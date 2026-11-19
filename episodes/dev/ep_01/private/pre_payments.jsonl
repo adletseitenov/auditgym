@@ -1,0 +1,27 @@
+{"doc_id": "szj6ywxzrq", "payment_id": "tdj7g5c1pd", "timestamp": "2026-10-08T09:01:25+05:00", "currency": "KZT", "amount_minor": 227500000, "invoice_refs": null}
+{"doc_id": "zzcr67e29a", "payment_id": "etz51ymqgk", "timestamp": "2026-10-10T04:25:05+05:00", "currency": "USD", "amount_minor": 1716150, "invoice_refs": ["f9fdzbgjaw"]}
+{"doc_id": "9e6xstw9f0", "payment_id": "gpexbaw7yv", "timestamp": "2026-10-13T07:57:23+05:00", "currency": "EUR", "amount_minor": 3838260, "invoice_refs": ["wsf5x1qg9y"]}
+{"doc_id": "gdey7efand", "payment_id": "txttb37bc4", "timestamp": "2026-10-14T12:23:13+05:00", "currency": "USD", "amount_minor": 7396000, "invoice_refs": ["4qw6kfzhwq", "ab9r5631rq"]}
+{"doc_id": "v6g9aeqq4v", "payment_id": "5jawjwvg6d", "timestamp": "2026-10-14T17:55:39+05:00", "currency": "USD", "amount_minor": 156000, "invoice_refs": ["dct1av0666"]}
+{"doc_id": "zcg293v6vb", "payment_id": "8cxcf619vd", "timestamp": "2026-10-17T20:58:06+05:00", "currency": "USD", "amount_minor": 1648850, "invoice_refs": ["f9fdzbgjaw"]}
+{"doc_id": "z7q4745map", "payment_id": "0srwk5qk49", "timestamp": "2026-10-21T03:34:29+05:00", "currency": "EUR", "amount_minor": 3078000, "invoice_refs": ["b229x4645r"]}
+{"doc_id": "8s84c54ayg", "payment_id": "v23fer41yf", "timestamp": "2026-10-21T23:59:03+05:00", "currency": "EUR", "amount_minor": -2647080, "invoice_refs": ["b229x4645r"]}
+{"doc_id": "q3sqkemryr", "payment_id": "jb9mt5ssa9", "timestamp": "2026-10-23T11:00:00+05:00", "currency": "EUR", "amount_minor": 1383000, "invoice_refs": ["56cp8aj8bk"]}
+{"doc_id": "3kpmrdsqk8", "payment_id": "qy3e0khwfn", "timestamp": "2026-10-24T04:18:49+05:45", "currency": "EUR", "amount_minor": 286000, "invoice_refs": ["6rcrkzs16c"]}
+{"doc_id": "ce2p30gpyt", "payment_id": "aheazcb8ny", "timestamp": "2026-10-25T09:03:41+09:30", "currency": "EUR", "amount_minor": 3592000, "invoice_refs": ["7b48x879vz"]}
+{"doc_id": "0caxg0rrcg", "payment_id": "kgh0ct7q0d", "timestamp": "2026-10-25T15:08:55+05:00", "currency": "EUR", "amount_minor": 186000, "invoice_refs": null}
+{"doc_id": "j7vh4g5cc2", "payment_id": "vbb5tamjmd", "timestamp": "2026-10-26T15:30:11+05:00", "currency": "EUR", "amount_minor": 2517000, "invoice_refs": ["ym844ewcyk"]}
+{"doc_id": "hvfaa7bfvt", "payment_id": "jc9c41r4h9", "timestamp": "2026-10-28T21:46:35+05:00", "currency": "EUR", "amount_minor": 3078000, "invoice_refs": ["g6nasetvcz"]}
+{"doc_id": "34hc4a0fy8", "payment_id": "g0me2x3fjv", "timestamp": "2026-10-29T10:25:28+05:00", "currency": "USD", "amount_minor": 3047000, "invoice_refs": ["54j0n1xcgx"]}
+{"doc_id": "qt5h4n0dwk", "payment_id": "n0vctztzyx", "timestamp": "2026-10-29T14:45:26+00:00", "currency": "EUR", "amount_minor": 1820000, "invoice_refs": ["p0wthx9svg"]}
+{"doc_id": "jdtzhfbj3a", "payment_id": "spb7zvr7bq", "timestamp": "2026-10-29T22:21:25+05:00", "currency": "EUR", "amount_minor": 4996000, "invoice_refs": ["vb1k2trn99"]}
+{"doc_id": "yg4pkhg1a6", "payment_id": "xhc647y8m0", "timestamp": "2026-10-29T23:46:36+05:00", "currency": "KZT", "amount_minor": 3774000000, "invoice_refs": ["2fay604b76"]}
+{"doc_id": "egmt3vr2qe", "payment_id": "epw0nzc4ex", "timestamp": "2026-10-30T12:15:50+05:00", "currency": "USD", "amount_minor": 5108000, "invoice_refs": ["rd27cx45a2"]}
+{"doc_id": "5gbzyfxka6", "payment_id": "7g2twfzwpf", "timestamp": "2026-10-30T14:18:47+05:00", "currency": "KZT", "amount_minor": 968000000, "invoice_refs": ["evxxm2vdxm"]}
+{"doc_id": "55a9wktg21", "payment_id": "qn4hndzr8w", "timestamp": "2026-10-31T02:41:34+05:00", "currency": "EUR", "amount_minor": 187480, "invoice_refs": ["1nkxwhrvv7"]}
+{"doc_id": "0qvt78gdcn", "payment_id": "63rcrbwk0k", "timestamp": "2026-10-31T05:54:09+05:00", "currency": "USD", "amount_minor": 2077000, "invoice_refs": ["17gk4fk5gk"]}
+{"doc_id": "y5n4vnn5v9", "payment_id": "pzrpcr5rs3", "timestamp": "2026-10-31T12:13:54+05:00", "currency": "USD", "amount_minor": -955420, "invoice_refs": ["17gk4fk5gk"]}
+{"doc_id": "byw58762fk", "payment_id": "h754p1qpvk", "timestamp": "2026-10-31T22:54:18+14:00", "currency": "USD", "amount_minor": 3583000, "invoice_refs": ["9psg1yt2mv"]}
+{"doc_id": "3ef32ga10n", "payment_id": "nx8eqhyzxv", "timestamp": "2026-10-31T14:40:08+05:00", "currency": "EUR", "amount_minor": 3494880, "invoice_refs": ["ygvkyyxwe6"]}
+{"doc_id": "h1aapcad95", "payment_id": "5bxqwayxak", "timestamp": "2026-10-31T19:06:13+05:00", "currency": "USD", "amount_minor": 2614080, "invoice_refs": ["e694d5m4b6"]}
+{"doc_id": "2pdcxe4jvh", "payment_id": "d2ber2whc4", "timestamp": "2026-10-31T23:52:20+05:00", "currency": "EUR", "amount_minor": 2329000, "invoice_refs": ["1qjxf85wcz"]}

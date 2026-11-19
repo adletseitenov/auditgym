@@ -1,9 +1,9 @@
 {
  "ledger_currency": "base",
  "base_currency": "KZT",
- "timezone": "+03:00",
- "period_start": "2026-10-01T00:00:00+03:00",
- "period_end": "2026-11-01T00:00:00+03:00",
+ "timezone": "+05:00",
+ "period_start": "2026-10-01T00:00:00+05:00",
+ "period_end": "2026-11-01T00:00:00+05:00",
  "fx_rate_date": "document_date_in_company_timezone",
  "fx_formula": "round(amount_minor * 10^(exp_base - exp_src) * rate)",
  "rounding": "half_even",
@@ -30,5 +30,6 @@
   "fx_error": 1,
   "period_cutoff": 0
  },
- "evidence_superset_allowed": true
+ "evidence_superset_allowed": true,
+ "period_basis": "document_date"
 }

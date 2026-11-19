@@ -1,74 +1,95 @@
 {
  "schema_version": "1",
- "episode_id": "ep_747e0e27daa8",
+ "episode_id": "ep_a797c2cfd519",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "cr5s12w5wn",
-    "jw8qbcmwst"
+    "7xbs9wt5f8",
+    "darcyy4zdx"
    ],
-   "expected_amount_minor": 5673000,
+   "expected_amount_minor": 780000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "cr5s12w5wn",
-     "jw8qbcmwst"
+     "7xbs9wt5f8",
+     "darcyy4zdx",
+     "6g72z29arh",
+     "ajesq4bg0m"
+    ],
+    [
+     "7xbs9wt5f8",
+     "darcyy4zdx",
+     "6g72z29arh",
+     "nspzcc4y3k"
+    ],
+    [
+     "7xbs9wt5f8",
+     "darcyy4zdx",
+     "ajesq4bg0m",
+     "bm1xvqvx20"
+    ],
+    [
+     "7xbs9wt5f8",
+     "darcyy4zdx",
+     "bm1xvqvx20",
+     "nspzcc4y3k"
     ]
    ]
   },
   {
    "issue_id": "t2",
-   "type": "duplicate_invoice",
+   "type": "period_cutoff",
    "affected_ids": [
-    "pv7xfbe6c7",
-    "tkgq1d1pdw"
+    "rzh2bjebm7"
    ],
-   "expected_amount_minor": 4284000,
-   "currency": "KZT",
+   "expected_amount_minor": 3000000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "pv7xfbe6c7",
-     "tkgq1d1pdw"
+     "rzh2bjebm7",
+     "mnzzbejv5v"
+    ],
+    [
+     "rzh2bjebm7",
+     "mynj5m13nn"
     ]
    ]
   },
   {
    "issue_id": "t3",
-   "type": "period_cutoff",
+   "type": "fx_error",
    "affected_ids": [
-    "ajc3hk0vv6"
+    "qwdpfpskmk"
    ],
-   "expected_amount_minor": 925000,
-   "currency": "EUR",
+   "expected_amount_minor": 11137602,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "ajc3hk0vv6",
-     "ndq8s4n0q0"
+     "qwdpfpskmk",
+     "atm1nay9km"
     ],
     [
-     "ajc3hk0vv6",
-     "vfhht5qm6f"
+     "qwdpfpskmk",
+     "yj5kf7ef9v"
     ]
    ]
   },
   {
    "issue_id": "t4",
-   "type": "period_cutoff",
+   "type": "allocation_gap",
    "affected_ids": [
-    "rq8jfgg7y6"
+    "cxsknpem7t",
+    "jf2gzn2y53"
    ],
-   "expected_amount_minor": 1420000,
+   "expected_amount_minor": 188400000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "rq8jfgg7y6",
-     "gvnt6bhmfd"
-    ],
-    [
-     "rq8jfgg7y6",
-     "1asdhkf2eh"
+     "cxsknpem7t",
+     "jf2gzn2y53",
+     "7d83d1827r"
     ]
    ]
   }

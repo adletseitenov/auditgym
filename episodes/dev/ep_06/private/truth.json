@@ -1,55 +1,55 @@
 {
  "schema_version": "1",
- "episode_id": "ep_32a874f43249",
+ "episode_id": "ep_b332f871b3ad",
  "issues": [
   {
    "issue_id": "t1",
-   "type": "duplicate_invoice",
+   "type": "period_cutoff",
    "affected_ids": [
-    "f36rqa7aaf",
-    "wkkhb81hdm"
+    "v48r30xy44"
    ],
-   "expected_amount_minor": 3120000,
+   "expected_amount_minor": 2074000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "f36rqa7aaf",
-     "wkkhb81hdm"
+     "v48r30xy44",
+     "f7k15kx6jv"
+    ],
+    [
+     "v48r30xy44",
+     "ny09ze5yrs"
     ]
    ]
   },
   {
    "issue_id": "t2",
-   "type": "duplicate_invoice",
+   "type": "allocation_gap",
    "affected_ids": [
-    "cqjt5x0bxd",
-    "hb5fxeh0sp"
+    "ef6znssgdb",
+    "k3kw7jvbcg"
    ],
-   "expected_amount_minor": 1669000,
-   "currency": "EUR",
+   "expected_amount_minor": 643963233,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "cqjt5x0bxd",
-     "hb5fxeh0sp"
+     "ef6znssgdb",
+     "k3kw7jvbcg",
+     "3sngafy1rn"
     ]
    ]
   },
   {
    "issue_id": "t3",
-   "type": "period_cutoff",
+   "type": "fx_error",
    "affected_ids": [
-    "xvdxs8qm50"
+    "ef6znssgdb"
    ],
-   "expected_amount_minor": 1274000,
-   "currency": "EUR",
+   "expected_amount_minor": 14829572,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "xvdxs8qm50",
-     "8an7ddktxt"
-    ],
-    [
-     "xvdxs8qm50",
-     "9ehzy6fsfe"
+     "ef6znssgdb",
+     "9f8zz03kfx"
     ]
    ]
   }
