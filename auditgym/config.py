@@ -10,30 +10,27 @@ import hashlib
 import json
 import re
 
+from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FINDINGS, MAX_FOREIGN_CURRENCIES,
+                     MAX_INVOICES, MAX_LEDGER_ROWS, MAX_PAGES, MAX_PERIOD_MONTHS, MAX_YEAR, MIN_BACKGROUND_PAIRS,
+                     MIN_INVOICES, MIN_YEAR, ROWS_PER_INVOICE, ROWS_PER_ISSUE, pages)
+
 CONFIG_VERSION = "1"
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 INTERACTIONS = ("none", "I1", "I2")
 CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY")
 CURRENCY_EXPONENTS = {"KZT": 2, "USD": 2, "EUR": 2, "RUB": 2, "CNY": 2}
 
-MAX_FINDINGS = 30
-MAX_LEDGER_ROWS = 2000
-MAX_PAGES = 60
-PAGE_SIZE = 50
-# Flag-everything must not pay off: at most one error per this many invoices (docs/DECISIONS.md A3).
-INVOICES_PER_ERROR = 8
-# Ledger budget used by the size check and enforced by the generator: the clean story posts at
-# most ROWS_PER_INVOICE rows per invoice on average, a background pair two rows, and an issue at
-# most ROWS_PER_ISSUE extra rows (a duplicate copy with its payment is the largest: 2 + 3).
-ROWS_PER_INVOICE = 5
-ROWS_PER_ISSUE = 5
-MIN_YEAR, MAX_YEAR = 2000, 2100
-SIZE_LIMITS = {"invoices": (10, 200), "background_pairs": (0, 900)}
+SIZE_LIMITS = {"invoices": (MIN_INVOICES, MAX_INVOICES), "background_pairs": (MIN_BACKGROUND_PAIRS, MAX_BACKGROUND_PAIRS)}
+DEFAULT_INVOICES = [48, 100]
+FX_DAYS_PER_MONTH = 31
+FX_MARGIN_ROWS = 10  # five days of rates on each side of the period
 
 DEFAULTS = {
     "config_version": CONFIG_VERSION,
-    # 48 invoices: the default four errors plus an interaction scenario (6 issues) fit the density limit.
-    "size": {"invoices": [48, 100], "background_pairs": [150, 300]},
+    "size": {"invoices": DEFAULT_INVOICES, "background_pairs": [150, 300]},
+    # Adaptive defaults (docs/AUDIT.md D5): an omitted `currencies` is the first supported currency
+    # other than the base; omitted `errors` shrink to the density limit of the size (and drop
+    # fx_error without a foreign currency); an omitted size.invoices grows to fit the errors.
     "currencies": ["USD"],
     "base_currency": "KZT",
     "timezone": "+05:00",
@@ -112,6 +109,7 @@ def normalize_config(config: object) -> dict:
     size = given("size")
     if not _str_keys(size) or any(key not in DEFAULTS["size"] for key in size):
         raise ConfigError("bad_size", "size must be an object with only invoices and background_pairs")
+    size_given = {name: "size" in config and name in size for name in ("invoices", "background_pairs")}
     out["size"] = {name: _range(size[name] if name in size else DEFAULTS["size"][name], name)
                    for name in ("invoices", "background_pairs")}
 
@@ -119,11 +117,12 @@ def normalize_config(config: object) -> dict:
     if not isinstance(base, str) or base not in CURRENCIES:
         raise ConfigError("bad_currency", "base_currency is not supported")
     out["base_currency"] = base
-    currencies = given("currencies")
-    if (not isinstance(currencies, list) or len(currencies) > 3
+    currencies = config["currencies"] if "currencies" in config else [next(c for c in CURRENCIES if c != base)]
+    if (not isinstance(currencies, list) or len(currencies) > MAX_FOREIGN_CURRENCIES
             or not all(isinstance(c, str) and c in CURRENCIES and c != base for c in currencies)
             or len(set(currencies)) != len(currencies)):
-        raise ConfigError("bad_currency", "currencies must be up to 3 distinct supported non-base currencies")
+        raise ConfigError("bad_currency", f"currencies must be up to {MAX_FOREIGN_CURRENCIES} distinct supported "
+                                          "non-base currencies")
     out["currencies"] = list(currencies)
 
     if not valid_offset(given("timezone")):
@@ -135,21 +134,30 @@ def normalize_config(config: object) -> dict:
         raise ConfigError("bad_period", "period needs exactly start and months")
     start, months = period["start"], period["months"]
     match = _MONTH_START.fullmatch(start) if isinstance(start, str) else None
-    if match is None or not MIN_YEAR <= int(match.group(1)) <= MAX_YEAR or not _is_int(months) or not 1 <= months <= 3:
-        raise ConfigError("bad_period", f"period needs start YYYY-MM-01 (years {MIN_YEAR}-{MAX_YEAR}) and months 1..3")
+    if (match is None or not MIN_YEAR <= int(match.group(1)) <= MAX_YEAR or not _is_int(months)
+            or not 1 <= months <= MAX_PERIOD_MONTHS):
+        raise ConfigError("bad_period", f"period needs start YYYY-MM-01 (years {MIN_YEAR}-{MAX_YEAR}) "
+                                        f"and months 1..{MAX_PERIOD_MONTHS}")
     out["period"] = {"start": start, "months": months}
-
-    errors = given("errors")
-    if not _str_keys(errors) or any(key not in ERROR_TYPES for key in errors):
-        raise ConfigError("bad_errors", "errors keys must be error types")
-    if any(not _is_int(value) or value < 0 for value in errors.values()):
-        raise ConfigError("bad_errors", "error counts must be non-negative integers")
-    out["errors"] = {name: errors.get(name, 0) for name in ERROR_TYPES}
 
     interaction = given("interaction")
     if not isinstance(interaction, str) or interaction not in INTERACTIONS:
         raise ConfigError("bad_interaction", "interaction must be none, I1 or I2")
     out["interaction"] = interaction
+
+    if "errors" in config:
+        errors = config["errors"]
+        if not _str_keys(errors) or any(key not in ERROR_TYPES for key in errors):
+            raise ConfigError("bad_errors", "errors keys must be error types")
+        if any(not _is_int(value) or value < 0 for value in errors.values()):
+            raise ConfigError("bad_errors", "error counts must be non-negative integers")
+        out["errors"] = {name: errors.get(name, 0) for name in ERROR_TYPES}
+        if not size_given["invoices"]:  # the default company grows to hold the requested errors
+            low = max(DEFAULT_INVOICES[0], INVOICES_PER_ERROR * _issue_count(out["errors"], interaction))
+            out["size"]["invoices"] = [min(low, MAX_INVOICES), min(max(DEFAULT_INVOICES[1], low), MAX_INVOICES)]
+    else:
+        out["errors"] = _default_errors(out["size"]["invoices"][0], interaction, bool(currencies))
+
     if not isinstance(given("distractors"), bool):
         raise ConfigError("bad_distractors", "distractors must be true or false")
     out["distractors"] = given("distractors")
@@ -162,20 +170,48 @@ def normalize_config(config: object) -> dict:
     if foreign_needed and not currencies:
         raise ConfigError("needs_foreign_currency", "fx_error and I1 need at least one foreign currency")
 
-    total_issues = sum(out["errors"].values()) + interaction_issue_count(interaction)
+    total_issues = _issue_count(out["errors"], interaction)
     if total_issues > MAX_FINDINGS:
         raise ConfigError("too_many_errors", f"at most {MAX_FINDINGS} issues fit into one answer")
     if total_issues * INVOICES_PER_ERROR > out["size"]["invoices"][0]:
         raise ConfigError("too_dense", f"need at least {INVOICES_PER_ERROR} invoices per error")
-
-    invoices_high = out["size"]["invoices"][1]
-    rows_high = (invoices_high * ROWS_PER_INVOICE + out["size"]["background_pairs"][1] * 2
-                 + total_issues * ROWS_PER_ISSUE)
-    if rows_high > MAX_LEDGER_ROWS:
-        raise ConfigError("too_large", f"ledger could exceed {MAX_LEDGER_ROWS} rows")
-    fx_rows = len(currencies) * (31 * months + 10)
-    documents_high = invoices_high + total_issues  # the generator keeps payments <= invoices
-    pages = sum(-(-n // PAGE_SIZE) for n in (rows_high, documents_high, documents_high, fx_rows))
-    if pages > MAX_PAGES:
-        raise ConfigError("too_large", f"a full read could exceed {MAX_PAGES} pages")
+    check_size(out["size"]["invoices"][1], out["size"]["background_pairs"][0], total_issues,
+               len(currencies), months)
     return out
+
+
+def _issue_count(errors: dict, interaction: str) -> int:
+    return sum(errors.values()) + interaction_issue_count(interaction)
+
+
+def _default_errors(invoices_low: int, interaction: str, foreign: bool) -> dict:
+    """One error of each type, as many as the density limit allows, in ERROR_TYPES order;
+    fx_error only with a foreign currency."""
+    room = invoices_low // INVOICES_PER_ERROR - interaction_issue_count(interaction)
+    errors = {name: 0 for name in ERROR_TYPES}
+    for name in ERROR_TYPES:
+        if room > 0 and (foreign or name != "fx_error"):
+            errors[name] = 1
+            room -= 1
+    return errors
+
+
+def ledger_budget(invoices_high: int, background_low: int, issues: int) -> int:
+    """Rows the ledger needs at most for the guaranteed part of the size. The generator caps the
+    background pairs so the whole ledger stays within MAX_LEDGER_ROWS (world.py)."""
+    return invoices_high * ROWS_PER_INVOICE + background_low * 2 + issues * ROWS_PER_ISSUE
+
+
+def full_read_pages(rows: int, documents: int, fx_rows: int) -> int:
+    """Pages for a full read: ledger, invoices and payments (each at most `documents`), fx."""
+    return pages(rows) + 2 * pages(documents) + pages(fx_rows)
+
+
+def check_size(invoices_high: int, background_low: int, issues: int, currencies: int, months: int) -> None:
+    rows = ledger_budget(invoices_high, background_low, issues)
+    if rows > MAX_LEDGER_ROWS:
+        raise ConfigError("too_large", f"ledger could exceed {MAX_LEDGER_ROWS} rows")
+    fx_rows = currencies * (FX_DAYS_PER_MONTH * months + FX_MARGIN_ROWS)
+    documents = invoices_high + issues  # the generator keeps payments <= invoices
+    if full_read_pages(MAX_LEDGER_ROWS, documents, fx_rows) > MAX_PAGES:
+        raise ConfigError("too_large", f"a full read could exceed {MAX_PAGES} pages")

@@ -3,8 +3,10 @@ import pathlib
 import tempfile
 import unittest
 
-from auditgym.config import INVOICES_PER_ERROR, ConfigError, normalize_config
+from auditgym import limits
+from auditgym.config import INVOICES_PER_ERROR, ConfigError, full_read_pages, ledger_budget, normalize_config
 from auditgym.generate import generate
+from auditgym.verify import verify
 from auditgym.rng import Rng
 from auditgym.storage import episode_files, load_episode, write_episode
 
@@ -58,7 +60,7 @@ class ConfigTest(unittest.TestCase):
             "bad_surface_seed": {"surface_seed": "7"},
             "needs_foreign_currency": {"currencies": [], "errors": {"fx_error": 1}},
             "too_many_errors": {"errors": {"fx_error": 31}},
-            "too_dense": {"errors": {"duplicate_invoice": 12}},
+            "too_dense": {"size": {"invoices": [40, 60]}, "errors": {"duplicate_invoice": 12}},
             "too_large": {"size": {"invoices": [200, 200], "background_pairs": [900, 900]}},
         }
         for code, config in cases.items():
@@ -98,6 +100,123 @@ class ConfigTest(unittest.TestCase):
                                    "errors": {"duplicate_invoice": 3, "allocation_gap": 3,
                                               "fx_error": 3, "period_cutoff": 3}})
         self.assertEqual(sum(config["errors"].values()), 12)
+
+
+ALL_ONE = {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1}
+TWELVE = {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 3, "period_cutoff": 3}
+
+
+class NaturalConfigTest(unittest.TestCase):
+    """docs/AUDIT.md D5: configs a reader of the case would write are accepted and generate."""
+
+    NATURAL = [
+        {"base_currency": "USD"}, {"currencies": []}, {"size": {"invoices": [20, 40]}}, {"errors": TWELVE},
+        {"interaction": "I1"}, {"interaction": "I2"}, {"interaction": "I2", "currencies": []},
+        {"base_currency": "EUR", "interaction": "I1"}, {"size": {"invoices": [10, 12]}},
+        {"size": {"background_pairs": [0, 0]}}, {"errors": {"fx_error": 2}, "base_currency": "USD"},
+        {"period": {"start": "2026-12-01", "months": 3}}, {"timezone": "-11:00", "currencies": ["EUR", "CNY", "RUB"]},
+    ]
+
+    def test_natural_configs_are_accepted_and_generate(self):
+        for config in self.NATURAL:
+            with self.subTest(config=config):
+                normalized = normalize_config(config)
+                self.assertEqual(verify(generate(1, config)), [])
+                issues = sum(normalized["errors"].values()) + (normalized["interaction"] != "none") * 2
+                self.assertLessEqual(issues * INVOICES_PER_ERROR, normalized["size"]["invoices"][0])
+
+    def test_default_foreign_currency_is_the_first_supported_other_than_base(self):
+        self.assertEqual(normalize_config({})["currencies"], ["USD"])
+        self.assertEqual(normalize_config({"base_currency": "USD"})["currencies"], ["KZT"])
+        self.assertEqual(normalize_config({"base_currency": "KZT", "currencies": ["EUR"]})["currencies"], ["EUR"])
+
+    def test_default_errors_shrink_to_the_size(self):
+        self.assertEqual(normalize_config({})["errors"], ALL_ONE)
+        self.assertEqual(normalize_config({"size": {"invoices": [20, 40]}})["errors"],
+                         {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 0, "period_cutoff": 0})
+        self.assertEqual(sum(normalize_config({"size": {"invoices": [10, 12]}})["errors"].values()), 1)
+        self.assertEqual(normalize_config({"currencies": []})["errors"]["fx_error"], 0)
+        self.assertEqual(sum(normalize_config({"interaction": "I1", "size": {"invoices": [20, 40]}})["errors"].values()), 0)
+
+    def test_default_size_grows_to_hold_explicit_errors(self):
+        config = normalize_config({"errors": TWELVE})
+        self.assertEqual(config["size"]["invoices"], [96, 100])
+        self.assertEqual(normalize_config({"errors": {}})["size"]["invoices"], [48, 100])
+        with self.assertRaises(ConfigError) as caught:  # an explicit size is never changed
+            normalize_config({"errors": TWELVE, "size": {"invoices": [48, 100]}})
+        self.assertEqual(caught.exception.code, "too_dense")
+
+    def test_case_ranges_are_reachable(self):
+        """Up to 12 errors, up to 2 000 ledger rows, 20 to 200 documents."""
+        self.assertEqual(len(generate(2, {"errors": TWELVE})["private"]["truth"]["issues"]), 12)
+        big = generate(3, {"errors": {}, "size": {"invoices": [10, 10], "background_pairs": [975, 1000]}})["public"]
+        self.assertTrue(1950 <= len(big["ledger"]) <= limits.MAX_LEDGER_ROWS, len(big["ledger"]))
+        many = generate(4, {"size": {"invoices": [200, 200], "background_pairs": [0, 1000]}})["public"]
+        self.assertGreaterEqual(len(many["invoices"]) + len(many["payments"]), 200)
+        self.assertLessEqual(len(many["ledger"]), limits.MAX_LEDGER_ROWS)
+        few = generate(5, {"errors": {}, "size": {"invoices": [10, 10], "background_pairs": [0, 0]}})["public"]
+        self.assertLessEqual(len(few["invoices"]) + len(few["payments"]), 20)
+
+
+class LimitBoundaryTest(unittest.TestCase):
+    """docs/AUDIT.md Q4: every limit holds exactly at its value and fails one past it."""
+
+    def code(self, config):
+        try:
+            normalize_config(config)
+        except ConfigError as error:
+            return error.code
+        return None
+
+    def test_one_constant_per_limit(self):
+        from auditgym import config, solver, verify as verify_module
+        self.assertIs(config.MAX_LEDGER_ROWS, limits.MAX_LEDGER_ROWS)
+        self.assertEqual(verify_module.MAX_LEDGER_ROWS, limits.MAX_LEDGER_ROWS)
+        self.assertEqual(verify_module.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
+        self.assertEqual(solver.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
+        self.assertEqual(config.MAX_FINDINGS, limits.MAX_FINDINGS)
+
+    def test_ledger_rows(self):
+        at = {"errors": {}, "size": {"invoices": [10, 10], "background_pairs": [975, 980]}}
+        past = {"errors": {}, "size": {"invoices": [11, 11], "background_pairs": [973, 980]}}
+        self.assertEqual(ledger_budget(10, 975, 0), 2000)
+        self.assertEqual(ledger_budget(11, 973, 0), 2001)
+        self.assertIsNone(self.code(at))
+        self.assertEqual(self.code(past), "too_large")
+
+    def test_pages(self):
+        self.assertEqual(full_read_pages(2000, 250, 500), limits.MAX_PAGES)
+        self.assertEqual(full_read_pages(2000, 250, 501), limits.MAX_PAGES + 1)
+        # The largest accepted config still reads in at most MAX_PAGES pages.
+        worst = normalize_config({"errors": {"duplicate_invoice": 25}, "currencies": ["USD", "EUR", "CNY"],
+                                  "size": {"invoices": [200, 200], "background_pairs": [0, 1000]},
+                                  "period": {"start": "2026-10-01", "months": 3}})
+        documents = worst["size"]["invoices"][1] + 25
+        self.assertLessEqual(full_read_pages(limits.MAX_LEDGER_ROWS, documents, 3 * (31 * 3 + 10)), limits.MAX_PAGES)
+
+    def test_months(self):
+        self.assertIsNone(self.code({"period": {"start": "2026-10-01", "months": limits.MAX_PERIOD_MONTHS}}))
+        self.assertEqual(self.code({"period": {"start": "2026-10-01", "months": limits.MAX_PERIOD_MONTHS + 1}}),
+                         "bad_period")
+
+    def test_density(self):
+        self.assertIsNone(self.code({"size": {"invoices": [32, 40]}, "errors": ALL_ONE}))
+        self.assertEqual(self.code({"size": {"invoices": [31, 40]}, "errors": ALL_ONE}), "too_dense")
+        self.assertIsNone(self.code({"size": {"invoices": [200, 200]}, "errors": {"duplicate_invoice": 25}}))
+        self.assertEqual(self.code({"size": {"invoices": [200, 200]}, "errors": {"duplicate_invoice": 26}}), "too_dense")
+
+    def test_findings(self):
+        self.assertEqual(self.code({"errors": {"duplicate_invoice": limits.MAX_FINDINGS + 1}}), "too_many_errors")
+        self.assertNotEqual(self.code({"errors": {"duplicate_invoice": limits.MAX_FINDINGS}}), "too_many_errors")
+
+    def test_size_bounds(self):
+        for name, (low, high) in (("invoices", (limits.MIN_INVOICES, limits.MAX_INVOICES)),
+                                  ("background_pairs", (limits.MIN_BACKGROUND_PAIRS, limits.MAX_BACKGROUND_PAIRS))):
+            base = {"errors": {}, "size": {"invoices": [10, 10], "background_pairs": [0, 0]}}
+            at = dict(base, size=dict(base["size"], **{name: [low, high]}))
+            self.assertIsNone(self.code(at), name)
+            for bad in ([low - 1, high], [low, high + 1]):
+                self.assertEqual(self.code(dict(base, size=dict(base["size"], **{name: bad}))), "bad_size", (name, bad))
 
 
 def _junk(rng: Rng, depth: int = 0):
