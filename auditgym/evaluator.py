@@ -57,50 +57,9 @@ def _cursor_token(episode_id: str, table: str, offset: int) -> str:
     return hashlib.sha256(body).hexdigest()[:20]
 
 
-# --- Stub judge -----------------------------------------------------------------------------
-# STUB: delete this function at merge once auditgym/judge.py exists (CONTRACTS section 8).
-# It covers only what tests/env needs: the structure check of the envelope, exact matching on
-# (type, affected_ids set, currency, amount within tolerance, one full evidence set), and the
-# case formulas for P, R, F1 and the reward, including the empty cases.
-def _stub_judge(episode: dict, payload, inspection_steps: int) -> dict:
-    public, truth = episode["public"], episode["private"]["truth"]
-    result = {"reward": -1.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
-              "tp": 0, "fp": 0, "fn": len(truth["issues"]), "structure_error": None}
-    if (not isinstance(payload, dict) or payload.get("episode_id") != public["manifest"]["episode_id"]
-            or not isinstance(payload.get("findings"), list) or len(payload["findings"]) > 30
-            or not all(isinstance(f, dict) for f in payload["findings"])):
-        result["structure_error"] = "bad_structure"
-        return result
-    tolerance = public["policy"].get("amount_tolerance_minor", {})
-    open_issues = {(i["type"], frozenset(i["affected_ids"])): i for i in truth["issues"]}
-    tp = fp = 0
-    for finding in payload["findings"]:
-        key = (finding.get("type"), frozenset(finding.get("affected_ids") or []))
-        issue = open_issues.get(key)
-        amount = finding.get("claimed_amount_minor")
-        if (issue is not None and finding.get("currency") == issue["currency"]
-                and isinstance(amount, int) and not isinstance(amount, bool)
-                and abs(amount - issue["expected_amount_minor"]) <= tolerance.get(issue["type"], 0)
-                and any(set(s) <= set(finding.get("evidence_ids") or []) for s in issue["evidence_sets"])):
-            tp += 1
-            del open_issues[key]
-        else:
-            fp += 1
-    fn = len(open_issues)
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
-    reward = max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * inspection_steps))
-    result.update(reward=reward, precision=precision, recall=recall, f1=f1, tp=tp, fp=fp, fn=fn)
-    return result
-# --- end of stub ----------------------------------------------------------------------------
-
-
 def _judge(episode: dict, payload, inspection_steps: int) -> dict:
-    try:
-        from .judge import judge
-    except ImportError:
-        judge = _stub_judge
+    from .judge import judge
+
     try:
         return judge(episode, payload, inspection_steps)
     except Exception as exc:  # a judge defect must not crash the episode; logged by class only
@@ -254,6 +213,10 @@ class Evaluator:
             inspection_steps = MAX_STEPS
         else:
             inspection_steps = self._steps - 1  # steps before submit, error steps included
+            if payload is None:
+                # judge() reads None as "no answer" (a truncated episode). A submit without
+                # findings is an invalid structure instead, so it must not be scored as silence.
+                payload = {}
         result = _judge(self._episode, payload, inspection_steps)
         self._write_result(result, inspection_steps, truncated)
         observation = {"type": "final", "steps_remaining": self._remaining()}

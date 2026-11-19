@@ -105,9 +105,9 @@ RENAMES = {
 def _load_zone_checks() -> None:
     import importlib
 
+    planned = {name: checks for _, _, checks in CRITERIA for name, _ in checks}
     for criterion, modules in ZONE_CHECKS.items():
-        checks = next(c for name, _, c in CRITERIA if name == criterion)
-        names = [name for name, _ in checks]
+        own = next(c for name, _, c in CRITERIA if name == criterion)
         for module_name in modules:
             try:
                 module = importlib.import_module(module_name)
@@ -115,11 +115,13 @@ def _load_zone_checks() -> None:
                 continue
             for name, function in module.CHECKS:
                 name = RENAMES.get(name, name)
-                if name in names:
-                    checks[names.index(name)] = (name, function)
+                checks = planned.get(name)  # a planned check keeps its criterion
+                if checks is None:
+                    own.append((name, function))
+                    planned[name] = own
                 else:
-                    checks.append((name, function))
-                    names.append(name)
+                    index = [n for n, _ in checks].index(name)
+                    checks[index] = (name, function)
 
 
 # (criterion, points, [(check name, function)]). Names are the plan: one per sentence of the case.
@@ -190,7 +192,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
 
 
 def _pending(message: str) -> bool:
-    return message == "TODO" or message.startswith("not implemented")
+    return message == "TODO" or message.startswith(("not implemented", "pending:"))
 
 
 def main(argv: list[str]) -> int:
