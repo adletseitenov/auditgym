@@ -555,6 +555,26 @@ class ServerLineLimitTest(unittest.TestCase):
         self.assertEqual(replies[0]["info"]["inspection_steps"], 0)
         self.assertEqual(replies[1]["observation"]["error"]["code"], "episode_over")
 
+    def test_a_submit_after_the_first_mebibyte_is_still_an_invalid_structure(self):
+        # D2: the action name comes after a filler longer than the limit, also split by a chunk border
+        for gap in (self.LIMIT + 10, 3 * self.LIMIT, 2 * self.LIMIT - 12):
+            for hint in ('"action":"submit"', '"action" \t:   " submit "'):
+                evaluator = tiny()
+                line = ('{"op":"step","action":{"pad":"' + "x" * gap + '",' + hint + '}}').encode()
+                [reply] = self.run_lines(evaluator, [line])
+                self.assertEqual((reply["observation"]["type"], reply["reward"], reply["terminated"]),
+                                 ("final", -1.0, True), (gap, hint))
+
+    def test_whitespace_around_the_hint_may_cross_a_chunk_border(self):
+        prefix = b'{"op":"step","action":{"action"' + b" " * (self.LIMIT + 5) + b':' + b" " * 7 + b'"submit"}}'
+        [reply] = self.run_lines(tiny(), [prefix])
+        self.assertEqual((reply["reward"], reply["terminated"]), (-1.0, True))
+
+    def test_a_long_line_without_submit_anywhere_stays_an_error_step(self):
+        line = ('{"op":"step","action":{"pad":"' + "x" * (3 * self.LIMIT) + '","note":"submitted"}}').encode()
+        [reply] = self.run_lines(tiny(), [line])
+        self.assertEqual((reply["observation"]["error"]["code"], reply["terminated"]), ("bad_arguments", False))
+
     def test_a_long_submit_with_the_name_in_another_key_and_case(self):
         for head in ('{"op":"step","action":{"TOOL":"x","name":"Submit",', '{"action":{"type" : " submit "},'):
             evaluator = tiny()

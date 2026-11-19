@@ -16,7 +16,7 @@ Protocol problems (a line that is not JSON, not an object, an unknown op, a load
 the first request) never stop the server and never spend a step; the reply has the shape of a
 step reply with an error observation. A line longer than MAX_LINE_BYTES is the exception while
 an episode is running (audit L4): it is read whole and counts as a step with a `bad_arguments`
-error, or, if it looks like a submit (an action/tool/name/type key with the value "submit"),
+error, or, if it looks like a submit anywhere in the line (an action/tool/name/type key with the value "submit"),
 as an invalid structure that ends the episode with reward -1. With no running episode it is a
 `bad_request` like any other bad line:
 
@@ -130,20 +130,32 @@ class Server:
 _TOO_LONG = b"\x00too long"  # not JSON; marks a line over the limit
 _TOO_LONG_SUBMIT = b"\x00too long submit"
 _SUBMIT_HINT = re.compile(rb'"(?:action|tool|name|type)"\s*:\s*"\s*submit\s*"', re.IGNORECASE)
+_WHITESPACE = re.compile(rb"\s+")
+_HINT_TAIL = 64  # bytes carried between chunks; the longest hint with whitespace collapsed is ~25
 
 
 def _read_line(stream) -> bytes | None:
     """One line of at most MAX_LINE_BYTES (not counting the newline); a longer line is consumed
-    whole and replaced by _TOO_LONG, or by _TOO_LONG_SUBMIT when the part kept in memory contains
-    an action named submit. None at end of input."""
+    whole and replaced by _TOO_LONG, or by _TOO_LONG_SUBMIT when an action named submit occurs
+    anywhere in it (audit D2). The rest is scanned chunk by chunk: runs of whitespace are
+    collapsed and a short tail is carried over, so a hint split by a chunk border is still found
+    and memory stays at about one chunk. None at end of input."""
     line = stream.readline(MAX_LINE_BYTES + 1)
     if not line:
         return None
     if len(line) > MAX_LINE_BYTES and not line.endswith(b"\n"):
-        submit = _SUBMIT_HINT.search(line) is not None
+        chunk = line
+        tail = b""
+        submit = False
         while True:
-            rest = stream.readline(MAX_LINE_BYTES)
-            if not rest or rest.endswith(b"\n"):
+            window = _WHITESPACE.sub(b" ", tail + chunk)
+            if not submit and _SUBMIT_HINT.search(window) is not None:
+                submit = True
+            tail = window[-_HINT_TAIL:]
+            chunk = stream.readline(MAX_LINE_BYTES)
+            if not chunk or chunk.endswith(b"\n"):
+                if chunk and not submit:
+                    submit = _SUBMIT_HINT.search(_WHITESPACE.sub(b" ", tail + chunk)) is not None
                 break
         return _TOO_LONG_SUBMIT if submit else _TOO_LONG
     return line
