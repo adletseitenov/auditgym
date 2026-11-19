@@ -1,6 +1,6 @@
 """What `python -m auditgym check` runs (docs/AUDIT.md C12).
 
-Fast (default): the determinism lint, the whole score table (tools/score.py) and every unit test except
+Fast (default): the whole score table (tools/score.py, which includes the determinism lint) and every unit test except
 FULL_ONLY. Full (`--full`): all of that, every test, and the long statistical tools in EXTRA_TOOLS.
 
 FULL_ONLY lists test modules and classes that are skipped in the fast mode for one of two reasons:
@@ -76,21 +76,20 @@ def _extra_tool(label: str, arguments: str) -> bool:
 
 def run(full: bool = False) -> int:
     """The body of `python -m auditgym check [--full]`: exit code 0 only when everything passed."""
-    from tools import lint_determinism, score
+    from tools import score
 
     began = started = time.perf_counter()
     result = unittest.TextTestRunner(verbosity=1).run(suite(full))
     print(f"unit tests: {result.testsRun} run" + ("" if full else f" (fast mode; --full also runs "
                                                    f"{len(FULL_ONLY)} more groups)"))
     _phase("tests", started)
-    lint_ok = lint_determinism.main() == 0
     # Development: a planned check that is not written yet is listed but does not fail the run.
     # The submission gate is AUDITGYM_STRICT=1, and --full: any TODO, `pending:` or missing module fails.
     strict = full or os.environ.get("AUDITGYM_STRICT") == "1"
     started = time.perf_counter()
     score_ok = score.main([] if strict else ["--allow-todo"]) == 0
     _phase("score table", started)
-    ok = result.wasSuccessful() and lint_ok and score_ok
+    ok = result.wasSuccessful() and score_ok  # the lint is a row of the score table: printed once
     if full:
         for label, arguments in EXTRA_TOOLS:
             ok = _extra_tool(label, arguments) and ok

@@ -27,6 +27,26 @@ class ModesTest(unittest.TestCase):
                        "tests.judge.test_attacks.", "tests.gen.test_config_storage."):
             self.assertTrue(any(i.startswith(needle) for i in fast), needle)
 
+    def test_the_determinism_lint_runs_once_per_check(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        from tools import lint_determinism, score
+
+        calls = []
+
+        def fake_score(arguments):  # the real score table calls the lint through one of its rows
+            calls.append(lint_determinism.main())
+            return 0
+
+        out = io.StringIO()
+        with mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
+                mock.patch.object(score, "main", fake_score), contextlib.redirect_stdout(out):
+            self.assertEqual(check_modes.run(False), 0)
+        self.assertEqual(out.getvalue().count("determinism lint:"), 1)
+        self.assertEqual(calls, [0])
+
     def test_help_and_bad_arguments(self):
         done = subprocess.run([sys.executable, "-m", "auditgym", "--help"], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0)
