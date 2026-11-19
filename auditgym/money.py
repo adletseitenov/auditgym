@@ -7,6 +7,8 @@ from __future__ import annotations
 import datetime as dt
 from decimal import ROUND_HALF_EVEN, Decimal
 
+RATE_SIGNIFICANT_DIGITS = 7  # policy promise: at least 6 significant digits in every rate
+
 
 def parse_offset(offset: str) -> dt.timezone:
     """'+05:00' -> a fixed-offset timezone."""
@@ -25,7 +27,7 @@ def local_date(timestamp: str, offset: str) -> str:
 
 
 def in_period(timestamp: str, period_start: str, period_end: str) -> bool:
-    """Half-open interval [period_start, period_end)."""
+    """Half-open interval [period_start, period_end), compared as moments."""
     return parse_time(period_start) <= parse_time(timestamp) < parse_time(period_end)
 
 
@@ -37,3 +39,13 @@ def convert(amount_minor: int, rate: Decimal, exponent_source: int, exponent_bas
 
 def fx_key(date: str, source: str, target: str) -> str:
     return f"{date}|{source}|{target}"
+
+
+def round_rate(rate: Decimal) -> Decimal:
+    """A positive rate kept to RATE_SIGNIFICANT_DIGITS significant digits."""
+    return rate.quantize(Decimal(10) ** (rate.adjusted() - RATE_SIGNIFICANT_DIGITS + 1), rounding=ROUND_HALF_EVEN)
+
+
+def significant_digits(text: str) -> int:
+    """Significant digits of a positive decimal string ('466.2100' -> 7, '0.00214' -> 3)."""
+    return len(Decimal(text).as_tuple().digits) if Decimal(text) != 0 else 0

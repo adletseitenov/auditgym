@@ -1,17 +1,40 @@
 """verify(episode) -> list of problems. An empty list means the episode is well formed.
 
-Checks the open records and the pre-injection ledger with nothing but the published policy,
-the way an outside checker would. It does not import the generator.
+Checks the open records, the pre-injection snapshot (pre_ledger, pre_invoices, pre_payments) and
+the recorded steps with nothing but the published policy, the way an outside checker would. It
+does not import the generator. Times are compared as moments, never as strings.
+
+What is checked:
+- shape and balance of both books (whole book, every event group, background pairs);
+- documents: ids, totals, quantity x unit price, due after issue, currencies, references;
+- the fx table: every date of the period plus the margin, at least 6 significant digits;
+- clean postings: a document is posted iff it is dated in the period, after its own date, by the
+  document's entity, at the policy amount; payments close receivables by the published payment
+  rule (auditgym/books.py); fx_difference only on foreign payments. Documents an issue is about
+  are exempt here and checked by the issue checks instead;
+- before injection no error predicate fires; after injection the predicates fire exactly on
+  the truth (type, affected ids, amount, currency), and every evidence set is sufficient;
+- the pre-injection snapshot plus the recorded steps gives the open records;
+- the generator's own rules (docs/DECISIONS.md B).
 """
 from __future__ import annotations
 
+import datetime as dt
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
-from .money import convert, fx_key, in_period, local_date
+from .money import convert, fx_key, local_date, parse_offset, parse_time, significant_digits
 
 LEDGER_FIELDS = ["row_id", "timestamp", "account", "debit_minor", "credit_minor", "currency",
                  "entity_id", "invoice_id", "payment_id"]
+MAX_EVIDENCE = 10
+MAX_LEDGER_ROWS = 2000
+FX_MARGIN_DAYS = 5
+FX_MIN_MINOR = 100
+FX_MIN_PER_MILLE = 5
+MIN_RATE_DIGITS = 6
+CUTOFF_MAX_DAYS = 4
+POSTING_TYPES = ("period_cutoff", "fx_error", "allocation_gap")  # issues about how a document is posted
 
 
 def _is_int(value: object) -> bool:
@@ -27,33 +50,143 @@ def group_key(row: dict) -> tuple:
     return ("background", row["timestamp"], row["entity_id"])
 
 
-class _Books:
-    """Indexes over the open records."""
+def invoice_signature(invoice: dict) -> tuple:
+    """Customer, currency, total and line items as a multiset (issued_at is not part of it)."""
+    items = sorted(tuple(sorted(item.items())) for item in invoice["line_items"])
+    return (invoice["entity_id"], invoice["currency"], invoice["total_minor"], tuple(items))
+
+
+class Books:
+    """Indexes over open records (public, or the pre-injection snapshot shaped like public)."""
 
     def __init__(self, public: dict) -> None:
-        self.policy = public["policy"]
-        self.base = self.policy["base_currency"]
-        self.offset = self.policy["timezone"]
+        self.policy = policy = public["policy"]
+        self.base = policy["base_currency"]
+        self.offset = policy["timezone"]
+        self.start, self.end = parse_time(policy["period_start"]), parse_time(policy["period_end"])
+        self.accounts = policy["accounts"]
+        self.exponents = policy["currency_exponents"]
+        self.tolerance = policy["amount_tolerance_minor"]
+        self.ledger = public["ledger"]
+        self.invoice_list, self.payment_list = public["invoices"], public["payments"]
         self.invoices = {inv["invoice_id"]: inv for inv in public["invoices"]}
         self.payments = {pay["payment_id"]: pay for pay in public["payments"]}
+        self.docs = {d["doc_id"]: d for d in public["invoices"] + public["payments"]}
         self.rates = {fx_key(r["date"], r["source_currency"], r["target_currency"]): Decimal(r["rate"])
                       for r in public["fx"]}
+        self.own = defaultdict(list)       # invoice_id -> its own posting pair (no payment id)
+        self.by_payment = defaultdict(list)
+        self.receivable = defaultdict(int)  # invoice_id -> receivable balance over the whole ledger
+        self.paid_by = defaultdict(list)    # invoice_id -> payments referring to it (any)
+        for row in public["ledger"]:
+            if row["payment_id"] is not None:
+                self.by_payment[row["payment_id"]].append(row)
+            elif row["invoice_id"] is not None:
+                self.own[row["invoice_id"]].append(row)
+            if row["account"] == self.accounts["receivable"] and row["invoice_id"] is not None:
+                self.receivable[row["invoice_id"]] += row["debit_minor"] - row["credit_minor"]
+        for payment in public["payments"]:
+            for ref in payment["invoice_refs"] or []:
+                self.paid_by[ref].append(payment)
 
-    def to_base(self, amount_minor: int, currency: str, timestamp: str) -> int | None:
+    def inside(self, timestamp: str) -> bool:
+        return self.start <= parse_time(timestamp) < self.end
+
+    def policy_amount(self, amount_minor: int, currency: str, timestamp: str) -> int | None:
         if currency == self.base:
             return amount_minor
         rate = self.rates.get(fx_key(local_date(timestamp, self.offset), currency, self.base))
-        if rate is None:
+        if rate is None or currency not in self.exponents:
             return None
-        exponents = self.policy["currency_exponents"]
-        return convert(amount_minor, rate, exponents[currency], exponents[self.base])
+        return convert(amount_minor, rate, self.exponents[currency], self.exponents[self.base])
+
+    def booked(self, invoice_id: str) -> int:
+        return sum(r["debit_minor"] for r in self.own.get(invoice_id, []) if r["account"] == self.accounts["receivable"])
 
 
-def _check_ledger_shape(rows: list[dict], books: _Books, name: str) -> list[str]:
+# ============================================================================ predicates
+def predicate_issues(public: dict) -> tuple[list[dict], list[str]]:
+    """The four published definitions over open records: (issues, undefined cases).
+
+    issue = {"type", "affected_ids" (sorted), "amount", "currency"}."""
+    books = Books(public)
+    issues, undefined = [], []
+    acc = books.accounts
+
+    by_signature = defaultdict(list)
+    for invoice in books.invoice_list:
+        if books.own.get(invoice["invoice_id"]):
+            by_signature[invoice_signature(invoice)].append(invoice)
+    for group in by_signature.values():
+        if len(group) > 2:
+            undefined.append("more than two posted invoices share a signature")
+        for i, first in enumerate(group):
+            for second in group[i + 1:]:
+                issues.append({"type": "duplicate_invoice", "affected_ids": sorted([first["doc_id"], second["doc_id"]]),
+                               "amount": first["total_minor"], "currency": first["currency"]})
+
+    for payment in books.payment_list:
+        rows = books.by_payment.get(payment["payment_id"], [])
+        if not rows or payment["invoice_refs"] is None:
+            continue
+        unallocated = [r for r in rows if r["account"] == acc["unallocated"]]
+        open_refs = [ref for ref in sorted(set(payment["invoice_refs"])) if books.receivable.get(ref, 0) > 0]
+        if not unallocated or not open_refs:
+            continue
+        if len(unallocated) != 1 or unallocated[0]["credit_minor"] <= 0:
+            undefined.append(f"payment {payment['doc_id']}: several or debit unallocated rows")
+            continue
+        for ref in open_refs:
+            if ref in books.invoices:
+                issues.append({"type": "allocation_gap",
+                               "affected_ids": sorted([payment["doc_id"], books.invoices[ref]["doc_id"]]),
+                               "amount": unallocated[0]["credit_minor"], "currency": books.base})
+
+    tolerance = books.tolerance["fx_error"]
+    for invoice in books.invoice_list:
+        rows = books.own.get(invoice["invoice_id"], [])
+        if not rows or invoice["currency"] == books.base:
+            continue
+        correct = books.policy_amount(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
+        if correct is None:
+            undefined.append(f"invoice {invoice['doc_id']}: no rate for its date")
+            continue
+        values = [r["debit_minor"] for r in rows if r["account"] == acc["receivable"]]
+        values += [r["credit_minor"] for r in rows if r["account"] == acc["revenue"]]
+        deviation = max(abs(value - correct) for value in values) if values else 0
+        if deviation > tolerance:
+            issues.append({"type": "fx_error", "affected_ids": [invoice["doc_id"]], "amount": deviation,
+                           "currency": books.base})
+    for payment in books.payment_list:
+        rows = books.by_payment.get(payment["payment_id"], [])
+        if not rows or payment["currency"] == books.base:
+            continue
+        correct = books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"])
+        if correct is None:
+            undefined.append(f"payment {payment['doc_id']}: no rate for its date")
+            continue
+        cash = sum(r["debit_minor"] - r["credit_minor"] for r in rows if r["account"] == acc["cash"])
+        if abs(cash - correct) > tolerance:
+            issues.append({"type": "fx_error", "affected_ids": [payment["doc_id"]], "amount": abs(cash - correct),
+                           "currency": books.base})
+
+    for invoice in books.invoice_list:
+        if books.own.get(invoice["invoice_id"]) and not books.inside(invoice["issued_at"]):
+            issues.append({"type": "period_cutoff", "affected_ids": [invoice["doc_id"]],
+                           "amount": abs(invoice["total_minor"]), "currency": invoice["currency"]})
+    for payment in books.payment_list:
+        if books.by_payment.get(payment["payment_id"]) and not books.inside(payment["timestamp"]):
+            issues.append({"type": "period_cutoff", "affected_ids": [payment["doc_id"]],
+                           "amount": abs(payment["amount_minor"]), "currency": payment["currency"]})
+    return issues, undefined
+
+
+# ============================================================================ clean books
+def _check_ledger(books: Books, name: str) -> list[str]:
     problems = []
-    accounts = set(books.policy["accounts"].values())
+    accounts = set(books.accounts.values())
     seen = set()
-    for row in rows:
+    for row in books.ledger:
         rid = row.get("row_id")
         if list(row) != LEDGER_FIELDS:
             problems.append(f"{name}: row {rid} has wrong fields")
@@ -72,119 +205,246 @@ def _check_ledger_shape(rows: list[dict], books: _Books, name: str) -> list[str]
             problems.append(f"{name}: row {rid} links to a missing invoice")
         if row["payment_id"] is not None and row["payment_id"] not in books.payments:
             problems.append(f"{name}: row {rid} links to a missing payment")
-        if not in_period(row["timestamp"], books.policy["period_start"], books.policy["period_end"]):
+        if not books.inside(row["timestamp"]):
             problems.append(f"{name}: row {rid} is outside the period")
-    return problems
-
-
-def _check_balance(rows: list[dict], name: str) -> list[str]:
-    problems = []
-    if sum(r["debit_minor"] for r in rows) != sum(r["credit_minor"] for r in rows):
+        if row["account"] == books.accounts["receivable"] and row["invoice_id"] is None:
+            problems.append(f"{name}: receivable row {rid} has no invoice")
+        if row["entity_id"] is None:
+            problems.append(f"{name}: row {rid} has no entity")
+    if problems:
+        return problems
+    if sum(r["debit_minor"] for r in books.ledger) != sum(r["credit_minor"] for r in books.ledger):
         problems.append(f"{name}: debits and credits differ")
-    groups = defaultdict(int)
-    for row in rows:
-        groups[group_key(row)] += row["debit_minor"] - row["credit_minor"]
-    for key, balance in sorted(groups.items(), key=repr):
-        if balance != 0:
+    groups = defaultdict(list)
+    for row in books.ledger:
+        groups[group_key(row)].append(row)
+    for key, rows in sorted(groups.items(), key=repr):
+        balance = sum(r["debit_minor"] - r["credit_minor"] for r in rows)
+        if balance:
             problems.append(f"{name}: group {key} is unbalanced by {balance}")
+        if key[0] == "background":
+            accounts_sides = sorted((r["account"], r["debit_minor"] > 0) for r in rows)
+            if accounts_sides != [(books.accounts["cash"], False), (books.accounts["expense"], True)]:
+                problems.append(f"{name}: background group {key} is not an expense/cash pair")
+        elif len({parse_time(r["timestamp"]) for r in rows}) != 1:
+            problems.append(f"{name}: group {key} is posted at several moments")
+    if len(books.ledger) > MAX_LEDGER_ROWS:
+        problems.append(f"{name}: more than {MAX_LEDGER_ROWS} ledger rows")
     return problems
 
 
-def _check_documents(public: dict, books: _Books) -> list[str]:
+def _check_documents(books: Books, name: str) -> list[str]:
     problems = []
-    doc_ids = [d["doc_id"] for d in public["invoices"]] + [d["doc_id"] for d in public["payments"]]
-    if len(set(doc_ids)) != len(doc_ids):
-        problems.append("documents: doc_id is not unique")
-    if len(books.invoices) != len(public["invoices"]) or len(books.payments) != len(public["payments"]):
-        problems.append("documents: invoice_id or payment_id is not unique")
-    for invoice in public["invoices"]:
-        if invoice["total_minor"] != sum(item["amount_minor"] for item in invoice["line_items"]):
-            problems.append(f"invoice {invoice['doc_id']}: total differs from its line items")
-        if books.to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"]) is None:
-            problems.append(f"invoice {invoice['doc_id']}: no rate for its date")
-    for payment in public["payments"]:
-        for ref in payment["invoice_refs"] or []:
-            if ref not in books.invoices:
-                problems.append(f"payment {payment['doc_id']}: refers to a missing invoice")
-        if books.to_base(payment["amount_minor"], payment["currency"], payment["timestamp"]) is None:
-            problems.append(f"payment {payment['doc_id']}: no rate for its date")
-    counts = public["manifest"]["counts"]
-    for table in ("ledger", "invoices", "payments", "fx"):
-        if counts[table] != len(public[table]):
-            problems.append(f"manifest: count of {table} differs from the file")
-    return problems
-
-
-def _check_clean_postings(rows_in: list[dict], books: _Books, name: str, exempt: set[str]) -> list[str]:
-    """Every document in the period is posted once, at the policy amount, at its own time; nothing
-    outside the period is posted. Documents in `exempt` (affected by an issue whose definition is
-    about the posting itself) are checked by the issue checks instead."""
-    problems = []
-    policy = books.policy
-    by_invoice = defaultdict(list)
-    by_payment = defaultdict(list)
-    for row in rows_in:
-        if row["payment_id"] is not None:
-            by_payment[row["payment_id"]].append(row)
-        elif row["invoice_id"] is not None:
-            by_invoice[row["invoice_id"]].append(row)
-
-    booked = {}
-    for invoice_id, invoice in books.invoices.items():
+    docs = books.invoice_list + books.payment_list
+    if len(books.docs) != len(docs):
+        problems.append(f"{name}: doc_id is not unique")
+    if len(books.invoices) != len(books.invoice_list) or len(books.payments) != len(books.payment_list):
+        problems.append(f"{name}: invoice_id or payment_id is not unique")
+    for invoice in books.invoice_list:
         doc = invoice["doc_id"]
-        expected = books.to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
-        booked[invoice_id] = expected
+        if invoice["currency"] not in books.exponents:
+            problems.append(f"{name}: invoice {doc} has an unknown currency")
+            continue
+        items = invoice["line_items"]
+        if not items or any(not all(_is_int(item[f]) for f in ("quantity", "unit_price_minor", "amount_minor"))
+                            or item["quantity"] <= 0 or item["quantity"] * item["unit_price_minor"] != item["amount_minor"]
+                            for item in items):
+            problems.append(f"{name}: invoice {doc}: quantity x unit price differs from the amount")
+        if not _is_int(invoice["total_minor"]) or invoice["total_minor"] != sum(i["amount_minor"] for i in items):
+            problems.append(f"{name}: invoice {doc}: total differs from its line items")
+        if any(item["service_start"] > item["service_end"] for item in items):
+            problems.append(f"{name}: invoice {doc}: service period ends before it starts")
+        if parse_time(invoice["due_at"]) <= parse_time(invoice["issued_at"]):
+            problems.append(f"{name}: invoice {doc}: due_at is not after issued_at")
+        if books.policy_amount(invoice["total_minor"], invoice["currency"], invoice["issued_at"]) is None:
+            problems.append(f"{name}: invoice {doc}: no rate for its date")
+    for payment in books.payment_list:
+        doc, refs = payment["doc_id"], payment["invoice_refs"]
+        if payment["currency"] not in books.exponents:
+            problems.append(f"{name}: payment {doc} has an unknown currency")
+            continue
+        if not _is_int(payment["amount_minor"]) or payment["amount_minor"] == 0:
+            problems.append(f"{name}: payment {doc}: amount must be a non-zero integer")
+        if refs is not None:
+            invoices = [books.invoices.get(ref) for ref in refs]
+            if not refs or None in invoices or len(set(refs)) != len(refs):
+                problems.append(f"{name}: payment {doc}: references must be existing distinct invoices")
+                continue
+            if any(inv["currency"] != payment["currency"] for inv in invoices):
+                problems.append(f"{name}: payment {doc}: currency differs from its invoice")
+            if len({inv["entity_id"] for inv in invoices}) != 1:
+                problems.append(f"{name}: payment {doc}: invoices of several customers")
+            if len(refs) > 1 and payment["amount_minor"] != sum(inv["total_minor"] for inv in invoices):
+                problems.append(f"{name}: payment {doc}: several references but not their full total")
+        if payment["amount_minor"] < 0 and (refs is None or len(refs) != 1):
+            problems.append(f"{name}: refund {doc} must refer to exactly one invoice")
+        if books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"]) is None:
+            problems.append(f"{name}: payment {doc}: no rate for its date")
+    return problems
+
+
+def _check_fx(public: dict, books: Books) -> list[str]:
+    problems = []
+    first = books.start.astimezone(parse_offset(books.offset)).date() - dt.timedelta(days=FX_MARGIN_DAYS)
+    last = (books.end - dt.timedelta(seconds=1)).astimezone(parse_offset(books.offset)).date() \
+        + dt.timedelta(days=FX_MARGIN_DAYS)
+    expected = {(first + dt.timedelta(days=d)).isoformat() for d in range((last - first).days + 1)}
+    dates = defaultdict(list)
+    for row in public["fx"]:
+        if row["target_currency"] != books.base or row["source_currency"] not in books.exponents \
+                or row["source_currency"] == books.base:
+            problems.append(f"fx: rate {row['date']}|{row['source_currency']} is not foreign -> base")
+            continue
+        try:
+            positive = Decimal(row["rate"]) > 0
+        except InvalidOperation:
+            positive = False
+        if not positive or significant_digits(row["rate"]) < MIN_RATE_DIGITS:
+            problems.append(f"fx: rate {row['date']}|{row['source_currency']} needs {MIN_RATE_DIGITS} significant digits")
+        dates[row["source_currency"]].append(row["date"])
+    for currency in sorted(set(books.exponents) - {books.base}):
+        got = dates.get(currency, [])
+        if len(got) != len(set(got)) or set(got) != expected:
+            problems.append(f"fx: rates of {currency} do not cover the period and its margin exactly once per day")
+    return problems
+
+
+def expected_closings(books: Books) -> dict[str, dict]:
+    """Per posted payment: the policy closings {"closes": {invoice_id: base}, "unallocated": base}
+    and a rule problem (or None), by the payment rule of auditgym/books.py."""
+    remaining = {iid: inv["total_minor"] for iid, inv in books.invoices.items()}
+    closed: dict[str, int] = defaultdict(int)
+    count: dict[str, int] = defaultdict(int)
+    out = {}
+    posted = [p for p in books.payment_list if books.by_payment.get(p["payment_id"])]
+    posted.sort(key=lambda p: (parse_time(p["timestamp"]), p["doc_id"]))
+    for payment in posted:
+        refs, amount = payment["invoice_refs"], payment["amount_minor"]
+        value = books.policy_amount(amount, payment["currency"], payment["timestamp"])
+        closes, unallocated, rule = {}, 0, None
+        if value is None:
+            out[payment["payment_id"]] = {"closes": {}, "unallocated": 0, "problem": "no rate"}
+            continue
+        if refs is None:
+            unallocated = value
+        elif len(refs) > 1:
+            for ref in refs:
+                closes[ref] = books.booked(ref) - closed[ref]
+                remaining[ref] -= books.invoices[ref]["total_minor"]
+        else:
+            ref = refs[0]
+            if amount < 0:
+                closes[ref] = value
+            elif amount < remaining[ref]:
+                closes[ref] = value
+            else:
+                closes[ref] = books.booked(ref) - closed[ref]
+                if amount > remaining[ref]:
+                    unallocated = books.policy_amount(amount - remaining[ref], payment["currency"], payment["timestamp"])
+                    if count[ref]:
+                        rule = "overpayment after another payment"
+            if amount > 0:
+                remaining[ref] -= amount
+        for ref, part in closes.items():
+            closed[ref] += part
+            count[ref] += 1
+        out[payment["payment_id"]] = {"closes": closes, "unallocated": unallocated, "problem": rule}
+    return out
+
+
+def _check_postings(books: Books, name: str, exempt: set[str]) -> list[str]:
+    """Every document dated in the period is posted once, after its own date, by its entity, at the
+    policy amount, and nothing dated outside it is posted. Documents in `exempt` are skipped."""
+    problems = []
+    acc = books.accounts
+    for invoice in books.invoice_list:
+        doc = invoice["doc_id"]
         if doc in exempt:
             continue
-        rows = by_invoice.get(invoice_id, [])
-        inside = in_period(invoice["issued_at"], policy["period_start"], policy["period_end"])
+        rows = books.own.get(invoice["invoice_id"], [])
+        inside = books.inside(invoice["issued_at"])
         if not rows:
             if inside:
                 problems.append(f"{name}: invoice {doc} is in the period but not posted")
             continue
         if not inside:
             problems.append(f"{name}: invoice {doc} is outside the period but posted")
-        debit = [r for r in rows if r["account"] == "receivable" and r["debit_minor"] == expected]
-        credit = [r for r in rows if r["account"] == "revenue" and r["credit_minor"] == expected]
-        if len(rows) != 2 or len(debit) != 1 or len(credit) != 1:
+        expected = books.policy_amount(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
+        shape = sorted((r["account"], r["debit_minor"], r["credit_minor"]) for r in rows)
+        if shape != sorted([(acc["receivable"], expected, 0), (acc["revenue"], 0, expected)]):
             problems.append(f"{name}: invoice {doc} is not posted once at the policy amount")
-        if any(r["timestamp"] != invoice["issued_at"] for r in rows):
-            problems.append(f"{name}: invoice {doc} is posted at another time")
+        if any(parse_time(r["timestamp"]) < parse_time(invoice["issued_at"]) for r in rows):
+            problems.append(f"{name}: invoice {doc} is posted before its date")
+        if any(r["entity_id"] != invoice["entity_id"] for r in rows):
+            problems.append(f"{name}: invoice {doc} is posted for another entity")
 
-    closed = defaultdict(int)
-    for payment_id, payment in books.payments.items():
-        doc = payment["doc_id"]
+    closings = expected_closings(books)
+    for payment in books.payment_list:
+        doc, pid, refs = payment["doc_id"], payment["payment_id"], payment["invoice_refs"]
         if doc in exempt:
             continue
-        rows = by_payment.get(payment_id, [])
-        inside = in_period(payment["timestamp"], policy["period_start"], policy["period_end"])
+        rows = books.by_payment.get(pid, [])
+        inside = books.inside(payment["timestamp"])
         if not rows:
             if inside:
                 problems.append(f"{name}: payment {doc} is in the period but not posted")
             continue
         if not inside:
             problems.append(f"{name}: payment {doc} is outside the period but posted")
-        expected = books.to_base(payment["amount_minor"], payment["currency"], payment["timestamp"])
-        cash = sum(r["debit_minor"] - r["credit_minor"] for r in rows if r["account"] == "cash")
-        if cash != expected:
-            problems.append(f"{name}: payment {doc} cash differs from the policy amount")
-        if any(r["timestamp"] != payment["timestamp"] for r in rows):
-            problems.append(f"{name}: payment {doc} is posted at another time")
-        refs = set(payment["invoice_refs"] or [])
+        if any(parse_time(r["timestamp"]) < parse_time(payment["timestamp"]) for r in rows):
+            problems.append(f"{name}: payment {doc} is posted before its date")
+        entities = {books.invoices[ref]["entity_id"] for ref in refs or [] if ref in books.invoices}
+        if (entities and {r["entity_id"] for r in rows} != entities) or len({r["entity_id"] for r in rows}) != 1:
+            problems.append(f"{name}: payment {doc} is posted for another entity")
+        if any(not books.own.get(ref) for ref in refs or []):
+            problems.append(f"{name}: payment {doc} refers to an invoice that is not posted")
+            continue
+        by_account = defaultdict(list)
         for row in rows:
-            if row["account"] == "receivable":
-                if row["invoice_id"] not in refs:
-                    problems.append(f"{name}: payment {doc} closes an invoice it does not refer to")
-                closed[row["invoice_id"]] += row["credit_minor"] - row["debit_minor"]
-    for invoice_id, amount in sorted(closed.items()):
-        if invoice_id in booked and amount > booked[invoice_id]:
-            problems.append(f"{name}: invoice {books.invoices[invoice_id]['doc_id']} is closed for more than it was booked")
+            by_account[row["account"]].append(row)
+        if set(by_account) - {acc["cash"], acc["receivable"], acc["unallocated"], acc["fx_difference"]}:
+            problems.append(f"{name}: payment {doc} posts to an account a payment does not use")
+        cash = by_account[acc["cash"]]
+        expected_cash = books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"])
+        if len(cash) != 1 or cash[0]["debit_minor"] - cash[0]["credit_minor"] != expected_cash:
+            problems.append(f"{name}: payment {doc} cash differs from the policy amount")
+        expected = closings[pid]
+        if expected["problem"]:
+            problems.append(f"{name}: payment {doc}: {expected['problem']}")
+        receivable = by_account[acc["receivable"]]
+        actual = {r["invoice_id"]: r["credit_minor"] - r["debit_minor"] for r in receivable}
+        if len(actual) != len(receivable) or actual != expected["closes"]:
+            problems.append(f"{name}: payment {doc} does not close its invoices by the payment rule")
+        unallocated = sum(r["credit_minor"] - r["debit_minor"] for r in by_account[acc["unallocated"]])
+        if len(by_account[acc["unallocated"]]) > 1 or unallocated != expected["unallocated"]:
+            problems.append(f"{name}: payment {doc} has an unallocated amount the payment rule does not give")
+        fx_rows = by_account[acc["fx_difference"]]
+        if len(fx_rows) > 1 or (fx_rows and payment["currency"] == books.base):
+            problems.append(f"{name}: payment {doc} has an fx_difference row it cannot have")
+        if payment["amount_minor"] < 0 and refs:
+            others = books.paid_by.get(refs[0], [])
+            if any(books.by_payment.get(p["payment_id"]) and any(r["account"] == acc["unallocated"]
+                                                                  for r in books.by_payment[p["payment_id"]])
+                   for p in others):
+                problems.append(f"{name}: refund {doc} on an invoice with an unallocated amount")
     return problems
 
 
-# ---------------------------------------------------------------------------------------------
-# State before injection, rebuilt from the provenance records (public ids only).
+def check_books(public: dict, name: str, exempt: set[str], counts: bool = True) -> list[str]:
+    books = Books(public)
+    problems = _check_documents(books, name) + _check_ledger(books, name)
+    if problems:
+        return problems
+    problems += _check_postings(books, name, exempt)
+    if counts:
+        manifest = public["manifest"]["counts"]
+        for table in ("ledger", "invoices", "payments", "fx"):
+            if manifest[table] != len(public[table]):
+                problems.append(f"manifest: count of {table} differs from the file")
+    return problems
 
+
+# ============================================================================ truth
 def _record_table(record: dict) -> str:
     if "row_id" in record:
         return "ledger"
@@ -193,181 +453,137 @@ def _record_table(record: dict) -> str:
     return "payments"
 
 
-def _pre_public(public: dict, steps: list[dict]) -> dict:
-    """Open documents as they were before injection: undo each step's documents, last step first."""
-    tables = {name: {record["doc_id"]: record for record in public[name]} for name in ("invoices", "payments")}
-    for step in reversed(steps):
-        for record in step["after"]:
-            table = _record_table(record)
-            if table != "ledger":
-                tables[table].pop(record["doc_id"], None)
+def _check_replay(public: dict, private: dict) -> list[str]:
+    """The pre-injection snapshot with every step's `before` records replaced by its `after` records
+    gives the open records, so the two states differ exactly by the recorded changes."""
+    problems = []
+    ident = {"ledger": "row_id", "invoices": "doc_id", "payments": "doc_id"}
+    state = {"ledger": {r["row_id"]: r for r in private["pre_ledger"]},
+             "invoices": {r["doc_id"]: r for r in private["pre_invoices"]},
+             "payments": {r["doc_id"]: r for r in private["pre_payments"]}}
+    for step in private["provenance"]["steps"]:
         for record in step["before"]:
             table = _record_table(record)
-            if table != "ledger":
-                tables[table][record["doc_id"]] = record
-    return dict(public, invoices=list(tables["invoices"].values()), payments=list(tables["payments"].values()))
-
-
-def _check_replay(public: dict, private: dict) -> list[str]:
-    """pre_ledger with every step's `before` rows replaced by its `after` rows equals the ledger,
-    so the two books differ exactly by the injected rows, and kept rows keep their row_id."""
-    problems = []
-    state = {row["row_id"]: row for row in private["pre_ledger"]}
-    for step in private["provenance"]["steps"]:
-        before = [r for r in step["before"] if _record_table(r) == "ledger"]
-        after = [r for r in step["after"] if _record_table(r) == "ledger"]
-        for row in before:
-            if state.get(row["row_id"]) != row:
-                problems.append(f"provenance: step {step['issue_id']} removes a row that is not in the books")
-            state.pop(row["row_id"], None)
-        for row in after:
-            if row["row_id"] in state:
-                problems.append(f"provenance: step {step['issue_id']} adds a row id that already exists")
-            state[row["row_id"]] = row
-    ledger = {row["row_id"]: row for row in public["ledger"]}
-    if state != ledger:
-        problems.append("provenance: pre_ledger plus the recorded steps does not give the ledger")
+            if state[table].get(record[ident[table]]) != record:
+                problems.append(f"provenance: step {step['issue_id']} changes a record that is not in that state")
+            state[table].pop(record[ident[table]], None)
+        for record in step["after"]:
+            table = _record_table(record)
+            if record[ident[table]] in state[table]:
+                problems.append(f"provenance: step {step['issue_id']} adds an id that already exists")
+            state[table][record[ident[table]]] = record
+    for table, key in ident.items():
+        if state[table] != {r[key]: r for r in public[table]}:
+            problems.append(f"provenance: the snapshot plus the recorded steps does not give the {table}")
     return problems
 
 
-# ---------------------------------------------------------------------------------------------
-# Truth: declared deviation, evidence, affected documents.
-
-MAX_EVIDENCE = 10
-POSTING_TYPES = ("period_cutoff", "fx_error", "allocation_gap")  # issues about how a document is posted
+def _key(item: dict, amount: str) -> tuple:
+    return (item["type"], tuple(sorted(item["affected_ids"])), item[amount], item["currency"])
 
 
-def invoice_signature(invoice: dict) -> tuple:
-    """Customer, currency, total and line items as a multiset (issued_at is not part of it)."""
-    items = sorted(tuple(sorted(item.items())) for item in invoice["line_items"])
-    return (invoice["entity_id"], invoice["currency"], invoice["total_minor"], tuple(items))
+def _evidence_problem(books: Books, issue: dict) -> str | None:
+    """Each type's evidence sets must be what docs/CONTRACTS.md section 3.1 lists."""
+    sets = sorted(sorted(group) for group in issue["evidence_sets"])
+    affected = issue["affected_ids"]
+    docs = [books.docs[d] for d in affected]
+
+    def own_rows(doc: dict) -> list[dict]:
+        if "invoice_id" in doc and "line_items" in doc:
+            return books.own.get(doc["invoice_id"], [])
+        return books.by_payment.get(doc["payment_id"], [])
+
+    def sides(doc: dict) -> list[str]:
+        rows = own_rows(doc)
+        debit = [r["row_id"] for r in rows if r["debit_minor"] > 0]
+        credit = [r["row_id"] for r in rows if r["credit_minor"] > 0]
+        return debit + credit if len(debit) == 1 and len(credit) == 1 and len(rows) == 2 else []
+
+    kind = issue["type"]
+    if kind == "duplicate_invoice":
+        a, b = (sides(doc) for doc in docs)
+        want = sorted(sorted(affected + [ra, rb]) for ra in a for rb in b)
+        return None if a and b and sets == want else "duplicate_invoice needs the four [docA, docB, rowA, rowB] sets"
+    if kind == "allocation_gap":
+        payment = next((d for d in docs if "payment_id" in d), None)
+        rows = [r for r in books.by_payment.get(payment["payment_id"], []) if r["account"] == books.accounts["unallocated"]] \
+            if payment else []
+        return None if len(rows) == 1 and sets == [sorted(affected + [rows[0]["row_id"]])] \
+            else "allocation_gap needs [payment, invoice, unallocated row]"
+    doc = docs[0]
+    if kind == "fx_error" and "payment_id" in doc:
+        rows = [r["row_id"] for r in own_rows(doc) if r["account"] == books.accounts["cash"]]
+        return None if len(rows) == 1 and sets == [sorted([doc["doc_id"], rows[0]])] else "fx_error on a payment needs [doc, cash row]"
+    pair = sides(doc)
+    want = sorted(sorted([doc["doc_id"], row]) for row in pair)
+    return None if pair and sets == want else f"{kind} needs [doc, debit row] and [doc, credit row]"
 
 
-def _own_rows(rows: list[dict], invoice_id: str) -> list[dict]:
-    return [r for r in rows if r["invoice_id"] == invoice_id and r["payment_id"] is None]
-
-
-def _posted_amount(rows: list[dict]) -> tuple[int, int] | None:
-    """(receivable debit, revenue credit) of an invoice posting pair, or None if it is not a pair."""
-    debit = [r for r in rows if r["account"] == "receivable" and r["debit_minor"] > 0]
-    credit = [r for r in rows if r["account"] == "revenue" and r["credit_minor"] > 0]
-    if len(rows) != 2 or len(debit) != 1 or len(credit) != 1:
-        return None
-    return debit[0]["debit_minor"], credit[0]["credit_minor"]
-
-
-def measure_duplicate(public: dict, pre_public: dict, pre_ledger: list[dict], issue: dict) -> tuple[int, str] | str:
-    """Deviation of a duplicate_invoice issue, in the invoice currency.
-
-    Exactly one of the two affected invoices (the copy) did not exist before injection and had no
-    postings in pre_ledger; the ledger now carries its posting pair at the policy amount. The
-    deviation is that copy's total_minor: revenue recognised twice for the same goods.
-    Returns (amount, currency) or a problem message.
-    """
-    docs = {d["doc_id"]: d for d in public["invoices"]}
-    pre_docs = {d["doc_id"] for d in pre_public["invoices"]}
-    affected = [docs.get(doc) for doc in issue["affected_ids"]]
-    if len(affected) != 2 or None in affected:
-        return "affected_ids must be two invoices"
-    if invoice_signature(affected[0]) != invoice_signature(affected[1]):
-        return "the two invoices do not share a signature"
-    copies = [d for d in affected if d["doc_id"] not in pre_docs]
-    if len(copies) != 1:
-        return "exactly one affected invoice must be created by injection"
-    copy_invoice = copies[0]
-    if _own_rows(pre_ledger, copy_invoice["invoice_id"]):
-        return "the copy is already posted before injection"
-    books = _Books(public)
-    for invoice in affected:
-        posted = _posted_amount(_own_rows(public["ledger"], invoice["invoice_id"]))
-        expected = books.to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
-        if posted != (expected, expected):
-            return f"invoice {invoice['doc_id']} is not posted at its policy amount"
-    return copy_invoice["total_minor"], copy_invoice["currency"]
-
-
-def measure_cutoff(public: dict, pre_public: dict, pre_ledger: list[dict], issue: dict) -> tuple[int, str] | str:
-    """Deviation of a period_cutoff issue, in the document currency.
-
-    The document was dated inside the period before injection and is dated outside it now (in the
-    company timezone), while its whole posting pair stays in the period's ledger. The deviation is
-    the document amount recognised in the wrong period: total_minor, since the pair carries the
-    policy amount of the full total at the document's own date (so it is not also an fx_error).
-    """
-    policy = public["policy"]
-    docs = {d["doc_id"]: d for d in public["invoices"]}
-    pre_docs = {d["doc_id"]: d for d in pre_public["invoices"]}
-    if len(issue["affected_ids"]) != 1 or issue["affected_ids"][0] not in docs:
-        return "affected_ids must be one invoice"
-    invoice = docs[issue["affected_ids"][0]]
-    before = pre_docs.get(invoice["doc_id"])
-    if before is None or not in_period(before["issued_at"], policy["period_start"], policy["period_end"]):
-        return "the invoice was not dated inside the period before injection"
-    if in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
-        return "the invoice is dated inside the period"
-    rows = _own_rows(public["ledger"], invoice["invoice_id"])
-    if any(not in_period(r["timestamp"], policy["period_start"], policy["period_end"]) for r in rows):
-        return "a posting of the invoice is outside the period"
-    expected = _Books(public).to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
-    if _posted_amount(rows) != (expected, expected):
-        return "the invoice is not posted in the period at its policy amount"
-    if {r["row_id"] for r in rows} != {r["row_id"] for r in _own_rows(pre_ledger, invoice["invoice_id"])}:
-        return "the posting rows are not the rows the invoice had before injection"
-    return invoice["total_minor"], invoice["currency"]
-
-
-MEASURES = {"duplicate_invoice": measure_duplicate, "period_cutoff": measure_cutoff}
-
-
-def _evidence_sufficient(public: dict, issue: dict) -> str | None:
-    """Each type's evidence sets must contain what docs/CONTRACTS.md section 3.1 lists."""
-    sets = [set(group) for group in issue["evidence_sets"]]
-    affected = set(issue["affected_ids"])
-    if issue["type"] == "duplicate_invoice":
-        if sets != [affected]:
-            return "duplicate_invoice evidence must be exactly both invoices"
-    elif issue["type"] == "period_cutoff":
-        doc = issue["affected_ids"][0]
-        invoice = next((d for d in public["invoices"] if d["doc_id"] == doc), None)
-        if invoice is None:
-            return "period_cutoff evidence needs an invoice"
-        rows = {r["row_id"]: r for r in _own_rows(public["ledger"], invoice["invoice_id"])}
-        sides = []
-        for group in sets:
-            others = group - {doc}
-            if doc not in group or len(others) != 1 or next(iter(others)) not in rows:
-                return "period_cutoff evidence must be pairs of the document and one of its posting rows"
-            row = rows[next(iter(others))]
-            sides.append("debit" if row["debit_minor"] > 0 else "credit")
-        if sorted(sides) != ["credit", "debit"]:
-            return "period_cutoff evidence needs one debit and one credit row"
+def _check_rules(books: Books, issue: dict, operator: str) -> str | None:
+    """Generator rules of docs/DECISIONS.md B for the record an issue is about."""
+    kind, docs = issue["type"], [books.docs[d] for d in issue["affected_ids"]]
+    if kind == "fx_error":
+        doc = docs[0]
+        amount = doc.get("total_minor", doc.get("amount_minor"))
+        moment = doc.get("issued_at", doc.get("timestamp"))
+        correct = books.policy_amount(amount, doc["currency"], moment)
+        if correct is None or issue["expected_amount_minor"] < FX_MIN_MINOR \
+                or issue["expected_amount_minor"] * 1000 < FX_MIN_PER_MILLE * abs(correct):
+            return "the injected fx difference is below 100 minor units or 0.5 %"
+        if "invoice_id" in doc and "line_items" in doc:
+            rows = books.own.get(doc["invoice_id"], [])
+            if len({r["debit_minor"] + r["credit_minor"] for r in rows}) != 1:
+                return "fx_error must distort the debit and the credit of an invoice equally"
+    elif kind == "allocation_gap":
+        payment = next((d for d in docs if "payment_id" in d), None)
+        invoice = next((d for d in docs if "line_items" in d), None)
+        if payment is None or invoice is None or payment["invoice_refs"] != [invoice["invoice_id"]]:
+            return "allocation_gap needs a payment referring to exactly its invoice"
+        if not books.inside(invoice["issued_at"]) or not books.own.get(invoice["invoice_id"]):
+            return "the invoice of an allocation_gap must be dated and posted in the period"
+        if [p["payment_id"] for p in books.paid_by.get(invoice["invoice_id"], [])] != [payment["payment_id"]]:
+            return "the invoice of an allocation_gap has other payments or refunds"
+    elif kind == "period_cutoff":
+        doc = docs[0]
+        if "line_items" not in doc:
+            return "period_cutoff targets are invoices"
+        moment = parse_time(doc["issued_at"])
+        edge = books.start if moment < books.start else books.end
+        if abs(moment - edge) >= dt.timedelta(days=CUTOFF_MAX_DAYS):
+            return "a cutoff date is more than four days outside the period"
+        if operator == "period_cutoff":
+            first = books.start.astimezone(parse_offset(books.offset)).date().isoformat()
+            last = (books.end - dt.timedelta(seconds=1)).astimezone(parse_offset(books.offset)).date().isoformat()
+            if any(item["service_end"] >= first and item["service_start"] <= last for item in doc["line_items"]):
+                return "a cutoff invoice keeps a service period inside the period"
     return None
 
 
-def _check_truth(public: dict, private: dict, pre_public: dict) -> list[str]:
+def _check_truth(public: dict, private: dict) -> list[str]:
     problems = []
     truth, provenance = private["truth"], private["provenance"]
     issues = truth["issues"]
-    doc_ids = {d["doc_id"] for d in public["invoices"]} | {d["doc_id"] for d in public["payments"]}
-    open_ids = doc_ids | {r["row_id"] for r in public["ledger"]} | {
-        fx_key(r["date"], r["source_currency"], r["target_currency"]) for r in public["fx"]}
-    currencies = set(public["policy"]["currency_exponents"])
+    books = Books(public)
+    open_ids = set(books.docs) | {r["row_id"] for r in public["ledger"]} | set(books.rates)
+    currencies = set(books.exponents)
 
     issue_ids = [issue["issue_id"] for issue in issues]
-    if len(set(issue_ids)) != len(issue_ids):
-        problems.append("truth: issue_id is not unique")
-    if sorted(issue_ids) != sorted(step["issue_id"] for step in provenance["steps"]):
+    step_ids = [step["issue_id"] for step in provenance["steps"]]
+    if len(set(issue_ids)) != len(issue_ids) or sorted(issue_ids) != sorted(step_ids):
         problems.append("truth: issues and provenance steps do not match one to one")
+    operator = {step["issue_id"]: step["operator"] for step in provenance["steps"]}
     config = provenance.get("config")
     if config:
+        scenario = {"I1": ("allocation_gap", "fx_error"), "I2": ("duplicate_invoice", "period_cutoff")}
         for name, count in sorted(config["errors"].items()):
+            count += scenario.get(config["interaction"], ()).count(name)
             if sum(1 for issue in issues if issue["type"] == name) != count:
                 problems.append(f"truth: number of {name} issues differs from the config")
 
     for issue in issues:
         tag = f"truth {issue['issue_id']}"
         affected = issue["affected_ids"]
-        if not affected or affected != sorted(set(affected)) or not set(affected) <= doc_ids:
+        if not affected or affected != sorted(set(affected)) or not set(affected) <= set(books.docs):
             problems.append(f"{tag}: deviation: affected_ids must be sorted existing doc ids")
             continue
         amount = issue["expected_amount_minor"]
@@ -380,67 +596,65 @@ def _check_truth(public: dict, private: dict, pre_public: dict) -> list[str]:
                 problems.append(f"{tag}: evidence: a set must have 1..{MAX_EVIDENCE} distinct ids")
             if not set(group) <= open_ids:
                 problems.append(f"{tag}: evidence: an id is not in the open records")
-        measure = MEASURES.get(issue["type"])
-        if measure is None:
-            problems.append(f"{tag}: deviation: no measure for {issue['type']}")
-            continue
-        measured = measure(public, pre_public, private["pre_ledger"], issue)
-        if isinstance(measured, str):
-            problems.append(f"{tag}: deviation: {measured}")
-        elif measured != (amount, issue["currency"]):
-            problems.append(f"{tag}: deviation: measured {measured} differs from the declared amount")
-        insufficient = _evidence_sufficient(public, issue)
+        insufficient = _evidence_problem(books, issue)
         if insufficient:
             problems.append(f"{tag}: evidence: {insufficient}")
+        broken = _check_rules(books, issue, operator.get(issue["issue_id"], ""))
+        if broken:
+            problems.append(f"{tag}: rule: {broken}")
+
+    found, undefined = predicate_issues(public)
+    problems += [f"truth: undefined case: {case}" for case in undefined]
+    by_target = {(i["type"], tuple(i["affected_ids"])): i for i in found}
+    declared = {}
+    for issue in issues:
+        target = (issue["type"], tuple(sorted(issue["affected_ids"])))
+        declared[target] = issue
+        hit = by_target.get(target)
+        if hit is None:
+            problems.append(f"truth {issue['issue_id']}: deviation: the {issue['type']} definition does not hold")
+        elif (hit["amount"], hit["currency"]) != (issue["expected_amount_minor"], issue["currency"]):
+            problems.append(f"truth {issue['issue_id']}: deviation: measured {(hit['amount'], hit['currency'])} "
+                            f"differs from the declared amount")
+    for target in sorted(set(by_target) - set(declared)):
+        problems.append(f"truth: the {target[0]} definition holds on {list(target[1])} but no issue lists it")
+    if len(found) != len(by_target):
+        problems.append("truth: a definition holds twice on the same documents")
     return problems
 
 
-def _check_no_unlisted(public: dict, issues: list[dict]) -> list[str]:
-    """The predicates of the implemented types fire only where the truth says so."""
-    problems = []
-    policy = public["policy"]
-    posted_invoices = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and r["payment_id"] is None}
-    by_signature = defaultdict(list)
+def _check_generator_rules(public: dict) -> list[str]:
+    counts = defaultdict(int)
     for invoice in public["invoices"]:
-        if invoice["invoice_id"] in posted_invoices:
-            by_signature[invoice_signature(invoice)].append(invoice["doc_id"])
-    pairs = set()
-    for docs in by_signature.values():
-        docs = sorted(docs)
-        pairs |= {(a, b) for i, a in enumerate(docs) for b in docs[i + 1:]}
-    declared = {tuple(issue["affected_ids"]) for issue in issues if issue["type"] == "duplicate_invoice"}
-    if pairs != declared:
-        problems.append("truth: duplicate invoice pairs in the records differ from the declared ones")
-
-    posted_payments = {r["payment_id"] for r in public["ledger"] if r["payment_id"]}
-    outside = {inv["doc_id"] for inv in public["invoices"] if inv["invoice_id"] in posted_invoices
-               and not in_period(inv["issued_at"], policy["period_start"], policy["period_end"])}
-    outside |= {pay["doc_id"] for pay in public["payments"] if pay["payment_id"] in posted_payments
-                and not in_period(pay["timestamp"], policy["period_start"], policy["period_end"])}
-    declared_cutoff = {doc for issue in issues if issue["type"] == "period_cutoff" for doc in issue["affected_ids"]}
-    if outside != declared_cutoff:
-        problems.append("truth: documents dated outside the period but posted differ from the declared ones")
-    return problems
+        counts[invoice_signature(invoice)] += 1
+    return ["rules: more than two invoices share a signature"] if any(n > 2 for n in counts.values()) else []
 
 
 def verify(episode: dict) -> list[str]:
+    try:
+        return _verify(episode)
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError, InvalidOperation) as error:
+        return [f"malformed episode: {type(error).__name__}"]
+
+
+def _verify(episode: dict) -> list[str]:
     public, private = episode["public"], episode["private"]
-    steps = private["provenance"]["steps"]
     issues = private["truth"]["issues"]
-    pre_public = _pre_public(public, steps)
-    books = _Books(public)
-    pre_books = _Books(pre_public)
-    problems = _check_documents(public, books)
-    problems += _check_ledger_shape(public["ledger"], books, "ledger")
-    problems += _check_balance(public["ledger"], "ledger")
-    problems += _check_ledger_shape(private["pre_ledger"], pre_books, "pre")
-    problems += _check_balance(private["pre_ledger"], "pre")
-    problems += _check_clean_postings(private["pre_ledger"], pre_books, "pre", set())
+    pre_public = dict(public, ledger=private["pre_ledger"], invoices=private["pre_invoices"],
+                      payments=private["pre_payments"])
+    problems = _check_fx(public, Books(public))
+    problems += check_books(pre_public, "pre", set(), counts=False)
+    if not problems:
+        found, undefined = predicate_issues(pre_public)
+        problems += [f"pre: the {i['type']} definition already holds on {i['affected_ids']}" for i in found]
+        problems += [f"pre: undefined case: {case}" for case in undefined]
     exempt = {doc for issue in issues if issue["type"] in POSTING_TYPES for doc in issue["affected_ids"]}
-    problems += _check_clean_postings(public["ledger"], books, "ledger", exempt)
+    books_problems = check_books(public, "ledger", exempt)
+    problems += books_problems
     problems += _check_replay(public, private)
-    problems += _check_truth(public, private, pre_public)
-    problems += _check_no_unlisted(public, issues)
+    if not books_problems:
+        problems += _check_truth(public, private)
+    problems += _check_generator_rules(public)
     if private["truth"]["episode_id"] != public["manifest"]["episode_id"]:
         problems.append("truth: episode_id differs from the manifest")
     return problems

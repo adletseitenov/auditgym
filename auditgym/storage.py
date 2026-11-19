@@ -55,6 +55,8 @@ def episode_files(episode: dict) -> dict[str, str]:
         "private/truth.json": _json(private["truth"]),
         "private/provenance.json": _json(private["provenance"]),
         "private/pre_ledger.csv": _csv(private["pre_ledger"], LEDGER_COLUMNS),
+        "private/pre_invoices.jsonl": _jsonl(private["pre_invoices"]),
+        "private/pre_payments.jsonl": _jsonl(private["pre_payments"]),
     }
 
 
@@ -88,5 +90,7 @@ def load_episode(directory: str | pathlib.Path) -> dict:
             "truth": json.loads(text("private/truth.json")),
             "provenance": json.loads(text("private/provenance.json")),
             "pre_ledger": _read_ledger(text("private/pre_ledger.csv")),
+            "pre_invoices": lines("private/pre_invoices.jsonl"),
+            "pre_payments": lines("private/pre_payments.jsonl"),
         },
     }

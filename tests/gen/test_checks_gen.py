@@ -1,24 +1,42 @@
+import io
 import unittest
 
-from tools import checks_gen
+from tools import checks_gen, fuzz
 
 
 class ChecksGenTest(unittest.TestCase):
     def test_shape(self):
-        self.assertEqual(len(checks_gen.CHECKS), 4)
+        self.assertEqual(len(checks_gen.CHECKS), 7)
         for name, function in checks_gen.CHECKS:
             self.assertIsInstance(name, str)
             self.assertTrue(callable(function))
 
-    def test_implemented_checks_pass(self):
-        self.assertIsNone(checks_gen.deviation_equals_expected_amount())
-        self.assertIsNone(checks_gen.evidence_sets_exist_and_suffice())
-        self.assertIsNone(checks_gen.any_seed_and_valid_config_gives_valid_episode())
+    def test_generator_checks_pass(self):
+        for name, function in checks_gen.CHECKS[:-1]:
+            with self.subTest(check=name):
+                self.assertIsNone(function())
 
-    def test_configurable_alone_names_what_is_missing(self):
-        message = checks_gen.each_error_type_configurable_alone()
-        # Until G5 lands, the two remaining types are reported, and nothing else fails.
-        self.assertIn(message, (None, "not implemented yet: allocation_gap, fx_error"))
+    def test_fuzz_check_passes_or_waits_for_the_solver(self):
+        message = checks_gen.fuzz_solver_equals_truth()
+        self.assertTrue(message is None or message.startswith("pending:"), message)
+
+
+class FuzzToolTest(unittest.TestCase):
+    def test_grid_covers_the_required_cases(self):
+        names = [name for name, _ in fuzz.grid()]
+        for required in ("clean", "clean_plain", "I1", "I2", "max_density_small", "max_density_large",
+                         *fuzz.TYPES, "duplicate_invoice+period_cutoff", "allocation_gap+fx_error"):
+            self.assertIn(required, names)
+        configs = [cfg for _, cfg in fuzz.grid()]
+        self.assertTrue({cfg.get("timezone") for cfg in configs} >= {"-11:00", "+14:00", "+05:45", "-09:30"})
+        self.assertTrue({len(cfg.get("currencies", [])) for cfg in configs} >= {0, 1, 2, 3})
+
+    def test_run_reports(self):
+        out = io.StringIO()
+        result = fuzz.run(1, ("I2",), out=out)
+        self.assertGreater(result["episodes"], 0)
+        self.assertIn("attempts per episode", out.getvalue())
+        self.assertIn("time per episode", out.getvalue())
 
 
 if __name__ == "__main__":

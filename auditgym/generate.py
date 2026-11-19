@@ -1,4 +1,12 @@
-"""generate(seed, config) -> episode (docs/CONTRACTS.md, section 1)."""
+"""generate(seed, config) -> episode (docs/CONTRACTS.md, section 1).
+
+Random streams are derived from the seed and the normalized config without surface_seed, so the
+same seed with another config gives another world, and ids depend on the error config too.
+Each attempt builds a story, injects the errors and checks the whole episode with verify() (which
+evaluates the four published predicates over the open records). An attempt that has no target for
+an operator, or whose episode verify() rejects, is replaced by the next attempt: a bounded
+deterministic retry. Exhausting the bound raises ConfigError("no_episode").
+"""
 from __future__ import annotations
 
 import hashlib
@@ -6,16 +14,14 @@ import json
 
 from . import SCHEMA_VERSION, __version__
 from .books import build_books
-from .config import CONFIG_VERSION, ConfigError, normalize_config
-from .inject import IMPLEMENTED, NoTarget, inject_errors
+from .config import CONFIG_VERSION, MAX_LEDGER_ROWS, ConfigError, config_digest, normalize_config
+from .inject import NoTarget, inject_errors
 from .rng import Rng
-from .surface import apply_surface, public_record
+from .surface import assign_ids, public_record, public_tables
+from .verify import verify
 from .world import build_world
 
-# Attempt k > 0 regenerates the whole story from a derived stream. A miss needs a story with fewer
-# unpaid invoices than period_cutoff cases; 64 misses in a row are far below any practical chance.
-MAX_ATTEMPTS = 64
-
+MAX_ATTEMPTS = 32
 ACCOUNTS = ("cash", "receivable", "revenue", "unallocated", "fx_difference", "expense")
 
 
@@ -31,6 +37,7 @@ def build_policy(world: dict) -> dict:
         "refund": "payment with negative amount_minor and one invoice ref",
         "amount_tolerance_minor": {"duplicate_invoice": 0, "allocation_gap": 0, "fx_error": 1, "period_cutoff": 0},
         "evidence_superset_allowed": True,
+        "period_basis": "document_date",
     }
 
 
@@ -41,61 +48,56 @@ def _episode_id(tables: dict) -> str:
     return "ep_" + hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
 
 
-def _attempt_root(seed: int, attempt: int) -> Rng:
-    return Rng(seed) if attempt == 0 else Rng(seed, f"attempt:{attempt}")
-
-
-def _build(seed: int, config: dict) -> tuple[int, dict, list[dict], list[dict], list[dict]]:
-    """Deterministic bounded retry over attempts 0..MAX_ATTEMPTS-1."""
-    for attempt in range(MAX_ATTEMPTS):
-        root = _attempt_root(seed, attempt)
-        world = build_world(root.child("world"), config)
-        ledger = build_books(world)
-        pre_ledger = [dict(row) for row in ledger]
-        try:
-            world, ledger, injections = inject_errors(root, world, ledger, config["errors"])
-        except NoTarget:
-            continue
-        return attempt, world, ledger, pre_ledger, injections
-    raise RuntimeError("no valid episode within the attempt limit")  # unreachable for valid configs
-
-
 def _public_evidence(group: list[str], id_map: dict[str, str]) -> list[str]:
-    """Documents first, sorted by public id (internal key order must not show), then rows as given."""
+    """Documents first, then rows, each sorted by public id (internal key order must not show)."""
     docs = sorted(id_map[key] for key in group if key.startswith("D:"))
-    return docs + [id_map[key] for key in group if not key.startswith("D:")]
+    return docs + sorted(id_map[key] for key in group if not key.startswith("D:"))
 
 
 def _public_params(params: dict, id_map: dict[str, str]) -> dict:
     return {name: id_map.get(value, value) if isinstance(value, str) else value for name, value in params.items()}
 
 
-def generate(seed: int, config: dict | None = None) -> dict:
-    if not isinstance(seed, int) or isinstance(seed, bool):
-        raise ConfigError("bad_seed", "seed must be an integer")
-    config = normalize_config(config)
-    missing = [name for name, count in config["errors"].items() if count and name not in IMPLEMENTED]
-    if missing or config["interaction"] != "none":
-        # allocation_gap, fx_error and the interaction scenarios land in tasks G5 and G8.
-        raise ConfigError("not_implemented", "this error type or interaction is not implemented yet")
+class _Rejected(Exception):
+    pass
 
-    attempt, world, ledger, pre_ledger, injections = _build(seed, config)
 
+def _assemble(seed: int, config: dict, digest: str, attempt: int, retries: list[dict]) -> dict:
+    root = Rng(f"{seed}|{digest}", f"attempt:{attempt}")
+    pre_world = build_world(root.child("world"), config)
+    try:
+        world, injections = inject_errors(root, pre_world, config)
+    except NoTarget as missing:
+        raise _Rejected(f"no target: {missing}") from None
+    pre_ledger, ledger = build_books(pre_world), build_books(world)
+    if len(ledger) > MAX_LEDGER_ROWS:
+        raise _Rejected("ledger too large")
+
+    keys = set(world["entities"])
+    for document in world["invoices"] + world["payments"]:
+        keys |= {document["key"], "D:" + document["key"]}
+    keys |= {row["key"] for row in ledger} | {row["key"] for row in pre_ledger}
+    for injection in injections:
+        keys |= {record["key"] for record in injection["before"] + injection["after"]}
     surface_seed = seed if config["surface_seed"] is None else config["surface_seed"]
-    tables = apply_surface(Rng(surface_seed, "surface"), world, ledger, pre_ledger)
-    id_map = tables["id_map"]
-    issues: list[dict] = []
-    steps: list[dict] = []
+    id_map = assign_ids(Rng(f"{surface_seed}|{digest}", "surface"), keys)
+    tables = public_tables(world, ledger, id_map)
+    pre_tables = public_tables(pre_world, pre_ledger, id_map)
+
+    issues, steps = [], []
     for number, injection in enumerate(injections, 1):
         issue_id = f"t{number}"
         issues.append({"issue_id": issue_id, "type": injection["type"],
                        "affected_ids": sorted(id_map[key] for key in injection["affected"]),
                        "expected_amount_minor": injection["amount_minor"], "currency": injection["currency"],
-                       "evidence_sets": [_public_evidence(group, id_map) for group in injection["evidence"]]})
-        steps.append({"operator": injection["type"], "params": _public_params(injection["params"], id_map),
-                      "issue_id": issue_id,
-                      "before": [public_record(record, id_map) for record in injection["before"]],
-                      "after": [public_record(record, id_map) for record in injection["after"]]})
+                       "evidence_sets": sorted(_public_evidence(group, id_map) for group in injection["evidence"])})
+
+        def records(items: list[dict]) -> list[dict]:
+            return sorted((public_record(record, id_map) for record in items),
+                          key=lambda r: (r.get("row_id") is not None, r.get("doc_id") or r.get("row_id")))
+
+        steps.append({"operator": injection["operator"], "params": _public_params(injection["params"], id_map),
+                      "issue_id": issue_id, "before": records(injection["before"]), "after": records(injection["after"])})
 
     episode_id = _episode_id(tables)
     policy = build_policy(world)
@@ -105,13 +107,34 @@ def generate(seed: int, config: dict | None = None) -> dict:
         "counts": {name: len(tables[name]) for name in ("ledger", "invoices", "payments", "fx")},
         "rounding": policy["rounding"], "config_version": CONFIG_VERSION,
     }
-    return {
-        "public": {"manifest": manifest, "policy": policy, "ledger": tables["ledger"],
-                   "invoices": tables["invoices"], "payments": tables["payments"], "fx": tables["fx"]},
+    episode = {
+        "public": {"manifest": manifest, "policy": policy, **tables},
         "private": {
             "truth": {"schema_version": SCHEMA_VERSION, "episode_id": episode_id, "issues": issues},
             "provenance": {"seed": seed, "config": config, "generator_version": __version__, "attempt": attempt,
-                           "steps": steps, "id_map": id_map},
-            "pre_ledger": tables["pre_ledger"],
+                           "retries": list(retries), "steps": steps, "id_map": id_map},
+            "pre_ledger": pre_tables["ledger"],
+            "pre_invoices": pre_tables["invoices"],
+            "pre_payments": pre_tables["payments"],
         },
     }
+    problems = verify(episode)
+    if problems:
+        raise _Rejected(f"verify: {problems[0]}")
+    return episode
+
+
+def generate(seed: int, config: dict | None = None) -> dict:
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ConfigError("bad_seed", "seed must be an integer")
+    config = normalize_config(config)
+    digest = config_digest(config)
+    retries: list[dict] = []
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return _assemble(seed, config, digest, attempt, retries)
+        except _Rejected as rejected:
+            retries.append({"attempt": attempt, "reason": str(rejected)[:200]})
+        except Exception as error:  # never escapes as anything but ConfigError; fuzz reports "internal"
+            retries.append({"attempt": attempt, "reason": f"internal: {type(error).__name__}"})
+    raise ConfigError("no_episode", f"no valid episode within {MAX_ATTEMPTS} attempts")
