@@ -8,7 +8,8 @@ from unittest import mock
 
 from tools import score
 
-MODULES = ("tools.checks_gen", "tools.checks_solver", "tools.checks_qa", "tools.checks_judge", "tools.checks_env")
+MODULES = ("tools.checks_gen", "tools.checks_solver", "tools.checks_qa", "tools.checks_judge", "tools.checks_env",
+           "tools.checks_pack")
 
 
 class WiringTest(unittest.TestCase):
@@ -102,13 +103,14 @@ class ExitCodeTest(unittest.TestCase):
                     score._load_zone_checks()
 
     def test_check_command_is_lenient_unless_strict_is_set(self):
-        from auditgym import __main__ as entry
+        from tools import check_modes
 
-        for value, expected in ((None, ["--allow-todo"]), ("0", ["--allow-todo"]), ("", ["--allow-todo"]),
-                                ("1", [])):
+        for value, full, expected in ((None, False, ["--allow-todo"]), ("0", False, ["--allow-todo"]),
+                                      ("", False, ["--allow-todo"]), ("1", False, []), (None, True, [])):
             environment = {} if value is None else {"AUDITGYM_STRICT": value}
             with mock.patch.dict("os.environ", environment, clear=False), \
-                    mock.patch.object(unittest.defaultTestLoader, "discover", return_value=unittest.TestSuite()), \
+                    mock.patch.object(check_modes, "suite", return_value=unittest.TestSuite()), \
+                    mock.patch.object(check_modes, "_extra_tool", return_value=True), \
                     mock.patch.object(score, "main", return_value=0) as scoring, \
                     mock.patch("tools.lint_determinism.main", return_value=0), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -116,7 +118,7 @@ class ExitCodeTest(unittest.TestCase):
                     import os
 
                     os.environ.pop("AUDITGYM_STRICT", None)
-                entry.check()
+                self.assertEqual(check_modes.run(full=full), 0)
             scoring.assert_called_once_with(expected)
 
 

@@ -113,6 +113,7 @@ ZONE_CHECKS = {
     "Данные и эталон": ("tools.checks_gen", "tools.checks_solver", "tools.checks_qa"),
     "Надёжность награды": ("tools.checks_judge",),
     "Контракт и изоляция": ("tools.checks_env",),
+    "Инженерия и объяснение": ("tools.checks_pack",),
 }
 # Module check name -> planned name (the sample suffix is added by _apply_samples).
 RENAMES = {
@@ -210,7 +211,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("one command runs everything offline in the container", todo),
         ("config and schema versions are recorded in every episode", todo),
         ("trajectory logs are written and contain no truth", todo),
-        ("measured failure analysis is in docs/RESULTS.md", todo),
+        ("measured failure analysis is in docs/DESIGN.md with numbers from docs/RESULTS.md", todo),
         ("limitations are stated in the README", todo),
     ]),
 ]
@@ -265,6 +266,10 @@ def _sample_sizes() -> dict:
         "episode written to files loads back equal": "1 seed",
         "Env.from_files gives the same observations as the generated episode": "1 seed",
         "trajectory logs are written and contain no truth": "1 seed, 3 policies",
+        "one command runs everything offline in the container": "README, Dockerfile, 1 offline episode",
+        "config and schema versions are recorded in every episode": "20 shipped episodes, 5 fields each",
+        "measured failure analysis is in docs/DESIGN.md with numbers from docs/RESULTS.md": "8+ cited numbers",
+        "limitations are stated in the README": "8 required topics",
         "rng: same seed gives the same stream": "1 seed, 3 draws",
     }
 
