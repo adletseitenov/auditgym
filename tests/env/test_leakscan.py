@@ -31,6 +31,14 @@ class ScannerSensitivityTest(unittest.TestCase):
         for case in cases:
             self.assertTrue(self.scan(case), f"not found: {case}")
 
+    def test_a_public_amount_near_today_is_not_a_clock(self):
+        """Amounts are 10-digit integers too; one that is a public record value and lies within ten
+        days of today's epoch seconds (1794500000 on 19.11.2026 did) is data. The clock is still found."""
+        now = int(time.time())
+        self.secret["public_ints"] = set(self.secret["public_ints"]) | {now - 86400}
+        self.assertEqual(self.scan({"amount_minor": now - 86400}), [])
+        self.assertTrue(self.scan({"amount_minor": now - 2 * 86400}))
+
     def test_pre_injection_values_are_found(self):
         if not self.secret["strings"] and not self.secret["ints"]:
             self.skipTest("this episode has no pre-injection-only values")
@@ -73,8 +81,9 @@ class LeakscanRunTest(unittest.TestCase):
         out = io.StringIO()
         summary = leakscan.run(2, out=out)
         self.assertEqual(summary["failures"], [], out.getvalue())
-        for item in summary["pending"]:
-            self.assertTrue(item.startswith("pending: generator fix"), item)
+        # C1 and C2 are fixed in the generator (DECISIONS C1, C2): nothing is waved through as pending.
+        self.assertEqual(leakscan.PENDING, {})
+        self.assertEqual(summary["pending"], [])
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ paid / unpaid (invoices), line-item count, payment terms in days, reference coun
 (payments). The separation measure is the AUC (Mann-Whitney, ties averaged; a boolean is 0/1).
 A feature separates when |AUC - 0.5| > 0.25 (a single threshold then classifies at least 75 %
 of pairs correctly) with at least 20 affected documents; fewer is reported as "few". Known
-generator defects found by review are reported as `pending:` naming the fix (DECISIONS C1, C2);
+generator defects awaiting a fix may be listed as `pending:` (none now: C1 and C2 are fixed);
 a feature that is the error's own definition (period_cutoff: table order is by document date)
 is reported as `explained`.
 
@@ -89,14 +89,12 @@ FORBIDDEN_WORDS = ("truth", "provenance", "pre_ledger", "pre_invoices", "pre_pay
                    "evidence_sets", "expected_amount", "issue_id", "generator_version", "surface_seed",
                    "background_pairs", "traceback", "exception", "error:", ".jsonl", ".json", ".csv",
                    "/users/", "/home/", "/tmp", "/var/folders", "c:\\\\", "auditgym/")
-PENDING = {
-    ("period_cutoff", "paid"):
-        "pending: generator fix C1 - choose period_cutoff targets independently of payment (DECISIONS C1)",
-    ("duplicate_invoice", "paid"):
-        "pending: generator fix C1 - the copy of a duplicate is sometimes paid (DECISIONS C1)",
-    ("*", "posting_equals_document_time"):
-        "pending: generator fix C2 - legitimate documents are posted with a delay (DECISIONS C2)",
-}
+# Known generator defects awaiting a fix are listed here as `pending:` (they do not fail the run).
+# Empty since contract v2: the C1 items (period_cutoff targets chosen independently of payment; the
+# copy of a duplicate sometimes paid) and C2 (legitimate posting lag) are fixed in the generator and
+# measured at AUC ~0.5, so `paid` and `posting_equals_document_time` are real checks again: a
+# separation there now FAILs.
+PENDING: dict = {}
 EXPLAINED = {
     ("period_cutoff", "position"): "table order is by document date; a date outside the period is the definition",
 }
@@ -182,6 +180,9 @@ def secrets(episode: dict, paths: tuple[str, ...] = ()) -> dict:
         "exact": exact - public_strings,
         "strings": {s for s in pre_strings - public_strings if len(s) >= 4 and s not in exact},
         "ints": {i for i in pre_ints - public_ints if i >= 10000},
+        # Integers the agent may legitimately read (amounts, ...): one that happens to lie within ten
+        # days of today's epoch seconds is data, not the clock. The 1.1 s repeat still catches a clock.
+        "public_ints": public_ints,
         "seed": provenance.get("seed"),
         "paths": tuple(p for p in paths if p) + (str(ROOT),),
     }
@@ -216,7 +217,7 @@ def scan_text(text: str, secret: dict, parsed=None) -> list[str]:
     for number in re.findall(r"(?<![0-9.])[0-9]{5,}(?![0-9])", text):
         if int(number) in secret["ints"]:
             problems.append(f"pre-injection amount {number}")
-        if _near_now(int(number)):
+        if _near_now(int(number)) and int(number) not in secret.get("public_ints", ()):
             problems.append(f"epoch-like number {number}")
     if parsed is not None:
         strings, ints = set(), set()
