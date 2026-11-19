@@ -30,6 +30,17 @@ def in_offset(timestamp: str, offset: str) -> str:
     return parse_time(timestamp).astimezone(parse_offset(offset)).isoformat()
 
 
+def moved_offset(offset: str, hours: int) -> str:
+    """An offset `hours` away from `offset` (may lie beyond +-14:00; still a valid ISO offset)."""
+    total = int(parse_offset(offset).utcoffset(None).total_seconds() // 60) + hours * 60
+    sign = "-" if total < 0 else "+"
+    return f"{sign}{abs(total) // 60:02d}:{abs(total) % 60:02d}"
+
+
+def shift_date(date: str, days: int) -> str:
+    return (dt.date.fromisoformat(date) + dt.timedelta(days=days)).isoformat()
+
+
 class Company:
     """A clean generated company plus edit helpers. `public` is a private deep copy."""
 
@@ -153,6 +164,27 @@ class Company:
             rows.append(self.add_row(at, "fx_difference", max(-rest, 0), max(rest, 0), entity_id, None, pid))
         return rows
 
+    def rebook_invoice(self, invoice: dict) -> list[dict]:
+        """Rebook the invoice rows (kept in place, same ids and times) at the rate of its own date,
+        then let every single-reference payment close the new booked value."""
+        amount = self.to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
+        rows = self.invoice_rows(invoice)
+        for row in rows:
+            row["debit_minor" if row["debit_minor"] else "credit_minor"] = amount
+        for payment in self.payments_of(invoice):
+            if payment["invoice_refs"] == [invoice["invoice_id"]] and self.payment_rows(payment):
+                self.rebook_payment(payment, closes={invoice["invoice_id"]: amount})
+        return rows
+
+    def lag_postings(self, rows: list[dict], **delta) -> bool:
+        """Move posting times later by `delta`, staying inside the period. False if it would leave it."""
+        moved = [shift(r["timestamp"], **delta) for r in rows]
+        if not all(self.inside(m) for m in moved):
+            return False
+        for row, moment in zip(rows, moved):
+            row["timestamp"] = moment
+        return True
+
     def rebook_payment(self, payment: dict, **kwargs) -> list[dict]:
         entity_id = self.payment_rows(payment)[0]["entity_id"]
         self.remove_rows(self.payment_rows(payment))
@@ -188,8 +220,25 @@ ID_FIELDS = {"ledger": ("row_id", "entity_id", "invoice_id", "payment_id"),
              "payments": ("doc_id", "payment_id")}
 
 
-def rename_and_shuffle(public: dict, seed: int) -> tuple[dict, dict]:
-    """Rename every id consistently and shuffle every table. Returns (new public, old -> new)."""
+ID_STYLES = ("token", "numeric", "hex64", "cyrillic", "separators")
+_CYRILLIC = "абвгдеёжзийклмнопрстуфхцчшщъыьэюяӘәҒғҚқҢңӨөҰұҮүҺһІі"
+
+
+def _new_id(rng: Rng, style: str) -> str:
+    if style == "numeric":
+        return str(rng.randint(0, 10 ** 9))
+    if style == "hex64":
+        return rng.token(64, "0123456789abcdef")
+    if style == "cyrillic":
+        return rng.token(8, _CYRILLIC)
+    if style == "separators":
+        return rng.token(4) + rng.choice((":", "|", "::", "|:")) + rng.token(4) + rng.choice(("", "|", ":"))
+    return rng.token(12)
+
+
+def rename_and_shuffle(public: dict, seed: int, style: str = "token") -> tuple[dict, dict]:
+    """Rename every id consistently (in the given id style) and shuffle every table, every invoice's
+    line items and every payment's references. Returns (new public, old -> new)."""
     rng = Rng(seed, "metamorph")
     public = copy.deepcopy(public)
     old_ids = set()
@@ -201,7 +250,7 @@ def rename_and_shuffle(public: dict, seed: int) -> tuple[dict, dict]:
     mapping, taken = {}, set()
     for old in sorted(old_ids):
         while True:
-            new = rng.token(12)
+            new = _new_id(rng, style)
             if new not in taken and new not in old_ids:
                 break
         taken.add(new)
@@ -218,6 +267,9 @@ def rename_and_shuffle(public: dict, seed: int) -> tuple[dict, dict]:
         rng.shuffle(public[table])
     for invoice in public["invoices"]:
         rng.shuffle(invoice["line_items"])
+    for payment in public["payments"]:
+        if payment["invoice_refs"]:
+            rng.shuffle(payment["invoice_refs"])
     return public, mapping
 
 
