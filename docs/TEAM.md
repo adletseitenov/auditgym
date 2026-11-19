@@ -6,7 +6,7 @@
 1. Установи [Claude Code](https://claude.com/claude-code) и git. Нужен Python 3.11 или новее (`python3 --version`).
 2. Склонируй репозиторий и открой свою ветку:
    ```bash
-   git clone <ссылка на репозиторий> auditgym && cd auditgym
+   git clone https://github.com/adletseitenov/auditgym.git && cd auditgym
    git checkout -b <gen | env | judge | pack>
    python3 -m auditgym check
    ```
