@@ -122,7 +122,7 @@ episode = {
 
 ```json
 {"config_version": "1",
- "size": {"invoices": [40, 100], "background_pairs": [150, 300]},
+ "size": {"invoices": [48, 100], "background_pairs": [150, 300]},
  "currencies": ["USD"], "base_currency": "KZT", "timezone": "+05:00",
  "period": {"start": "2026-10-01", "months": 1},
  "errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1},

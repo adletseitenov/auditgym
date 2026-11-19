@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_863a66a628e6",
+ "episode_id": "ep_2dc2ac1d92de",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "j536z6hjfm",
-    "rg0f9pj007"
+    "efn56s3y83",
+    "vm8snv4t1m"
    ],
-   "expected_amount_minor": 3774000000,
-   "currency": "KZT",
+   "expected_amount_minor": 3620000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "j536z6hjfm",
-     "rg0f9pj007",
-     "9wq0h7xhmm",
-     "c62msxd375"
+     "efn56s3y83",
+     "vm8snv4t1m",
+     "7taa2vey9z",
+     "fvaztkknky"
     ],
     [
-     "j536z6hjfm",
-     "rg0f9pj007",
-     "9wq0h7xhmm",
-     "y6tbjtssqq"
+     "efn56s3y83",
+     "vm8snv4t1m",
+     "7taa2vey9z",
+     "h099b4dy2g"
     ],
     [
-     "j536z6hjfm",
-     "rg0f9pj007",
-     "c62msxd375",
-     "x861wmq784"
+     "efn56s3y83",
+     "vm8snv4t1m",
+     "fvaztkknky",
+     "n7279d645a"
     ],
     [
-     "j536z6hjfm",
-     "rg0f9pj007",
-     "x861wmq784",
-     "y6tbjtssqq"
+     "efn56s3y83",
+     "vm8snv4t1m",
+     "h099b4dy2g",
+     "n7279d645a"
     ]
    ]
   },
@@ -42,35 +42,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "17504n0bfn",
-    "kyknzr2xk2"
+    "6b21fnpm81",
+    "q462m63qdx"
    ],
-   "expected_amount_minor": 1437500000,
+   "expected_amount_minor": 2512000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "17504n0bfn",
-     "kyknzr2xk2",
-     "1x2zr9jt5x",
-     "28e6k1gn8j"
+     "6b21fnpm81",
+     "q462m63qdx",
+     "3353vf86xd",
+     "g54pm83p11"
     ],
     [
-     "17504n0bfn",
-     "kyknzr2xk2",
-     "1x2zr9jt5x",
-     "6zs3624vha"
+     "6b21fnpm81",
+     "q462m63qdx",
+     "3353vf86xd",
+     "k5a8d37p8w"
     ],
     [
-     "17504n0bfn",
-     "kyknzr2xk2",
-     "28e6k1gn8j",
-     "h3znxesz8t"
+     "6b21fnpm81",
+     "q462m63qdx",
+     "dcac7bgrrx",
+     "g54pm83p11"
     ],
     [
-     "17504n0bfn",
-     "kyknzr2xk2",
-     "6zs3624vha",
-     "h3znxesz8t"
+     "6b21fnpm81",
+     "q462m63qdx",
+     "dcac7bgrrx",
+     "k5a8d37p8w"
     ]
    ]
   }

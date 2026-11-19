@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_efee7d421a37",
+ "episode_id": "ep_460d175b5cde",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "6yfjyf3m7t",
-    "r83f6ejg6r"
+    "erxendjyz5",
+    "ym1azkpz0a"
    ],
-   "expected_amount_minor": 836500000,
+   "expected_amount_minor": 918000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "6yfjyf3m7t",
-     "r83f6ejg6r",
-     "ftwz3a6rsk",
-     "ryyg1j958f"
+     "erxendjyz5",
+     "ym1azkpz0a",
+     "37c9haw3ss",
+     "8y79t305hz"
     ],
     [
-     "6yfjyf3m7t",
-     "r83f6ejg6r",
-     "ftwz3a6rsk",
-     "s57f4ntzry"
+     "erxendjyz5",
+     "ym1azkpz0a",
+     "37c9haw3ss",
+     "axvcg5fwz1"
     ],
     [
-     "6yfjyf3m7t",
-     "r83f6ejg6r",
-     "ryyg1j958f",
-     "vqecb64hav"
+     "erxendjyz5",
+     "ym1azkpz0a",
+     "8y79t305hz",
+     "fx4cv75p67"
     ],
     [
-     "6yfjyf3m7t",
-     "r83f6ejg6r",
-     "s57f4ntzry",
-     "vqecb64hav"
+     "erxendjyz5",
+     "ym1azkpz0a",
+     "axvcg5fwz1",
+     "fx4cv75p67"
     ]
    ]
   },
@@ -42,35 +42,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "6y8d4kvd8s",
-    "r0ns6kcnv7"
+    "608k956xj4",
+    "zaqj3w83ze"
    ],
-   "expected_amount_minor": 1123000,
-   "currency": "USD",
+   "expected_amount_minor": 1729500000,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "6y8d4kvd8s",
-     "r0ns6kcnv7",
-     "7kd6yw1k9t",
-     "hxaqcw8eqb"
+     "608k956xj4",
+     "zaqj3w83ze",
+     "4rkchr6adg",
+     "cmxysdf2j0"
     ],
     [
-     "6y8d4kvd8s",
-     "r0ns6kcnv7",
-     "7kd6yw1k9t",
-     "rrvgw6f3rs"
+     "608k956xj4",
+     "zaqj3w83ze",
+     "4rkchr6adg",
+     "zvdew46th1"
     ],
     [
-     "6y8d4kvd8s",
-     "r0ns6kcnv7",
-     "hxaqcw8eqb",
-     "wnbfrf5fnv"
+     "608k956xj4",
+     "zaqj3w83ze",
+     "6e6yeze1zj",
+     "cmxysdf2j0"
     ],
     [
-     "6y8d4kvd8s",
-     "r0ns6kcnv7",
-     "rrvgw6f3rs",
-     "wnbfrf5fnv"
+     "608k956xj4",
+     "zaqj3w83ze",
+     "6e6yeze1zj",
+     "zvdew46th1"
     ]
    ]
   }

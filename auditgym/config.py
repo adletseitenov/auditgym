@@ -32,7 +32,8 @@ SIZE_LIMITS = {"invoices": (10, 200), "background_pairs": (0, 900)}
 
 DEFAULTS = {
     "config_version": CONFIG_VERSION,
-    "size": {"invoices": [40, 100], "background_pairs": [150, 300]},
+    # 48 invoices: the default four errors plus an interaction scenario (6 issues) fit the density limit.
+    "size": {"invoices": [48, 100], "background_pairs": [150, 300]},
     "currencies": ["USD"],
     "base_currency": "KZT",
     "timezone": "+05:00",

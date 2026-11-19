@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_371d58781fc6",
+ "episode_id": "ep_bd83a008d100",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "wzyjzcr2yc",
-    "zypaymp26g"
+    "4wv3bdebh0",
+    "dzfj2jv5rn"
    ],
-   "expected_amount_minor": 568500000,
+   "expected_amount_minor": 2856000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "wzyjzcr2yc",
-     "zypaymp26g",
-     "3xchet7vs7",
-     "cxsmnd7s5n"
+     "4wv3bdebh0",
+     "dzfj2jv5rn",
+     "2b1xz7gswc",
+     "fynhzw9ysa"
     ],
     [
-     "wzyjzcr2yc",
-     "zypaymp26g",
-     "3xchet7vs7",
-     "t55jhxjtxy"
+     "4wv3bdebh0",
+     "dzfj2jv5rn",
+     "2b1xz7gswc",
+     "rd6z2s7r82"
     ],
     [
-     "wzyjzcr2yc",
-     "zypaymp26g",
-     "cxsmnd7s5n",
-     "dk204jv5fk"
+     "4wv3bdebh0",
+     "dzfj2jv5rn",
+     "fynhzw9ysa",
+     "kne6kqba10"
     ],
     [
-     "wzyjzcr2yc",
-     "zypaymp26g",
-     "dk204jv5fk",
-     "t55jhxjtxy"
+     "4wv3bdebh0",
+     "dzfj2jv5rn",
+     "kne6kqba10",
+     "rd6z2s7r82"
     ]
    ]
   },
@@ -42,16 +42,16 @@
    "issue_id": "t2",
    "type": "allocation_gap",
    "affected_ids": [
-    "4t1mmd59kx",
-    "5me60e8w98"
+    "65ts34s347",
+    "a0e727nfd8"
    ],
-   "expected_amount_minor": 249839598,
+   "expected_amount_minor": 21931893,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "4t1mmd59kx",
-     "5me60e8w98",
-     "4yvy7tahjk"
+     "65ts34s347",
+     "a0e727nfd8",
+     "0h5ptmxjnz"
     ]
    ]
   },
@@ -59,14 +59,14 @@
    "issue_id": "t3",
    "type": "fx_error",
    "affected_ids": [
-    "5me60e8w98"
+    "a0e727nfd8"
    ],
-   "expected_amount_minor": 16655990,
+   "expected_amount_minor": 697832,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "5me60e8w98",
-     "yc1gv8v1dz"
+     "a0e727nfd8",
+     "r0nc225q0v"
     ]
    ]
   }
