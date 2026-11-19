@@ -1,6 +1,6 @@
 # Контракты между зонами
 
-Версия 1, 19.11.2026. Это общий договор четырёх зон: `gen`, `env`, `judge`, `qa`. Каждый пишет свою зону против этого файла и может не ждать остальных. **Менять только вместе:** правка здесь = сообщение в чат команды + повышение `SCHEMA_VERSION`.
+Версия 2, 19.11.2026 (после первого ревью; что изменилось — `docs/DECISIONS.md`, раздел A). Это общий договор четырёх зон: `gen`, `env`, `judge`, `qa`. Каждый пишет свою зону против этого файла и может не ждать остальных. **Менять только вместе:** правка здесь = сообщение в чат команды + повышение `SCHEMA_VERSION`.
 
 Основание — `docs/CASE.md` (текст кейса) и `docs/SPEC.md` (ТЗ версии 2). Если этот файл расходится с кейсом, прав кейс.
 
@@ -21,12 +21,14 @@ episode = {
     "private": {
         "truth": {...},         # §3.1
         "provenance": {...},    # §3.2
-        "pre_ledger": [row, ...],  # книга до вставки ошибок, с финальными ID
+        "pre_ledger": [row, ...],    # книга до вставки ошибок, с финальными ID
+        "pre_invoices": [inv, ...],  # счета до вставки ошибок, с финальными ID
+        "pre_payments": [pay, ...],  # платежи до вставки ошибок, с финальными ID
     },
 }
 ```
 
-На диске: `<dir>/public/{manifest.json, policy.json, ledger.csv, invoices.jsonl, payments.jsonl, fx.csv}` и `<dir>/private/{truth.json, provenance.json, pre_ledger.csv}`. Открытые и закрытые файлы всегда в разных каталогах. В CSV отсутствующая ссылка — пустое поле; через инструменты среды она отдаётся как JSON `null`.
+На диске: `<dir>/public/{manifest.json, policy.json, ledger.csv, invoices.jsonl, payments.jsonl, fx.csv}` и `<dir>/private/{truth.json, provenance.json, pre_ledger.csv, pre_invoices.jsonl, pre_payments.jsonl}`. Три файла `pre_*` вместе — полное состояние «до ошибки». Открытые и закрытые файлы всегда в разных каталогах. В CSV отсутствующая ссылка — пустое поле; через инструменты среды она отдаётся как JSON `null`.
 
 **Правила значений:** деньги — `int` в минимальных единицах; курсы — десятичные строки, в коде `Decimal`; время — ISO-8601 со смещением (`2026-10-03T14:05:00+05:00`); даты — `YYYY-MM-DD`. `float` запрещён. Все списки записей отсортированы в порядке, который назначила поверхность (`surface`), и этот порядок — часть эпизода.
 
@@ -57,7 +59,7 @@ episode = {
  "document_date": {"invoice": "issued_at", "payment": "timestamp"},
  "refund": "payment with negative amount_minor and one invoice ref",
  "amount_tolerance_minor": {"duplicate_invoice": 0, "allocation_gap": 0, "fx_error": 1, "period_cutoff": 0},
- "evidence_superset_allowed": true}
+ "evidence_superset_allowed": true, "period_basis": "document_date"}
 ```
 
 ### 2.3 ledger.csv
@@ -91,15 +93,16 @@ episode = {
 {"schema_version": "1", "episode_id": "ep_7f3k2m9q",
  "issues": [{"issue_id": "t1", "type": "duplicate_invoice",
              "affected_ids": ["docA", "docB"], "expected_amount_minor": 125000, "currency": "USD",
-             "evidence_sets": [["docA", "docB"]]}]}
+             "evidence_sets": [["docA", "docB", "rowA_debit", "rowB_debit"], ["docA", "docB", "rowA_debit", "rowB_credit"],
+                               ["docA", "docB", "rowA_credit", "rowB_debit"], ["docA", "docB", "rowA_credit", "rowB_credit"]]}]}
 ```
 Типы: `duplicate_invoice`, `allocation_gap`, `fx_error`, `period_cutoff`. `affected_ids` — множество `doc_id` (хранится отсортированным, сравнивается как множество). Каждый набор доказательств — не больше 10 ID, все существуют в открытых записях.
 
 | Тип | `affected_ids` | Сумма и валюта | `evidence_sets` |
 |---|---|---|---|
-| `duplicate_invoice` | оба счёта | `total_minor`, валюта счёта | `[[docA, docB]]` |
+| `duplicate_invoice` | оба счёта | `total_minor`, валюта счёта | четыре набора `[docA, docB, строка A, строка B]`: по одной строке (дебет или кредит) из собственной группы проводок каждого счёта |
 | `allocation_gap` | платёж и счёт | `credit_minor` строки на `unallocated`, базовая валюта | `[[doc_платежа, doc_счёта, row_нераспределённых]]` |
-| `fx_error` | документ | модуль разницы, базовая валюта | `[[doc, row_пересчёта]]` для каждой строки пересчёта |
+| `fx_error` | документ | модуль разницы, базовая валюта | счёт: `[[doc, row_Дт], [doc, row_Кт]]`; платёж: `[[doc, row_денег]]` |
 | `period_cutoff` | документ | сумма документа, валюта документа | `[[doc, row_Дт], [doc, row_Кт]]` |
 
 Точные предикаты — в `docs/SPEC.md`, раздел «Определения ошибок».
@@ -130,7 +133,7 @@ episode = {
 - `errors` — число ошибок каждого типа (0 и больше). `{}` или все нули — чистая компания.
 - `interaction`: `"none"`, `"I1"` (частичный платёж в иностранной валюте у границы периода: `allocation_gap` + `fx_error`), `"I2"` (копия счёта, датированная вне периода: `duplicate_invoice` + `period_cutoff`). Сценарий добавляет свои две записи эталона сверх `errors`.
 - `surface_seed: null` — берётся из `seed`. Другое значение даёт тот же эпизод с другими ID и порядком.
-- Проверки: всего ошибок ≤ 30; ошибок ≤ документов / 8; проводок ≤ 2 000; страниц на полное чтение ≤ 60; валюты из списка `KZT, USD, EUR, RUB, CNY`; неизвестный ключ — ошибка. Нарушение → `ConfigError` с коротким кодом, эпизод не создаётся.
+- Проверки: всего ошибок ≤ 30; не больше одной ошибки на 8 счетов (по нижней границе `size.invoices`); проводок ≤ 2 000; страниц на полное чтение ≤ 60; валюты из списка `KZT, USD, EUR, RUB, CNY`; неизвестный ключ — ошибка. Нарушение → `ConfigError` с коротким кодом, эпизод не создаётся.
 
 ## 5. Протокол среды
 
