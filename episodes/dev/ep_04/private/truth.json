@@ -1,0 +1,41 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_db34a08b5abe",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "2s1tn9hj92",
+    "pprdc3e2m9"
+   ],
+   "expected_amount_minor": 4164000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "2s1tn9hj92",
+     "pprdc3e2m9"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t2",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "gb2nxbghta"
+   ],
+   "expected_amount_minor": 5224000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "gb2nxbghta",
+     "qtj9wgjhkz"
+    ],
+    [
+     "gb2nxbghta",
+     "pn5b9yvd0x"
+    ]
+   ]
+  }
+ ]
+}

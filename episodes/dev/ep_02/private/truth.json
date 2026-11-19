@@ -1,0 +1,63 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_cbc448288530",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "wz5estx7rv"
+   ],
+   "expected_amount_minor": 4139000,
+   "currency": "USD",
+   "evidence_sets": [
+    [
+     "wz5estx7rv",
+     "jebsbxtagc"
+    ],
+    [
+     "wz5estx7rv",
+     "6qq1h6zp71"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t2",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "0ew959ba5h"
+   ],
+   "expected_amount_minor": 969000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "0ew959ba5h",
+     "wpqcmarzmm"
+    ],
+    [
+     "0ew959ba5h",
+     "8762rbfy60"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t3",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "02vvfdv1rf"
+   ],
+   "expected_amount_minor": 2691000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "02vvfdv1rf",
+     "ggjep1p423"
+    ],
+    [
+     "02vvfdv1rf",
+     "5x0snp1ram"
+    ]
+   ]
+  }
+ ]
+}

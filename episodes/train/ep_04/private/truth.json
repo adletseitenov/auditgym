@@ -1,0 +1,25 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_e407e374585d",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "t1ww80tjhn"
+   ],
+   "expected_amount_minor": 2812000,
+   "currency": "CNY",
+   "evidence_sets": [
+    [
+     "t1ww80tjhn",
+     "ay99htshb2"
+    ],
+    [
+     "t1ww80tjhn",
+     "fs11zahbya"
+    ]
+   ]
+  }
+ ]
+}
