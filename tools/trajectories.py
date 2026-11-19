@@ -1,9 +1,12 @@
 """Trajectory logs (CASE §09: trajectories.jsonl with episode_id, step, action, observation, reward,
 terminated, truncated; «В наблюдениях обучающих траекторий нет закрытого эталона»).
 
-    python -m tools.trajectories --out trajectories.jsonl (--episodes DIR | --seeds 1 2 3)
+    python -m tools.trajectories [--out trajectories.jsonl] [--episodes DIR | --seeds 1 2 3]
                                  [--config JSON] [--policies random,solver,oracle]
                                  [--policy module:Class ...] [--oracle-out PATH] [--mode train|eval]
+
+Without a source it records the open train episodes (episodes/train), or ten generated seeds when
+that folder is missing; without --out it writes trajectories.jsonl (`make trajectories`).
 
 Each line has exactly the seven fields, in that order. Step 0 is the reset: action null, reward
 0.0, both flags false. `info` is never written, nor anything else.
@@ -212,16 +215,18 @@ def _without_records(observation: dict) -> dict:
 
 
 def _submitted_ids(action) -> set:
-    from auditgym.actions import parse_action, ActionError
+    """Ids a submit action cites, in any form the environment accepts (CONTRACTS §5.2)."""
+    from auditgym.actions import ActionError, parse_action, submit_payload
 
     try:
         name, arguments = parse_action(action)
+        payload = submit_payload(arguments, "") if name == "submit" else None
     except ActionError:
         return set()
-    if name != "submit" or not isinstance(arguments.get("findings"), dict):
+    if not isinstance(payload, dict) or not isinstance(payload.get("findings"), list):
         return set()
     ids = set()
-    for finding in arguments["findings"].get("findings") or []:
+    for finding in payload["findings"]:
         if isinstance(finding, dict):
             for field in ("affected_ids", "evidence_ids"):
                 if isinstance(finding.get(field), list):
@@ -351,10 +356,17 @@ def record(out, *, seeds=(), episodes_dir=None, config=None, policies=("random",
     return {"train": out, "oracle": oracle_out if "oracle" in writers else None, "episodes": episodes}
 
 
+DEFAULT_OUT = "trajectories.jsonl"
+DEFAULT_EPISODES = ROOT / "episodes" / "train"
+DEFAULT_SEEDS = tuple(range(1_000_001, 1_000_011))
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Without arguments (`make trajectories`): the open train episodes when episodes/train exists,
+    else ten generated seeds, written to trajectories.jsonl."""
     parser = argparse.ArgumentParser(prog="python -m tools.trajectories")
-    parser.add_argument("--out", required=True)
-    source = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument("--out", default=DEFAULT_OUT)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--episodes")
     source.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--config", default=None, help="JSON config for --seeds")
@@ -363,6 +375,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oracle-out", default=None)
     parser.add_argument("--mode", choices=("train", "eval"), default="train")
     arguments = parser.parse_args(argv)
+    if arguments.episodes is None and arguments.seeds is None:
+        if DEFAULT_EPISODES.is_dir() and _episode_dirs(DEFAULT_EPISODES):
+            arguments.episodes = str(DEFAULT_EPISODES)
+        else:
+            arguments.seeds = list(DEFAULT_SEEDS)
     policies = tuple(p for p in arguments.policies.split(",") if p)
     config = json.loads(arguments.config) if arguments.config else None
     try:

@@ -16,6 +16,32 @@ from tools.trajectories import (FIELDS, OracleSubmitPolicy, Recorder, SolverPoli
 CONFIG = {"errors": {"duplicate_invoice": 1, "period_cutoff": 1}}
 
 
+def _open_episodes(directory) -> dict:
+    from auditgym.storage import load_episode
+
+    episodes = {}
+    for path in trajectories._episode_dirs(directory):
+        episode = load_episode(path)
+        episodes[episode["public"]["manifest"]["episode_id"]] = episode
+    return episodes
+
+
+class CommittedTrajectoriesTest(unittest.TestCase):
+    """CASE §09: the submitted trajectories.jsonl belongs to the submitted train episodes and
+    holds no truth. After `make episodes`, run `make trajectories` again."""
+
+    def test_committed_file_matches_the_train_episodes(self):
+        path = trajectories.ROOT / trajectories.DEFAULT_OUT
+        if not path.is_file():
+            self.skipTest("trajectories.jsonl is not in the repository")
+        episodes = _open_episodes(trajectories.DEFAULT_EPISODES)
+        lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        unknown = {line["episode_id"] for line in lines} - set(episodes)
+        self.assertFalse(unknown, "trajectories.jsonl is stale: run `make trajectories` after `make episodes`")
+        self.assertEqual({line["episode_id"] for line in lines}, set(episodes))
+        self.assertEqual(scan_file(path, episodes, (str(trajectories.ROOT),)), [])
+
+
 class TrajectoriesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -95,6 +121,14 @@ class TrajectoriesTest(unittest.TestCase):
         lines = path.read_text(encoding="utf-8").splitlines()
         self.assertGreater(reward, 0.9)
         self.assertEqual(json.loads(lines[-1])["terminated"], True)
+
+    def test_cli_defaults_record_the_open_train_episodes(self):
+        """AUDIT C11: `make trajectories` runs without arguments."""
+        out = self.tmp / "default.jsonl"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(trajectories.main(["--out", str(out)]), 0)
+        ids = {json.loads(line)["episode_id"] for line in out.read_text(encoding="utf-8").splitlines()}
+        self.assertEqual(ids, set(_open_episodes(trajectories.DEFAULT_EPISODES)))
 
     def test_cli(self):
         out = self.tmp / "cli" / "trajectories.jsonl"
