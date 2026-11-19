@@ -90,6 +90,9 @@ def open_results_file(path) -> None:
         os.close(descriptor)
 
 
+SECRET_ENV = "AUDITGYM_SECRET"
+
+
 class EvaluatorError(Exception):
     """A request the evaluator refuses outright (bad seed or config, nothing loaded)."""
 
@@ -157,7 +160,10 @@ class Evaluator:
         from .generate import generate
 
         try:
-            return generate(seed, config)
+            # The evaluator-side secret (AUDITGYM_SECRET) is mixed into every random stream, so
+            # knowing the generator code and the seed is not enough to rebuild the hidden truth.
+            # Empty by default: open train/dev episodes stay reproducible from seed and config.
+            return generate(seed, config, secret=os.environ.get(SECRET_ENV, ""))
         except ConfigError:
             raise EvaluatorError("bad_config") from None
 
