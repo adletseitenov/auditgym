@@ -6,9 +6,11 @@ or None when the company has no record fit for the edit.
 """
 from __future__ import annotations
 
-from auditgym.money import local_date, parse_time
+from decimal import Decimal
 
-from .helpers import Company, in_offset, shift
+from auditgym.money import convert, local_date, parse_time
+
+from .helpers import Company, in_offset, moved_offset, shift, shift_date
 
 # (seed, currencies, timezone): small companies, offsets from both ends of the clock.
 COMPANIES = [
@@ -53,8 +55,29 @@ def duplicate(c: Company, foreign: bool):
         return None
     items = list(reversed(invoice["line_items"]))  # same multiset, other order
     copy_ = c.add_invoice(invoice, issued_at=_spare_day(c, invoice), line_items=items)
+    return [expect_duplicate(c, invoice, copy_)]
+
+
+def expect_duplicate(c: Company, invoice: dict, copy_: dict):
+    """CONTRACTS 3.1: four sets [docA, docB, a row of A's group, a row of B's group]."""
     ids = [invoice["doc_id"], copy_["doc_id"]]
-    return [expect("duplicate_invoice", ids, invoice["total_minor"], invoice["currency"], [ids])]
+    sets = [ids + [a["row_id"], b["row_id"]] for a in c.invoice_rows(invoice) for b in c.invoice_rows(copy_)]
+    return expect("duplicate_invoice", ids, invoice["total_minor"], invoice["currency"], sets)
+
+
+def duplicate_paid_copy(c: Company, foreign: bool):
+    """A double payment: the original is paid once and the copy is paid again. Only the duplicate."""
+    pair = _first([(inv, pay) for inv, pay in c.paid_once(foreign) if _spare_day(c, inv)], c)
+    if pair is None:
+        return None
+    invoice, payment = pair
+    copy_ = c.add_invoice(invoice, issued_at=_spare_day(c, invoice))
+    moment = shift(payment["timestamp"], hours=3) if c.inside(shift(payment["timestamp"], hours=3)) \
+        else copy_["issued_at"]
+    again = c.add_payment(timestamp=moment, currency=payment["currency"], amount_minor=copy_["total_minor"],
+                          invoice_refs=[copy_["invoice_id"]])
+    c.book_payment(again, closes={copy_["invoice_id"]: c.booked(copy_)})
+    return [expect_duplicate(c, invoice, copy_)]
 
 
 def allocation_gap(c: Company, foreign: bool):
@@ -102,15 +125,26 @@ def fx_error_payment(c: Company):
     return [expect("fx_error", [payment["doc_id"]], delta, c.base, [[payment["doc_id"], cash["row_id"]]])]
 
 
-def cutoff_invoice(c: Company, foreign: bool, where: str = "end"):
-    invoice = _first([inv for inv in c.unpaid(foreign) if c.invoice_rows(inv)], c)
+def _shift_service(invoice: dict, days: int) -> None:
+    for item in invoice["line_items"]:
+        item["service_start"] = shift_date(item["service_start"], days)
+        item["service_end"] = shift_date(item["service_end"], days)
+
+
+def cutoff_invoice(c: Company, foreign: bool, where: str = "end", paid: bool = False):
+    """Dated outside the period, posted inside it (rows keep their in-period time). DECISIONS A5: the
+    service period moves with the date; DECISIONS A4: the posting uses the rate of the new date."""
+    candidates = [inv for inv, _ in c.paid_once(foreign)] if paid else c.unpaid(foreign)
+    invoice = _first([inv for inv in candidates if c.invoice_rows(inv)], c)
     if invoice is None:
         return None
     if where == "end":  # exactly the end of the half-open period, written in UTC
         invoice["issued_at"] = in_offset(c.policy["period_end"], "+00:00")
+        _shift_service(invoice, 31)
     else:  # one second before the start, written in another offset
         invoice["issued_at"] = in_offset(shift(c.policy["period_start"], seconds=-1), "+09:00")
-    rows = c.invoice_rows(invoice)
+        _shift_service(invoice, -31)
+    rows = c.rebook_invoice(invoice)
     return [expect("period_cutoff", [invoice["doc_id"]], invoice["total_minor"], invoice["currency"],
                    [[invoice["doc_id"], row["row_id"]] for row in rows])]
 
@@ -121,7 +155,7 @@ def cutoff_payment(c: Company):
         return None
     invoice, payment = pair
     payment["timestamp"] = shift(c.policy["period_end"], hours=2)  # posted rows keep their in-period time
-    rows = c.payment_rows(payment)
+    rows = c.rebook_payment(payment, closes={invoice["invoice_id"]: c.booked(invoice)})  # rate of its own date
     return [expect("period_cutoff", [payment["doc_id"]], payment["amount_minor"], payment["currency"],
                    [[payment["doc_id"], row["row_id"]] for row in rows])]
 
@@ -154,9 +188,8 @@ def interaction_i2(c: Company, foreign: bool):
     if invoice is None:
         return None
     copy_ = c.add_invoice(invoice, post=False, issued_at=shift(c.policy["period_end"], days=2, hours=3))
-    rows = c.book_invoice(copy_, amount=c.booked(invoice), at=invoice["issued_at"])
-    ids = [invoice["doc_id"], copy_["doc_id"]]
-    return [expect("duplicate_invoice", ids, invoice["total_minor"], invoice["currency"], [ids]),
+    rows = c.book_invoice(copy_, at=invoice["issued_at"])  # DECISIONS B: each copy at the rate of its own date
+    return [expect_duplicate(c, invoice, copy_),
             expect("period_cutoff", [copy_["doc_id"]], copy_["total_minor"], copy_["currency"],
                    [[copy_["doc_id"], row["row_id"]] for row in rows])]
 
@@ -173,6 +206,116 @@ def all_four(c: Company):
     return expected
 
 
+def cutoff_out_of_period_rate(c: Company):
+    """A cutoff invoice still booked at its old in-period rate: period_cutoff and fx_error (DECISIONS A4)."""
+    for invoice in c.unpaid(foreign=True):
+        if not c.invoice_rows(invoice) or invoice["doc_id"] in getattr(c, "taken", set()):
+            continue
+        old = c.booked(invoice)
+        moved = shift(c.policy["period_end"], days=1, hours=5)
+        correct = c.to_base(invoice["total_minor"], invoice["currency"], moved)
+        if abs(correct - old) <= 1:
+            continue
+        c.taken = getattr(c, "taken", set()) | {invoice["doc_id"]}
+        invoice["issued_at"] = moved
+        rows = c.invoice_rows(invoice)
+        return [expect("period_cutoff", [invoice["doc_id"]], invoice["total_minor"], invoice["currency"],
+                       [[invoice["doc_id"], row["row_id"]] for row in rows]),
+                expect("fx_error", [invoice["doc_id"]], abs(correct - old), c.base,
+                       [[invoice["doc_id"], row["row_id"]] for row in rows])]
+    return None
+
+
+def cutoff_by_own_offset(c: Company, foreign: bool, booked_at_written_date: bool = False):
+    """The wall clock of the document says the last day of the period, but in the company offset the
+    instant is already the next period: a cutoff, and the rate date is the company-local date."""
+    invoice = _first([inv for inv in c.unpaid(foreign) if c.invoice_rows(inv)], c)
+    if invoice is None:
+        return None
+    instant = shift(c.policy["period_end"], hours=1)
+    invoice["issued_at"] = in_offset(instant, moved_offset(c.offset, -6))
+    assert invoice["issued_at"][:10] < c.policy["period_end"][:10] and not c.inside(invoice["issued_at"])
+    _shift_service(invoice, 31)
+    rows = c.rebook_invoice(invoice)
+    expected = [expect("period_cutoff", [invoice["doc_id"]], invoice["total_minor"], invoice["currency"],
+                       [[invoice["doc_id"], row["row_id"]] for row in rows])]
+    if booked_at_written_date:
+        if not foreign:
+            return None
+        correct = c.booked(invoice)
+        wrong = c.to_base(invoice["total_minor"], invoice["currency"], instant, date=invoice["issued_at"][:10])
+        if abs(wrong - correct) <= 1:
+            return None
+        for row in rows:
+            row["debit_minor" if row["debit_minor"] else "credit_minor"] = wrong
+        expected.append(expect("fx_error", [invoice["doc_id"]], abs(wrong - correct), c.base,
+                               [[invoice["doc_id"], row["row_id"]] for row in rows]))
+    return expected
+
+
+def fx_error_written_date(c: Company):
+    """Inside the period, but the document's own offset puts its wall clock on the next day; booking at
+    the rate of the written date instead of the company-local date is an fx_error."""
+    for invoice in c.unpaid(foreign=True):
+        if not c.invoice_rows(invoice) or invoice["doc_id"] in getattr(c, "taken", set()):
+            continue
+        local = local_date(invoice["issued_at"], c.offset)
+        instant = shift(local + "T23:30:00" + c.offset, days=0)
+        if not c.inside(instant):
+            continue
+        written = in_offset(instant, moved_offset(c.offset, 6))
+        right = c.to_base(invoice["total_minor"], invoice["currency"], instant)
+        wrong = c.to_base(invoice["total_minor"], invoice["currency"], instant, date=written[:10])
+        if abs(right - wrong) <= 1:
+            continue
+        c.taken = getattr(c, "taken", set()) | {invoice["doc_id"]}
+        invoice["issued_at"] = written
+        rows = c.invoice_rows(invoice)
+        for row in rows:
+            row["debit_minor" if row["debit_minor"] else "credit_minor"] = wrong
+        return [expect("fx_error", [invoice["doc_id"]], abs(right - wrong), c.base,
+                       [[invoice["doc_id"], row["row_id"]] for row in rows])]
+    return None
+
+
+def _quiet_date(c: Company, currency: str):
+    """A local date inside the period with no document in `currency`, at noon."""
+    busy = {local_date(d["issued_at" if "issued_at" in d else "timestamp"], c.offset)
+            for d in c.public["invoices"] + c.public["payments"] if d["currency"] == currency}
+    for days in range(2, 26):
+        moment = shift(c.policy["period_start"], days=days, hours=12)
+        if c.inside(moment) and local_date(moment, c.offset) not in busy:
+            return moment
+    return None
+
+
+def long_rate(c: Company, wrong: bool):
+    """A rate with many significant digits; booking at it is clean, booking at it rounded to two decimals
+    is an fx_error."""
+    currency = next((inv["currency"] for inv in c.public["invoices"] if inv["currency"] != c.base), None)
+    moment = currency and _quiet_date(c, currency)
+    if not moment:
+        return None
+    date = local_date(moment, c.offset)
+    c.set_rate(currency, date, c.rate(currency, date) + Decimal("0.001234567891"))
+    like = next(inv for inv in c.public["invoices"] if inv["currency"] == currency)
+    items = [{"description": "Long rate", "quantity": 3, "unit_price_minor": 329_218_107,
+              "amount_minor": 987_654_321, "service_start": date, "service_end": date}]
+    invoice = c.add_invoice(like, post=False, issued_at=moment, due_at=shift(moment, days=30), line_items=items)
+    exponents = c.policy["currency_exponents"]
+    right = c.to_base(invoice["total_minor"], currency, moment)
+    short = convert(invoice["total_minor"], c.rate(currency, date).quantize(Decimal("0.01")),
+                    exponents[currency], exponents[c.base])
+    rows = c.book_invoice(invoice, amount=short if wrong else right)
+    payment = c.add_payment(timestamp=moment, currency=currency, amount_minor=invoice["total_minor"],
+                            invoice_refs=[invoice["invoice_id"]])
+    c.book_payment(payment, closes={invoice["invoice_id"]: c.booked(invoice)})
+    if not wrong:
+        return []
+    return [expect("fx_error", [invoice["doc_id"]], abs(right - short), c.base,
+                   [[invoice["doc_id"], row["row_id"]] for row in rows])]
+
+
 ERROR_CASES = {
     "duplicate_base": lambda c: duplicate(c, False),
     "duplicate_foreign": lambda c: duplicate(c, True),
@@ -184,6 +327,16 @@ ERROR_CASES = {
     "cutoff_invoice_end_base": lambda c: cutoff_invoice(c, False, "end"),
     "cutoff_invoice_start_foreign": lambda c: cutoff_invoice(c, True, "start"),
     "cutoff_payment": cutoff_payment,
+    "cutoff_invoice_paid_base": lambda c: cutoff_invoice(c, False, "start", paid=True),
+    "cutoff_invoice_paid_foreign": lambda c: cutoff_invoice(c, True, "end", paid=True),
+    "cutoff_out_of_period_rate": cutoff_out_of_period_rate,
+    "cutoff_by_own_offset_base": lambda c: cutoff_by_own_offset(c, False),
+    "cutoff_by_own_offset_foreign": lambda c: cutoff_by_own_offset(c, True),
+    "cutoff_by_own_offset_written_rate": lambda c: cutoff_by_own_offset(c, True, booked_at_written_date=True),
+    "duplicate_paid_copy_base": lambda c: duplicate_paid_copy(c, False),
+    "duplicate_paid_copy_foreign": lambda c: duplicate_paid_copy(c, True),
+    "fx_error_written_date": fx_error_written_date,
+    "fx_error_long_rate": lambda c: long_rate(c, wrong=True),
     "interaction_I1": interaction_i1,
     "interaction_I2_base": lambda c: interaction_i2(c, False),
     "interaction_I2_foreign": lambda c: interaction_i2(c, True),
@@ -243,12 +396,13 @@ def split(c: Company, foreign: bool):
     return []
 
 
-def refund(c: Company, foreign: bool):
+def refund(c: Company, foreign: bool, full: bool = False):
+    """A refund on an ordinary fully paid invoice (part of it, or all of it)."""
     pair = _first([(inv, pay) for inv, pay in c.paid_once(foreign) if c.inside(shift(pay["timestamp"], hours=2))], c)
     if pair is None:
         return None
     invoice, payment = pair
-    back = -(invoice["total_minor"] // 4)
+    back = -invoice["total_minor"] if full else -(invoice["total_minor"] // 4)
     refund_ = c.add_payment(timestamp=shift(payment["timestamp"], hours=2), currency=payment["currency"],
                             amount_minor=back, invoice_refs=[invoice["invoice_id"]])
     cash = c.to_base(back, refund_["currency"], refund_["timestamp"])
@@ -340,6 +494,79 @@ def weekend(c: Company):
     return None
 
 
+def posting_lag(c: Company):
+    """Every document posting is made later than the document date (minutes to days), inside the period,
+    some written in another offset. Nothing is an error: predicates read document dates only."""
+    groups: dict = {}
+    for row in c.ledger:
+        key = row["payment_id"] or row["invoice_id"]
+        if key is not None:
+            groups.setdefault(key, []).append(row)
+    moved = 0
+    for index, key in enumerate(sorted(groups)):
+        delta = ({"minutes": 7}, {"hours": 5}, {"days": 2, "hours": 3}, {"seconds": 1})[index % 4]
+        if c.lag_postings(groups[key], **delta):
+            moved += 1
+            if index % 3 == 0:
+                for row in groups[key]:
+                    row["timestamp"] = in_offset(row["timestamp"], "-09:30")
+    return [] if moved >= 5 else None
+
+
+def written_date_outside(c: Company, foreign: bool):
+    """Inside the period in the company offset, though the wall clock says the next period; booked at
+    the rate of the company-local date."""
+    instant = shift(c.policy["period_end"], minutes=-40)
+    invoice = _fresh_invoice(c, foreign, in_offset(instant, moved_offset(c.offset, 6)), "inside", post=False)
+    if invoice is None:
+        return None
+    assert invoice["issued_at"][:10] >= c.policy["period_end"][:10] and c.inside(invoice["issued_at"])
+    c.book_invoice(invoice, at=shift(instant, minutes=30))
+    return []
+
+
+def payment_near_boundary(c: Company, foreign: bool):
+    """An in-period invoice paid in the last minutes of the period (posted, in another offset), and another
+    paid just after it (the payment belongs to the next period and is not posted)."""
+    end = c.policy["period_end"]
+    early = [(inv, pay) for inv, pay in c.paid_once(foreign) if parse_time(inv["issued_at"]) < parse_time(shift(end, hours=-2))]
+    pair = _first(early, c)
+    later = _first(early, c)
+    if pair is None or later is None:
+        return None
+    invoice, payment = pair
+    payment["timestamp"] = in_offset(shift(end, minutes=-3), moved_offset(c.offset, -7))
+    c.rebook_payment(payment, closes={invoice["invoice_id"]: c.booked(invoice)})
+    _, outside = later
+    outside["timestamp"] = in_offset(shift(end, minutes=4), moved_offset(c.offset, 3))
+    c.remove_rows(c.payment_rows(outside))
+    return []
+
+
+def unposted_neighbours(c: Company, foreign: bool):
+    """Documents of the previous and the next period without postings: an invoice, a payment of it,
+    an advance, a refund and a recurring copy for the next service period."""
+    start, end = c.policy["period_start"], c.policy["period_end"]
+    before = _fresh_invoice(c, foreign, shift(start, days=-3), "before", post=False)
+    if before is None:
+        return None
+    c.add_payment(timestamp=shift(start, days=-1), currency=before["currency"], amount_minor=before["total_minor"],
+                  invoice_refs=[before["invoice_id"]])
+    c.add_payment(timestamp=shift(end, days=2), currency=before["currency"], amount_minor=-1000,
+                  invoice_refs=[before["invoice_id"]])
+    c.add_payment(timestamp=shift(end, hours=1), currency=before["currency"], amount_minor=123_400, invoice_refs=None)
+    invoice = _first([inv for inv in c.public["invoices"] if c.invoice_rows(inv)
+                      and (inv["currency"] != c.base) == foreign], c)
+    if invoice is None:
+        return None
+    items = [dict(item, service_start=shift_date(item["service_start"], 31), service_end=shift_date(item["service_end"], 31))
+             for item in invoice["line_items"]]
+    c.add_invoice(invoice, post=False, issued_at=shift(end, days=1), line_items=items)
+    # An exact copy dated in the next period and not posted is not a duplicate either (both must be posted).
+    c.add_invoice(invoice, post=False, issued_at=shift(end, days=3))
+    return []
+
+
 DISTRACTOR_CASES = {
     "overpayment_base": lambda c: overpayment(c, False),
     "overpayment_foreign": lambda c: overpayment(c, True),
@@ -351,6 +578,16 @@ DISTRACTOR_CASES = {
     "split_foreign": lambda c: split(c, True),
     "refund_base": lambda c: refund(c, False),
     "refund_foreign": lambda c: refund(c, True),
+    "refund_full_base": lambda c: refund(c, False, full=True),
+    "refund_full_foreign": lambda c: refund(c, True, full=True),
+    "posting_lag": posting_lag,
+    "written_date_outside_base": lambda c: written_date_outside(c, False),
+    "written_date_outside_foreign": lambda c: written_date_outside(c, True),
+    "payment_near_boundary_base": lambda c: payment_near_boundary(c, False),
+    "payment_near_boundary_foreign": lambda c: payment_near_boundary(c, True),
+    "unposted_neighbours_base": lambda c: unposted_neighbours(c, False),
+    "unposted_neighbours_foreign": lambda c: unposted_neighbours(c, True),
+    "long_rate_digits": lambda c: long_rate(c, wrong=False),
     "recurring_base": lambda c: recurring(c, False),
     "recurring_foreign": lambda c: recurring(c, True),
     "boundary_offsets_base": lambda c: boundary_offsets(c, False),

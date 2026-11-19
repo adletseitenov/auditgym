@@ -11,7 +11,7 @@ from auditgym.solver import solve
 from auditgym.storage import load_episode
 
 from .cases import COMPANIES, DISTRACTOR_CASES, ERROR_CASES, build
-from .helpers import Company, canonical, rename_and_shuffle, shift
+from .helpers import ID_STYLES, Company, canonical, rename_and_shuffle, shift
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FINDING_KEYS = ["type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids", "explanation"]
@@ -100,9 +100,29 @@ class MetamorphicTest(unittest.TestCase):
         cases = {**ERROR_CASES, **DISTRACTOR_CASES}
         for index, (name, company, (public, _)) in enumerate(all_cases(cases)):
             findings = solve(public)
-            for round_ in range(2):
-                renamed, mapping = rename_and_shuffle(public, index * 10 + round_)
-                self.assertEqual(canonical(solve(renamed)), canonical(findings, mapping), f"{name} {company}")
+            for round_, style in enumerate(ID_STYLES):
+                renamed, mapping = rename_and_shuffle(public, index * 10 + round_, style)
+                self.assertEqual(canonical(solve(renamed)), canonical(findings, mapping),
+                                 f"{name} {company} ids={style}")
+
+    def test_id_styles_are_really_used(self):
+        _, _, (public, _) = next(all_cases({"all_four": ERROR_CASES["all_four"]}))
+        for style, probe in (("numeric", str.isdigit), ("hex64", lambda i: len(i) == 64),
+                             ("cyrillic", lambda i: any("а" <= ch <= "я" or ch in "әғқңөұүһі" for ch in i.lower())),
+                             ("separators", lambda i: ":" in i or "|" in i)):
+            renamed, _ = rename_and_shuffle(public, 1, style)
+            self.assertTrue(all(probe(r["row_id"]) for r in renamed["ledger"]), style)
+
+    def test_shuffled_line_items_and_refs_do_not_matter(self):
+        for name, company, (public, _) in all_cases({"split_base": DISTRACTOR_CASES["split_base"],
+                                                      "duplicate_base": ERROR_CASES["duplicate_base"]}):
+            findings = canonical(solve(public))
+            for invoice in public["invoices"]:
+                invoice["line_items"].reverse()
+            for payment in public["payments"]:
+                if payment["invoice_refs"]:
+                    payment["invoice_refs"].reverse()
+            self.assertEqual(canonical(solve(public)), findings, f"{name} {company}")
 
     def test_output_order_is_deterministic(self):
         for name, company, (public, _) in all_cases({"all_four": ERROR_CASES["all_four"]}):
@@ -175,11 +195,49 @@ class ReadingTest(unittest.TestCase):
         c.add_invoice(invoice, post=False)
         self.assertEqual(solve(c.done()), [])
 
-    def test_foreign_document_outside_the_period_is_only_a_cutoff(self):
+    def test_document_outside_the_period_is_checked_at_its_own_rate(self):
+        """DECISIONS A4: no suppression. At the old rate: cutoff and fx_error; at its own rate: only cutoff."""
         c, invoice = self._company_with_invoice(foreign=True)
-        invoice["issued_at"] = shift(c.policy["period_end"], days=1)  # its rate now differs from the booking
+        old = c.booked(invoice)
+        invoice["issued_at"] = shift(c.policy["period_end"], days=1)
+        correct = c.to_base(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
+        self.assertGreater(abs(correct - old), 1)
         findings = solve(c.done())
-        self.assertEqual([f["type"] for f in findings], ["period_cutoff"])
+        self.assertEqual([(f["type"], f["claimed_amount_minor"]) for f in findings],
+                         [("fx_error", abs(correct - old)), ("period_cutoff", invoice["total_minor"])])
+        c.rebook_invoice(invoice)
+        self.assertEqual([f["type"] for f in solve(c.done())], ["period_cutoff"])
+
+    def test_duplicate_evidence_holds_every_truth_set(self):
+        """CONTRACTS 3.1 v2: the finding holds both docs and both rows of each invoice's own group."""
+        c, invoice = self._company_with_invoice()
+        copy_ = c.add_invoice(invoice)
+        (finding,) = solve(c.done())
+        rows_a, rows_b = c.invoice_rows(invoice), c.invoice_rows(copy_)
+        self.assertEqual(set(finding["evidence_ids"]), {invoice["doc_id"], copy_["doc_id"]}
+                         | {r["row_id"] for r in rows_a + rows_b})
+        for a in rows_a:
+            for b in rows_b:
+                self.assertLessEqual({invoice["doc_id"], copy_["doc_id"], a["row_id"], b["row_id"]},
+                                     set(finding["evidence_ids"]))
+
+    def test_fx_evidence_is_doc_and_both_conversion_rows(self):
+        c, invoice = self._company_with_invoice(foreign=True)
+        rows = c.invoice_rows(invoice)
+        for row in rows:  # Dr and Cr distorted equally (DECISIONS B)
+            row["debit_minor" if row["debit_minor"] else "credit_minor"] += 500
+        (finding,) = solve(c.done())
+        self.assertEqual(set(finding["evidence_ids"]), {invoice["doc_id"]} | {r["row_id"] for r in rows})
+
+    def test_posting_time_never_matters(self):
+        """A clean posting whose time differs from the document date, even by days, is not an error."""
+        c, invoice = self._company_with_invoice(foreign=True)
+        rows = c.invoice_rows(invoice)
+        for days in (0, 1, 3):
+            moved = shift(c.policy["period_start"], days=days, hours=1)
+            for row in rows:
+                row["timestamp"] = moved
+            self.assertEqual(solve(c.done()), [], moved)
 
     def test_base_currency_invoice_at_a_wrong_amount_is_not_fx_error(self):
         c, invoice = self._company_with_invoice(foreign=False)
@@ -211,6 +269,86 @@ class ReadingTest(unittest.TestCase):
         findings = solve(c.done())
         self.assertEqual([(f["type"], f["affected_ids"], f["claimed_amount_minor"]) for f in findings],
                          [("fx_error", [payment["doc_id"]], 5000)])
+
+
+class RobustnessTest(unittest.TestCase):
+    """Malformed open records: the affected predicate is skipped for that record; nothing raises."""
+
+    def _base(self):
+        for seed, currencies, timezone in COMPANIES:
+            built = build("all_four", ERROR_CASES["all_four"], seed, currencies, timezone)
+            if built is not None:
+                public, _ = built
+                fx = [f for f in solve(public) if f["type"] == "fx_error"]
+                if fx:
+                    return public, fx[0]
+        self.fail("no all_four company")
+
+    def _types(self, public):
+        return sorted(f["type"] for f in solve(public))
+
+    def _doc(self, public, doc_id):
+        return next(d for d in public["invoices"] + public["payments"] if d["doc_id"] == doc_id)
+
+    def test_missing_rate_skips_only_fx_for_that_document(self):
+        public, finding = self._base()
+        doc = self._doc(public, finding["affected_ids"][0])
+        from auditgym.money import local_date
+        date = local_date(doc["issued_at"], public["policy"]["timezone"])
+        public["fx"] = [r for r in public["fx"] if not (r["date"] == date and r["source_currency"] == doc["currency"])]
+        self.assertEqual(self._types(public), ["allocation_gap", "duplicate_invoice", "period_cutoff"])
+
+    def test_unreadable_rate_skips_only_fx_for_that_document(self):
+        public, finding = self._base()
+        doc = self._doc(public, finding["affected_ids"][0])
+        from auditgym.money import local_date
+        date = local_date(doc["issued_at"], public["policy"]["timezone"])
+        for row in public["fx"]:
+            if row["date"] == date and row["source_currency"] == doc["currency"]:
+                row["rate"] = "n/a"
+        self.assertEqual(self._types(public), ["allocation_gap", "duplicate_invoice", "period_cutoff"])
+
+    def test_broken_document_skips_only_that_document(self):
+        public, finding = self._base()
+        doc = self._doc(public, finding["affected_ids"][0])
+        doc["issued_at"] = "not a time"
+        self.assertEqual(self._types(public), ["allocation_gap", "duplicate_invoice", "period_cutoff"])
+        doc["issued_at"] = None
+        self.assertEqual(self._types(public), ["allocation_gap", "duplicate_invoice", "period_cutoff"])
+
+    def test_assorted_damage_never_raises(self):
+        public, _ = self._base()
+        damages = [
+            lambda p: p["invoices"][0].pop("line_items"),
+            lambda p: p["invoices"][1].update(total_minor="12"),
+            lambda p: p["invoices"][2].update(currency=None),
+            lambda p: p["payments"][0].update(timestamp=""),
+            lambda p: p["payments"][1].update(amount_minor=1.5),
+            lambda p: p["payments"][2].update(invoice_refs=["unknown-ref", None]),
+            lambda p: p["ledger"][0].update(debit_minor="100"),
+            lambda p: p["ledger"][1].pop("payment_id"),
+            lambda p: p["ledger"].append("not a row"),
+            lambda p: p["fx"].append({"date": "2026-10-05"}),
+            lambda p: p["policy"].pop("amount_tolerance_minor"),
+            lambda p: p["policy"]["currency_exponents"].clear(),
+            lambda p: p.update(invoices=[], payments=[]),
+            lambda p: p.update(ledger=[], fx=[]),
+            lambda p: [inv.update(total_minor="12") for inv in p["invoices"]],  # every pair shares a bad total
+            lambda p: [inv.update(doc_id=None) for inv in p["invoices"]],
+        ]
+        import copy
+        for index, damage in enumerate(damages):
+            damaged = copy.deepcopy(public)
+            damage(damaged)
+            findings = solve(damaged)  # must not raise
+            for finding in findings:
+                self.assertTrue(all(isinstance(i, str) for i in finding["evidence_ids"]), index)
+                self.assertLessEqual(len(finding["evidence_ids"]), 10, index)
+
+    def test_empty_company(self):
+        public, _ = self._base()
+        empty = dict(public, ledger=[], invoices=[], payments=[], fx=[])
+        self.assertEqual(solve(empty), [])
 
 
 class PerformanceTest(unittest.TestCase):

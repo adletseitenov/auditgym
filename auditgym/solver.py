@@ -1,18 +1,28 @@
-"""Independent solver: findings from the open records only (docs/SPEC.md, "Определения ошибок").
+"""Independent solver: findings from the open records only (docs/SPEC.md "Определения ошибок",
+overridden by docs/DECISIONS.md where they differ).
 
 solve(public) evaluates the four published predicates over the final open records and returns
 findings in the shape of docs/CONTRACTS.md section 6. It never reads `private` and does not
 import the generator or the error operators.
 
-Readings chosen where the definitions leave a case open (listed for the definition owner):
+Every predicate reads document dates and ids only; posting timestamps are never compared with
+document dates (a legitimate posting may lag its document). Dates are compared as instants and
+converted to the company offset for the rate date.
+
+Readings chosen where the definitions leave a case open:
 - duplicate_invoice fires for every pair of posted invoices with the same signature, so three
-  identical posted invoices give three findings; an unposted copy gives none.
+  identical posted invoices give three findings; an unposted copy gives none. Evidence: both
+  doc_ids plus the rows of each invoice's own posting group (normally Dr and Cr, so six ids).
 - allocation_gap needs exactly one unallocated row with a positive credit for the payment;
   a payment with several such rows is left unreported.
-- fx_error is evaluated only for foreign-currency documents dated inside the period (an
-  out-of-period posting is already a period_cutoff and its "correct" value is undefined) and
-  only when the policy has a rate for the document date.
+- fx_error is evaluated for every posted foreign-currency document, in or out of the period, at
+  the rate of the document's own company-local date (DECISIONS A4). An error only when
+  |booked - correct| is strictly greater than the policy tolerance. A base-currency document is
+  never an fx_error.
 - period_cutoff reports the absolute document amount, so a refund never yields a negative claim.
+
+Robustness: a record that lacks a piece a predicate needs (a rate for its date, a parseable
+timestamp, a numeric amount) is skipped by that predicate only; solve() never raises on it.
 """
 from __future__ import annotations
 
@@ -23,21 +33,45 @@ from decimal import Decimal
 from .money import convert, fx_key, in_period, local_date
 
 MAX_EVIDENCE = 10
+ROWS_PER_DUPLICATE_INVOICE = 4  # 2 docs + 2 x 4 rows = 10 at most
+
+# What a malformed record can raise inside one predicate. Caught per record, never globally.
+_MALFORMED = (KeyError, TypeError, ValueError, ArithmeticError, AttributeError, IndexError)
+
+DEFAULT_ACCOUNTS = {name: name for name in ("cash", "receivable", "revenue", "unallocated", "fx_difference",
+                                            "expense")}
 
 
-def _canonical_items(line_items: list) -> tuple:
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _canonical_items(line_items) -> tuple:
     """Line items as a multiset: every field of every item, order of items ignored."""
     return tuple(sorted(json.dumps(item, sort_keys=True, ensure_ascii=False) for item in line_items or []))
 
 
 def _signature(invoice: dict) -> tuple:
-    return (invoice.get("entity_id"), invoice.get("currency"), invoice.get("total_minor"),
+    return (invoice["entity_id"], invoice["currency"], invoice["total_minor"],
             _canonical_items(invoice.get("line_items")))
 
 
 def _row_order(row: dict) -> tuple:
     """Content first, id last: the choice of rows does not depend on how ids are spelled."""
     return (row["account"], -row["debit_minor"], -row["credit_minor"], row["timestamp"], row["row_id"])
+
+
+def _valid_row(row) -> bool:
+    if not isinstance(row, dict):
+        return False
+    try:
+        return (isinstance(row["row_id"], str) and isinstance(row["account"], str)
+                and isinstance(row["timestamp"], str)
+                and _is_int(row["debit_minor"]) and _is_int(row["credit_minor"])
+                and (row["invoice_id"] is None or isinstance(row["invoice_id"], str))
+                and (row["payment_id"] is None or isinstance(row["payment_id"], str)))
+    except KeyError:
+        return False
 
 
 class _Books:
@@ -47,22 +81,28 @@ class _Books:
         self.offset = self.policy["timezone"]
         self.start = self.policy["period_start"]
         self.end = self.policy["period_end"]
-        self.accounts = self.policy["accounts"]
-        self.exponents = self.policy["currency_exponents"]
-        self.tolerance = self.policy["amount_tolerance_minor"]
-        self.invoices = list(public["invoices"])
-        self.payments = list(public["payments"])
-        self.invoice_by_id = {inv["invoice_id"]: inv for inv in self.invoices}
-        self.payment_by_id = {pay["payment_id"]: pay for pay in self.payments}
-        self.rates = {fx_key(r["date"], r["source_currency"], r["target_currency"]): Decimal(r["rate"])
-                      for r in public["fx"]}
+        self.accounts = {**DEFAULT_ACCOUNTS, **(self.policy.get("accounts") or {})}
+        self.exponents = self.policy.get("currency_exponents") or {}
+        self.tolerance = self.policy.get("amount_tolerance_minor") or {}
+        self.invoices = [inv for inv in public.get("invoices") or [] if isinstance(inv, dict)]
+        self.payments = [pay for pay in public.get("payments") or [] if isinstance(pay, dict)]
+        self.invoice_by_id = {inv.get("invoice_id"): inv for inv in self.invoices}
+        self.payment_by_id = {pay.get("payment_id"): pay for pay in self.payments}
+        self.rates: dict[str, Decimal] = {}
+        for rate in public.get("fx") or []:
+            try:
+                self.rates[fx_key(rate["date"], rate["source_currency"], rate["target_currency"])] = Decimal(rate["rate"])
+            except _MALFORMED:
+                continue  # an unreadable rate is the same as a missing one
 
         # Event groups (CONTRACTS 2.3) and receivable balances per invoice, in one pass.
         self.invoice_group: dict[str, list[dict]] = defaultdict(list)
         self.payment_group: dict[str, list[dict]] = defaultdict(list)
         self.receivable: dict[str, int] = defaultdict(int)
         receivable = self.accounts["receivable"]
-        for row in public["ledger"]:
+        for row in public.get("ledger") or []:
+            if not _valid_row(row):
+                continue
             if row["payment_id"] is not None:
                 self.payment_group[row["payment_id"]].append(row)
             elif row["invoice_id"] is not None:
@@ -70,34 +110,61 @@ class _Books:
             if row["account"] == receivable and row["invoice_id"] is not None:
                 self.receivable[row["invoice_id"]] += row["debit_minor"] - row["credit_minor"]
 
+    def tol(self, kind: str) -> int:
+        value = self.tolerance.get(kind, 0)
+        return value if _is_int(value) else 0
+
     def inside(self, timestamp: str) -> bool:
         return in_period(timestamp, self.start, self.end)
 
     def policy_amount(self, amount_minor: int, currency: str, timestamp: str) -> int | None:
-        """Document amount at the policy rate, or None when the policy gives no rate."""
+        """Document amount at the rate of its own company-local date, or None when there is no rate."""
+        if not _is_int(amount_minor):
+            return None
         rate = self.rates.get(fx_key(local_date(timestamp, self.offset), currency, self.base))
         if rate is None or currency not in self.exponents or self.base not in self.exponents:
             return None
         return convert(amount_minor, rate, self.exponents[currency], self.exponents[self.base])
 
 
+def _each(records, predicate) -> list[dict]:
+    """Apply a per-record predicate; a malformed record is skipped by that predicate only."""
+    findings = []
+    for record in records:
+        try:
+            finding = predicate(record)
+        except _MALFORMED:
+            continue
+        if finding:
+            findings.append(finding)
+    return findings
+
+
 def _duplicates(books: _Books) -> list[dict]:
     by_signature: dict[tuple, list[dict]] = defaultdict(list)
-    for invoice in books.invoices:
-        if books.invoice_group.get(invoice["invoice_id"]):
+
+    def collect(invoice: dict) -> None:
+        if (books.invoice_group.get(invoice["invoice_id"]) and isinstance(invoice["doc_id"], str)
+                and _is_int(invoice["total_minor"])):
             by_signature[_signature(invoice)].append(invoice)
+
+    _each(books.invoices, collect)
     findings = []
-    for group in by_signature.values():
-        group = sorted(group, key=lambda inv: inv["doc_id"])
+    for signature in sorted(by_signature, key=repr):
+        group = sorted(by_signature[signature], key=lambda inv: inv["doc_id"])
         for i, first in enumerate(group):
             for second in group[i + 1:]:
                 if first["doc_id"] == second["doc_id"] or first["invoice_id"] == second["invoice_id"]:
                     continue
                 ids = sorted([first["doc_id"], second["doc_id"]])
+                rows = []
+                for invoice in (first, second):
+                    own = sorted(books.invoice_group[invoice["invoice_id"]], key=_row_order)
+                    rows += [row["row_id"] for row in own[:ROWS_PER_DUPLICATE_INVOICE]]
                 findings.append({
                     "type": "duplicate_invoice", "affected_ids": ids,
-                    "claimed_amount_minor": first["total_minor"], "currency": first["currency"],
-                    "evidence_ids": ids,
+                    "claimed_amount_minor": abs(first["total_minor"]), "currency": first["currency"],
+                    "evidence_ids": ids + rows,
                     "explanation": "Both invoices are posted and share customer, currency, total and line items.",
                 })
     return findings
@@ -105,90 +172,100 @@ def _duplicates(books: _Books) -> list[dict]:
 
 def _allocation_gaps(books: _Books) -> list[dict]:
     unallocated = books.accounts["unallocated"]
-    findings = []
-    for payment_id, rows in books.payment_group.items():
+
+    def gaps(item) -> list[dict]:
+        payment_id, rows = item
         payment = books.payment_by_id.get(payment_id)
         if payment is None or not payment.get("invoice_refs"):
-            continue  # unknown payment, or an advance without references
+            return []  # unknown payment, or an advance without references
         credits = [row for row in rows if row["account"] == unallocated and row["credit_minor"] > 0]
         if len(credits) != 1:
-            continue  # no gap, or several unallocated rows: undefined, left unreported
+            return []  # no gap, or several unallocated rows: undefined, left unreported
         row = credits[0]
+        found = []
         for ref in sorted(set(payment["invoice_refs"])):
             invoice = books.invoice_by_id.get(ref)
             if invoice is None or books.receivable.get(ref, 0) <= 0:
                 continue
-            findings.append({
+            found.append({
                 "type": "allocation_gap", "affected_ids": sorted([payment["doc_id"], invoice["doc_id"]]),
                 "claimed_amount_minor": row["credit_minor"], "currency": books.base,
                 "evidence_ids": [payment["doc_id"], invoice["doc_id"], row["row_id"]],
                 "explanation": "Part of the payment sits on unallocated while the invoice it refers to stays open.",
             })
-    return findings
+        return found
+
+    nested = _each(sorted(books.payment_group.items()), gaps)
+    return [finding for group in nested for finding in group]
 
 
 def _fx_finding(books: _Books, doc_id: str, deviations: list[tuple[int, dict]]) -> dict | None:
-    wrong = [(amount, row) for amount, row in deviations if amount > books.tolerance["fx_error"]]
-    if not wrong:
+    """deviations: (|booked - correct|, row) for every conversion row of the document."""
+    if not deviations:
         return None
-    wrong.sort(key=lambda pair: (-pair[0], _row_order(pair[1])))
-    rows = [row["row_id"] for _, row in wrong][:MAX_EVIDENCE - 1]
+    worst = max(amount for amount, _ in deviations)
+    if worst <= books.tol("fx_error"):
+        return None
+    rows = [row["row_id"] for _, row in sorted(deviations, key=lambda pair: (-pair[0], _row_order(pair[1])))]
     return {
-        "type": "fx_error", "affected_ids": [doc_id], "claimed_amount_minor": wrong[0][0],
-        "currency": books.base, "evidence_ids": [doc_id, *rows],
-        "explanation": "The posted base amount differs from document amount times the policy rate.",
+        "type": "fx_error", "affected_ids": [doc_id], "claimed_amount_minor": worst,
+        "currency": books.base, "evidence_ids": [doc_id, *rows[:MAX_EVIDENCE - 1]],
+        "explanation": "The posted base amount differs from document amount times the rate of the document date.",
     }
 
 
 def _fx_errors(books: _Books) -> list[dict]:
     receivable, revenue, cash = (books.accounts[name] for name in ("receivable", "revenue", "cash"))
-    findings = []
-    for invoice in books.invoices:
+
+    def invoice_fx(invoice: dict) -> dict | None:
         rows = books.invoice_group.get(invoice["invoice_id"])
-        if not rows or invoice["currency"] == books.base or not books.inside(invoice["issued_at"]):
-            continue
+        if not rows or invoice["currency"] == books.base:
+            return None
         correct = books.policy_amount(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
         if correct is None:
-            continue
+            return None
         deviations = [(abs(row["debit_minor"] - correct), row) for row in rows
                       if row["account"] == receivable and row["debit_minor"] > 0]
         deviations += [(abs(row["credit_minor"] - correct), row) for row in rows
                        if row["account"] == revenue and row["credit_minor"] > 0]
-        finding = _fx_finding(books, invoice["doc_id"], deviations)
-        if finding:
-            findings.append(finding)
-    for payment in books.payments:
+        return _fx_finding(books, invoice["doc_id"], deviations)
+
+    def payment_fx(payment: dict) -> dict | None:
         rows = books.payment_group.get(payment["payment_id"])
-        if not rows or payment["currency"] == books.base or not books.inside(payment["timestamp"]):
-            continue
+        if not rows or payment["currency"] == books.base:
+            return None
         correct = books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"])
         cash_rows = [row for row in rows if row["account"] == cash]
         if correct is None or not cash_rows:
-            continue
-        booked = sum(row["debit_minor"] - row["credit_minor"] for row in cash_rows)
-        difference = abs(booked - correct)
-        finding = _fx_finding(books, payment["doc_id"], [(difference, row) for row in cash_rows])
-        if finding:
-            findings.append(finding)
-    return findings
+            return None
+        difference = abs(sum(row["debit_minor"] - row["credit_minor"] for row in cash_rows) - correct)
+        return _fx_finding(books, payment["doc_id"], [(difference, row) for row in cash_rows])
+
+    return _each(books.invoices, invoice_fx) + _each(books.payments, payment_fx)
 
 
 def _cutoffs(books: _Books) -> list[dict]:
-    findings = []
-    documents = [(inv["doc_id"], inv["issued_at"], inv["total_minor"], inv["currency"],
-                  books.invoice_group.get(inv["invoice_id"])) for inv in books.invoices]
-    documents += [(pay["doc_id"], pay["timestamp"], pay["amount_minor"], pay["currency"],
-                   books.payment_group.get(pay["payment_id"])) for pay in books.payments]
-    for doc_id, moment, amount, currency, rows in documents:
-        if not rows or books.inside(moment):
-            continue
+    def cutoff(document: tuple) -> dict | None:
+        doc_id, moment, amount, currency, rows = document
+        if not rows or books.inside(moment) or not _is_int(amount):
+            return None
         evidence = [row["row_id"] for row in sorted(rows, key=_row_order)][:MAX_EVIDENCE - 1]
-        findings.append({
+        return {
             "type": "period_cutoff", "affected_ids": [doc_id], "claimed_amount_minor": abs(amount),
             "currency": currency, "evidence_ids": [doc_id, *evidence],
             "explanation": "The document is dated outside the period in the company timezone but posted in it.",
-        })
-    return findings
+        }
+
+    def invoice_doc(inv: dict) -> tuple:
+        return (inv["doc_id"], inv["issued_at"], inv["total_minor"], inv["currency"],
+                books.invoice_group.get(inv["invoice_id"]))
+
+    def payment_doc(pay: dict) -> tuple:
+        return (pay["doc_id"], pay["timestamp"], pay["amount_minor"], pay["currency"],
+                books.payment_group.get(pay["payment_id"]))
+
+    return (_each(books.invoices, lambda inv: cutoff(invoice_doc(inv)))
+            + _each(books.payments, lambda pay: cutoff(payment_doc(pay))))
 
 
 def _sort_key(finding: dict) -> tuple:
@@ -199,4 +276,8 @@ def _sort_key(finding: dict) -> tuple:
 def solve(public: dict) -> list[dict]:
     books = _Books(public)
     findings = _duplicates(books) + _allocation_gaps(books) + _fx_errors(books) + _cutoffs(books)
+    # A finding must be well-formed: string ids, a non-negative int amount, at most 10 evidence ids.
+    findings = [f for f in findings if all(isinstance(i, str) for i in f["affected_ids"] + f["evidence_ids"])
+                and isinstance(f["currency"], str) and _is_int(f["claimed_amount_minor"])
+                and f["claimed_amount_minor"] >= 0 and len(f["evidence_ids"]) <= MAX_EVIDENCE]
     return sorted(findings, key=_sort_key)
