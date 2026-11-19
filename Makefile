@@ -1,12 +1,16 @@
-# Thin aliases. The official single command is: python -m auditgym check
+# Thin aliases. The official single command is: python3 -m auditgym check (fast, about 100 s);
+# `make check-full` runs everything.
 PY ?= python3
 SEEDS ?= 1000
 IMAGE ?= auditgym
 
-.PHONY: check test score fuzz episodes trajectories report demo docker-check
+.PHONY: check check-full test score fuzz episodes trajectories report demo docker-check
 
 check:
 	$(PY) -m auditgym check
+
+check-full:
+	$(PY) -m auditgym check --full
 
 test:
 	$(PY) -m unittest discover -s tests -q
