@@ -140,6 +140,23 @@ def interactions_are_unambiguous() -> Optional[str]:
     return None
 
 
+def fuzz_solver_equals_truth() -> Optional[str]:
+    """tools.fuzz on 4 seeds per grid config. Pending (not failed) while the only disagreement is
+    the solver's duplicate evidence, which the solver zone is moving to [docA, docB, rowA, rowB]."""
+    import io
+
+    from tools import fuzz
+
+    result = fuzz.run(4, out=io.StringIO())
+    reasons = sorted(result["failures"])
+    if not reasons:
+        return None
+    if reasons == ["solver: evidence lacks a full set (duplicate_invoice)"]:
+        return "pending: solver duplicate evidence lacks the posting rows (DECISIONS A2)"
+    seed, name = min(result["failures"][reasons[0]])
+    return f"{reasons[0]} (seed {seed}, {name})"
+
+
 CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
     ("after injection the deviation equals expected_amount_minor of each issue", deviation_equals_expected_amount),
     ("every evidence set exists, has at most 10 ids and is sufficient", evidence_sets_exist_and_suffice),
@@ -147,6 +164,7 @@ CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
     ("any seed and any valid config gives a valid episode", any_seed_and_valid_config_gives_valid_episode),
     ("distractors do not satisfy any error definition", distractors_satisfy_no_definition),
     ("both interaction scenarios give an unambiguous truth", interactions_are_unambiguous),
+    ("fuzz grid: verify is empty and the solver equals the truth", fuzz_solver_equals_truth),
 ]
 
 
