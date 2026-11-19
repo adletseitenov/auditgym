@@ -59,6 +59,17 @@ def suite(full: bool, start: str = "tests") -> unittest.TestSuite:
     return result
 
 
+def secret_line(environ=None) -> str:
+    """Whether the evaluator secret is set (docs/DECISIONS.md H). The value is never printed."""
+    from auditgym.evaluator import SECRET_ENV
+
+    environ = os.environ if environ is None else environ
+    if environ.get(SECRET_ENV, ""):
+        return f"{SECRET_ENV}: set (the closed run is not reproducible without it)"
+    return (f"{SECRET_ENV}: not set (open episodes are reproducible from the seed; "
+            f"set it for a closed run, see README «Закрытая проверка»)")
+
+
 def _phase(name: str, started: float) -> None:
     print(f"[{name}: {time.perf_counter() - started:.0f} s]", flush=True)
 
@@ -79,6 +90,7 @@ def run(full: bool = False) -> int:
     from tools import score
 
     began = started = time.perf_counter()
+    print(secret_line(), flush=True)
     result = unittest.TextTestRunner(verbosity=1).run(suite(full))
     print(f"unit tests: {result.testsRun} run" + ("" if full else f" (fast mode; --full also runs "
                                                    f"{len(FULL_ONLY)} more groups)"))

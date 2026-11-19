@@ -47,6 +47,33 @@ class ModesTest(unittest.TestCase):
         self.assertEqual(out.getvalue().count("determinism lint:"), 1)
         self.assertEqual(calls, [0])
 
+    def test_the_secret_line_tells_whether_it_is_set_and_never_shows_the_value(self):
+        from auditgym.evaluator import SECRET_ENV
+
+        self.assertIn("not set", check_modes.secret_line({}))
+        self.assertIn("not set", check_modes.secret_line({SECRET_ENV: ""}))
+        line = check_modes.secret_line({SECRET_ENV: "hunter2-value"})
+        self.assertIn("set", line)
+        self.assertNotIn("not set", line)
+        self.assertNotIn("hunter2-value", line)
+
+    def test_check_prints_the_secret_line_once_and_without_the_value(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+
+        from auditgym.evaluator import SECRET_ENV
+        from tools import score
+
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {SECRET_ENV: "hunter2-value"}), \
+                mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
+                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out):
+            check_modes.run(False)
+        self.assertEqual(out.getvalue().count(SECRET_ENV + ":"), 1)
+        self.assertNotIn("hunter2-value", out.getvalue())
+
     def test_help_and_bad_arguments(self):
         done = subprocess.run([sys.executable, "-m", "auditgym", "--help"], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0)
