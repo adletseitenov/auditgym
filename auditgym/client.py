@@ -28,6 +28,7 @@ import sys
 import threading
 
 from .actions import default_results_path
+from .limits import json_depth_exceeds
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
 _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal_error")
@@ -135,6 +136,8 @@ class Env:
     @staticmethod
     def _encode(message: dict) -> str | None:
         try:
+            if json_depth_exceeds(message):
+                return None
             return json.dumps(message, ensure_ascii=True, allow_nan=False)
         except (TypeError, ValueError, RecursionError, OverflowError, MemoryError):
             return None

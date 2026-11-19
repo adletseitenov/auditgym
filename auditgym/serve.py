@@ -45,6 +45,7 @@ import re
 import sys
 
 from .actions import default_results_path
+from .limits import json_depth_exceeds
 from .evaluator import Evaluator, EvaluatorError
 
 MAX_LINE_BYTES = 1 << 20
@@ -94,6 +95,8 @@ class Server:
         try:
             request = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, ValueError, RecursionError):
+            return protocol_error("bad_request", self._remaining())
+        if json_depth_exceeds(request):
             return protocol_error("bad_request", self._remaining())
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
             return protocol_error("bad_request", self._remaining())

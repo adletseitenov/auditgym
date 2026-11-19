@@ -10,6 +10,8 @@ MAX_FINDINGS = 30                 # findings in one submit; also the most issues
 MAX_EVIDENCE_IDS = 10             # evidence ids per finding, and ids per truth evidence set
 MAX_EXPLANATION_CHARS = 1000
 MAX_MESSAGE_BYTES = 256 * 1024    # docs/AUDIT.md R2: 30 x 10 x 1 000 Cyrillic characters must fit
+MAX_JSON_DEPTH = 64               # nesting of one message; explicit so the result does not depend on
+                                  # the Python version's json recursion behaviour
 
 # Episode
 MAX_STEPS = 100
@@ -32,3 +34,24 @@ ROWS_PER_ISSUE = 5
 def pages(count: int) -> int:
     """Pages of PAGE_SIZE needed to read `count` records (an empty table still costs no page)."""
     return -(-count // PAGE_SIZE)
+
+
+def json_depth_exceeds(value: object, limit: int = MAX_JSON_DEPTH) -> bool:
+    """True when lists/dicts nest deeper than `limit`. Iterative, so it never recurses itself."""
+    stack = [(value, 0)]
+    seen = 0
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, dict):
+            children = item.values()
+        elif isinstance(item, (list, tuple)):
+            children = item
+        else:
+            continue
+        if depth >= limit:
+            return True
+        seen += 1
+        if seen > 1_000_000:
+            return True
+        stack.extend((child, depth + 1) for child in children)
+    return False

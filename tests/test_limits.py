@@ -192,3 +192,16 @@ class AnswerSizeBoundaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JsonDepthTest(unittest.TestCase):
+    """The nesting limit is explicit, so Python 3.11 and newer versions answer the same."""
+
+    def test_depth_boundary(self):
+        from auditgym.limits import MAX_JSON_DEPTH, json_depth_exceeds
+        value = 1
+        for _ in range(MAX_JSON_DEPTH):
+            value = [value]
+        self.assertFalse(json_depth_exceeds(value))
+        self.assertTrue(json_depth_exceeds([value]))
+        self.assertTrue(json_depth_exceeds({"a": [value]}))
