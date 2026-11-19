@@ -1,23 +1,23 @@
 {
  "schema_version": "1",
- "episode_id": "ep_9f0470657f6d",
+ "episode_id": "ep_f7eadee54e01",
  "issues": [
   {
    "issue_id": "t1",
    "type": "period_cutoff",
    "affected_ids": [
-    "rggfnz4dy0"
+    "qjf2q8bknt"
    ],
-   "expected_amount_minor": 7500000,
-   "currency": "EUR",
+   "expected_amount_minor": 479000000,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "rggfnz4dy0",
-     "0tkrv6egks"
+     "qjf2q8bknt",
+     "58x5znjppj"
     ],
     [
-     "rggfnz4dy0",
-     "9xhzspt79m"
+     "qjf2q8bknt",
+     "smr1a4spkm"
     ]
    ]
   },
@@ -25,35 +25,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "2a1tj8w9yr",
-    "49gre632fk"
+    "9f5bmdc214",
+    "mkjc0d6zxb"
    ],
-   "expected_amount_minor": 3499000,
-   "currency": "EUR",
+   "expected_amount_minor": 289500000,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "2a1tj8w9yr",
-     "49gre632fk",
-     "61j84e4cet",
-     "dq5f3wzypv"
+     "9f5bmdc214",
+     "mkjc0d6zxb",
+     "2mf3n4xks7",
+     "7rbj1j2zm3"
     ],
     [
-     "2a1tj8w9yr",
-     "49gre632fk",
-     "61j84e4cet",
-     "kpefk3rp1n"
+     "9f5bmdc214",
+     "mkjc0d6zxb",
+     "2mf3n4xks7",
+     "sjfa0yqst4"
     ],
     [
-     "2a1tj8w9yr",
-     "49gre632fk",
-     "dq5f3wzypv",
-     "mqqhgwzdqv"
+     "9f5bmdc214",
+     "mkjc0d6zxb",
+     "7rbj1j2zm3",
+     "bqc324c7gv"
     ],
     [
-     "2a1tj8w9yr",
-     "49gre632fk",
-     "kpefk3rp1n",
-     "mqqhgwzdqv"
+     "9f5bmdc214",
+     "mkjc0d6zxb",
+     "bqc324c7gv",
+     "sjfa0yqst4"
     ]
    ]
   },
@@ -61,18 +61,18 @@
    "issue_id": "t3",
    "type": "period_cutoff",
    "affected_ids": [
-    "2a1tj8w9yr"
+    "9f5bmdc214"
    ],
-   "expected_amount_minor": 3499000,
-   "currency": "EUR",
+   "expected_amount_minor": 289500000,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "2a1tj8w9yr",
-     "dq5f3wzypv"
+     "9f5bmdc214",
+     "2mf3n4xks7"
     ],
     [
-     "2a1tj8w9yr",
-     "kpefk3rp1n"
+     "9f5bmdc214",
+     "bqc324c7gv"
     ]
    ]
   }

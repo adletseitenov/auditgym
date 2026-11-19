@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_460d175b5cde",
+ "episode_id": "ep_7ea4329f08e9",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "erxendjyz5",
-    "ym1azkpz0a"
+    "fmvb1yc468",
+    "yzkv7jxd9x"
    ],
-   "expected_amount_minor": 918000000,
-   "currency": "KZT",
+   "expected_amount_minor": 664000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "erxendjyz5",
-     "ym1azkpz0a",
-     "37c9haw3ss",
-     "8y79t305hz"
+     "fmvb1yc468",
+     "yzkv7jxd9x",
+     "5kk32pnsty",
+     "e1b62f6jqr"
     ],
     [
-     "erxendjyz5",
-     "ym1azkpz0a",
-     "37c9haw3ss",
-     "axvcg5fwz1"
+     "fmvb1yc468",
+     "yzkv7jxd9x",
+     "5kk32pnsty",
+     "kp9j5e7g97"
     ],
     [
-     "erxendjyz5",
-     "ym1azkpz0a",
-     "8y79t305hz",
-     "fx4cv75p67"
+     "fmvb1yc468",
+     "yzkv7jxd9x",
+     "e1b62f6jqr",
+     "gze3f67wpd"
     ],
     [
-     "erxendjyz5",
-     "ym1azkpz0a",
-     "axvcg5fwz1",
-     "fx4cv75p67"
+     "fmvb1yc468",
+     "yzkv7jxd9x",
+     "gze3f67wpd",
+     "kp9j5e7g97"
     ]
    ]
   },
@@ -42,35 +42,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "608k956xj4",
-    "zaqj3w83ze"
+    "cyypm6vdxp",
+    "f6e9wxetvj"
    ],
-   "expected_amount_minor": 1729500000,
+   "expected_amount_minor": 742000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "608k956xj4",
-     "zaqj3w83ze",
-     "4rkchr6adg",
-     "cmxysdf2j0"
+     "cyypm6vdxp",
+     "f6e9wxetvj",
+     "qfsn4n778m",
+     "shm9k0zgg5"
     ],
     [
-     "608k956xj4",
-     "zaqj3w83ze",
-     "4rkchr6adg",
-     "zvdew46th1"
+     "cyypm6vdxp",
+     "f6e9wxetvj",
+     "qfsn4n778m",
+     "vvaw79dtd2"
     ],
     [
-     "608k956xj4",
-     "zaqj3w83ze",
-     "6e6yeze1zj",
-     "cmxysdf2j0"
+     "cyypm6vdxp",
+     "f6e9wxetvj",
+     "sb3g66q150",
+     "shm9k0zgg5"
     ],
     [
-     "608k956xj4",
-     "zaqj3w83ze",
-     "6e6yeze1zj",
-     "zvdew46th1"
+     "cyypm6vdxp",
+     "f6e9wxetvj",
+     "sb3g66q150",
+     "vvaw79dtd2"
     ]
    ]
   }

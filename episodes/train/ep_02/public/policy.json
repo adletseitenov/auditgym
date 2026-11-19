@@ -4,6 +4,8 @@
  "timezone": "-11:00",
  "period_start": "2026-10-01T00:00:00-11:00",
  "period_end": "2026-11-01T00:00:00-11:00",
+ "period_interval": "[start, end)",
+ "period_basis": "document_date",
  "fx_rate_date": "document_date_in_company_timezone",
  "fx_formula": "round(amount_minor * 10^(exp_base - exp_src) * rate)",
  "rounding": "half_even",
@@ -24,12 +26,13 @@
   "payment": "timestamp"
  },
  "refund": "payment with negative amount_minor and one invoice ref",
+ "payment_rule": "a payment with one reference moves the invoice's receivable by round_half_even(booked * paid_after / total) - round_half_even(booked * paid_before / total), where booked is the invoice's posted base amount and paid counts earlier posted payments of it (refunds reopen it the same way); an overpayment closes what is left and puts the excess at the payment date's rate on unallocated; a payment of several invoices closes each in full; an advance goes to unallocated; cash is the payment at its date's rate and the rest of every foreign payment is its own fx_difference row",
+ "duplicate_signature": "entity, currency, total, line items incl. service period",
  "amount_tolerance_minor": {
   "duplicate_invoice": 0,
   "allocation_gap": 0,
   "fx_error": 1,
   "period_cutoff": 0
  },
- "evidence_superset_allowed": true,
- "period_basis": "document_date"
+ "evidence_superset_allowed": true
 }

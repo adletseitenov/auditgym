@@ -1,14 +1,14 @@
 {
  "schema_version": "1",
- "episode_id": "ep_a2c48a61e756",
+ "episode_id": "ep_f937bf7856f3",
  "base_currency": "KZT",
  "period_start": "2026-10-01T00:00:00-03:00",
  "period_end": "2026-11-01T00:00:00-03:00",
  "timezone": "-03:00",
  "counts": {
-  "ledger": 775,
-  "invoices": 70,
-  "payments": 54,
+  "ledger": 888,
+  "invoices": 99,
+  "payments": 84,
   "fx": 123
  },
  "rounding": "half_even",
