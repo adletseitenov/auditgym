@@ -237,5 +237,12 @@ class IndependenceTest(unittest.TestCase):
         self.assertNotIn("\"private\"", source)
 
 
+
+class ScoreChecksTest(unittest.TestCase):
+    def test_solver_checks_pass(self):
+        from tools.checks_solver import CHECKS
+
+        for name, check in CHECKS:
+            self.assertIsNone(check(), name)
 if __name__ == "__main__":
     unittest.main()
