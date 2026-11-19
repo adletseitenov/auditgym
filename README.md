@@ -35,7 +35,7 @@ CHECK: PASSED
 | Matcher и награда, схемы, политики | `auditgym/matcher.py`, `reward.py`, `findings.py`, `judge.py`; `schemas/` (25 файлов JSON Schema); политика эпизода `public/policy.json` (`auditgym/generate.py`, `build_policy`) | `python3 -m tools.attack` (таблица атакующих ответов); `python3 -m unittest tests.test_schemas` |
 | Эпизоды | `episodes/train` (10) и `episodes/dev` (10), по `public/` и `private/` | `python3 -m tools.episodes --out episodes` (пересборка побайтно; `make episodes`) |
 | Тесты | `tests/` (среда, сопоставление и награда, генератор, решатель, схемы) | `python3 -m unittest discover -s tests` (`make test`) |
-| Базовые политики | `policies/`: `random_explorer`, `reconcile`, `flag_all*`, `oracle`, а также `silence` и `solver_policy` | `python3 -m tools.report --out docs/RESULTS.md` (`make report`) |
+| Базовые политики | `policies/`: `random_explorer`, `reconcile`, `flag_all*`, `oracle`, а также `silence` и `solver_policy`; демонстрационная (не базовая) `heuristic` | `python3 -m tools.report --out docs/RESULTS.md` (`make report`) |
 | Траектории | `trajectories.jsonl` (поля `episode_id, policy, step, action, observation, reward, terminated, truncated`; в последней строке эпизода ещё `metrics` с P, R, F1; политики `random_explorer`, `reconcile`, `flag_all` на 12 книгах train и dev, около 4,4 МБ; в наблюдениях нет эталона). Траектории oracle лежат отдельно, в `runs/trajectories.oracle.jsonl` (не сдаются: в действиях эталон) | `python3 -m tools.trajectories --out trajectories.jsonl --oracle-out runs/trajectories.oracle.jsonl` (`make trajectories`; `--all-episodes` берёт все 20 книг, около 9 МБ) |
 | Записка о дизайне | `docs/DESIGN.md` | — |
 | Демо | `python3 -m tools.demo` (`make demo`): один эпизод по шагам, разбор оценщика, атаки на тот же эпизод | `python3 -m tools.demo` |
@@ -138,14 +138,17 @@ errors | invoices needed (>=) | default size.invoices when size is omitted | acc
 | Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Шаги | Время, мс |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | oracle | 200 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.0 | 23 |
-| solver_policy | 200 | 1.000 | 1.000 | 1.000 | 0.960 | 0.959 | 0.960 | 21.1 | 30 |
-| reconcile | 200 | 0.122 | 0.266 | 0.165 | -0.681 | -1.000 | -0.761 | 10.6 | 27 |
-| random_explorer | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 0.069 | -0.733 | 11.0 | 25 |
-| silence | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 1.000 | -0.500 | 1.0 | 24 |
-| flag_all | 200 | 0.005 | 0.047 | 0.010 | -0.986 | -1.000 | -0.989 | 19.6 | 29 |
-| flag_all_cutoff | 200 | 0.012 | 0.107 | 0.022 | -0.966 | -1.000 | -0.975 | 19.6 | 30 |
-| flag_all_duplicates | 200 | 0.010 | 0.088 | 0.018 | -0.973 | -1.000 | -0.980 | 19.6 | 30 |
+| solver_policy | 200 | 1.000 | 1.000 | 1.000 | 0.960 | 0.959 | 0.960 | 21.1 | 29 |
+| reconcile | 200 | 0.236 | 0.517 | 0.318 | -0.391 | -1.000 | -0.543 | 19.6 | 28 |
+| random_explorer | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 0.069 | -0.733 | 11.0 | 24 |
+| silence | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 1.000 | -0.500 | 1.0 | 23 |
+| flag_all | 200 | 0.006 | 0.054 | 0.011 | -0.984 | -1.000 | -0.988 | 19.6 | 29 |
+| flag_all_cutoff | 200 | 0.011 | 0.098 | 0.020 | -0.969 | -1.000 | -0.977 | 19.6 | 29 |
+| flag_all_duplicates | 200 | 0.008 | 0.077 | 0.015 | -0.978 | -1.000 | -0.984 | 19.6 | 29 |
+| heuristic | 200 | 0.321 | 0.948 | 0.471 | -0.099 | -1.000 | -0.324 | 21.1 | 29 |
 <!-- results:end -->
+
+`heuristic` — демонстрационная эвристика без учёта отвлекающих случаев (частичные оплаты, позиции, пояс компании, переплаты): она ловит почти всё (R 0.948), но обвиняет и законные случаи (P 0.321, F1 0.471), на чистых книгах получает −1. Это не базовая политика и не часть баллов проверки.
 
 Возврат — `clip(2·F1 − 1 − 0.002·inspection_steps, −1, 1)`. Что из этого следует и чего нельзя вывести — в разделе «Ограничения».
 

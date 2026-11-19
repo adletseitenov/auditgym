@@ -16,7 +16,7 @@ import time
 
 MAX_STEPS = 100
 NAMES = ("random_explorer", "reconcile", "flag_all", "flag_all_cutoff", "flag_all_duplicates",
-         "silence", "solver_policy", "oracle")
+         "silence", "solver_policy", "heuristic", "oracle")
 
 
 def make_policy(name: str, truth: dict | None = None, **options):
@@ -30,6 +30,9 @@ def make_policy(name: str, truth: dict | None = None, **options):
     if name.startswith("flag_all"):
         from .flag_all import FlagAll
         return FlagAll(variant="mixed" if name == "flag_all" else name[len("flag_all_"):])
+    if name == "heuristic":  # a demonstration, not one of the baselines of the check
+        from .heuristic import Heuristic
+        return Heuristic()
     if name == "silence":
         from .silence import Silence
         return Silence()

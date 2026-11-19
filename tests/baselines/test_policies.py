@@ -17,7 +17,7 @@ from tools.report import generated_cases, ordering_problems, run_generated
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 ALL = ("random_explorer", "reconcile", "flag_all", "flag_all_cutoff", "flag_all_duplicates",
-       "silence", "solver_policy", "oracle")
+       "silence", "solver_policy", "heuristic", "oracle")
 ORDERED = ("oracle", "solver_policy", "reconcile", "silence", "flag_all", "flag_all_cutoff", "flag_all_duplicates")
 
 
@@ -113,7 +113,8 @@ class RowOrderTest(unittest.TestCase):
     """Audit R8: reordering the rows of the public tables (tools.transform, ids kept) must not
     change the reward of any policy. random_explorer is excluded (its actions are random by design)
     and the oracle does not read tables."""
-    POLICIES = ("reconcile", "flag_all", "flag_all_cutoff", "flag_all_duplicates", "silence", "solver_policy")
+    POLICIES = ("reconcile", "flag_all", "flag_all_cutoff", "flag_all_duplicates", "silence", "solver_policy",
+                "heuristic")
     CASES = (3, 8, 21)
 
     def _reward(self, name: str, directory: str) -> float:
@@ -196,6 +197,38 @@ class OrderingTest(unittest.TestCase):
         for rows in (self.errors, self.clean):
             for name, policy_rows in rows.items():
                 self.assertTrue(all(row["steps"] <= MAX_STEPS and not row["truncated"] for row in policy_rows), name)
+
+
+class HeuristicTest(unittest.TestCase):
+    """policies/heuristic.py is a demonstration: the planted distractors fool it. It is not one of the
+    baselines of the check (tools/checks_*.py never run it) but its F1 is quoted in docs/RESULTS.md."""
+
+    @classmethod
+    def setUpClass(cls):
+        pool = episodes_tool.supported_pool(episodes_tool.ERROR_POOL, quiet=True)
+        clean_pool = episodes_tool.supported_pool(episodes_tool.CLEAN_POOL, quiet=True)
+        cls.errors = run_generated(("heuristic", "reconcile"), [(80_000 + k, pool[k % len(pool)]) for k in range(40)])
+        cls.clean = run_generated(("heuristic", "silence"), [(90_000 + k, clean_pool[k % len(clean_pool)])
+                                                              for k in range(10)])
+
+    def test_f1_on_books_with_errors_is_middling(self):
+        f1 = statistics.fmean(row["f1"] for row in self.errors["heuristic"])
+        self.assertTrue(0.35 <= f1 <= 0.6, f1)
+        recall = statistics.fmean(row["recall"] for row in self.errors["heuristic"])
+        precision = statistics.fmean(row["precision"] for row in self.errors["heuristic"])
+        self.assertGreater(recall, 0.8)       # it finds nearly everything...
+        self.assertLess(precision, 0.5)       # ...and accuses legitimate cases on top
+
+    def test_it_beats_reconcile_on_f1_but_distractors_cost_it_on_clean_books(self):
+        self.assertGreater(statistics.fmean(row["f1"] for row in self.errors["heuristic"]),
+                           statistics.fmean(row["f1"] for row in self.errors["reconcile"]))
+        self.assertLess(statistics.fmean(row["reward"] for row in self.clean["heuristic"]),
+                        statistics.fmean(row["reward"] for row in self.clean["silence"]))
+
+    def test_it_is_not_one_of_the_checked_baselines(self):
+        for module in ("checks_qa", "checks_judge", "checks_solver", "checks_env", "checks_gen", "checks_pack"):
+            text = (ROOT / "tools" / f"{module}.py").read_text(encoding="utf-8")
+            self.assertNotIn("heuristic", text, module)
 
 
 class SolverPolicyTest(unittest.TestCase):

@@ -21,7 +21,7 @@ from tools import episodes as episodes_tool
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 POLICIES = ("oracle", "solver_policy", "reconcile", "random_explorer", "silence",
-            "flag_all", "flag_all_cutoff", "flag_all_duplicates")
+            "flag_all", "flag_all_cutoff", "flag_all_duplicates", "heuristic")
 TYPED = ("reconcile", "solver_policy")
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 LARGE_SEED_BASE = 50_000
@@ -249,7 +249,11 @@ def build_report(n: int, episodes_dir=None) -> str:
             f"с ошибками и {skipped_clean} чистых.", "",
             "Политики: `oracle` знает эталон (только оценщик); `solver_policy` читает все таблицы и запускает "
             "решатель; `reconcile` — простая сверка; `random_explorer` — случайные действия с seed 0; "
-            "`silence` — пустой ответ; `flag_all*` — атака «пометить всё» в трёх вариантах.", ""]
+            "`silence` — пустой ответ; `flag_all*` — атака «пометить всё» в трёх вариантах; "
+            "`heuristic` — демонстрационная эвристика без учёта отвлекающих случаев (не базовая политика и не часть "
+            "баллов проверки): одинаковые суммы контрагента как дубли, любой неразнесённый остаток как разрыв, "
+            "документ с датой вне периода и проводкой внутри как отсечка, расхождение с курсом напечатанной даты как "
+            "курсовая ошибка; частичные оплаты, позиции, пояс компании и переплаты она не различает.", ""]
     for name, rows in sets.items():
         out += [f"## {titles[name][0].upper() + titles[name][1:]}", ""] + _table(rows) + [""]
         truncated = {policy: summary(policy_rows)["truncated"] for policy, policy_rows in rows.items()}
