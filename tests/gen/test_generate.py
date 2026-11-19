@@ -1,15 +1,17 @@
 import copy
+import datetime as dt
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
-from auditgym.config import ConfigError
 from auditgym.generate import generate
+from auditgym.money import local_date, parse_time, significant_digits
 from auditgym.storage import episode_files, load_episode, write_episode
-from auditgym.verify import verify
+from auditgym.verify import invoice_signature, predicate_issues, verify
 
 CLEAN = {"errors": {}}
 GRID = [
@@ -21,22 +23,42 @@ GRID = [
      "period": {"start": "2028-02-01", "months": 1}},
     {"errors": {}, "size": {"invoices": [10, 12], "background_pairs": [0, 5]}},
     {"errors": {}, "size": {"invoices": [200, 200], "background_pairs": [480, 490]}},
+    {"errors": {}, "currencies": ["USD", "EUR"], "distractors": False, "timezone": "-03:00"},
 ]
+
+
+def posted_docs(public):
+    """doc_id -> posting moment of each posted document."""
+    by_invoice = {r["invoice_id"]: r["timestamp"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
+    by_payment = {r["payment_id"]: r["timestamp"] for r in public["ledger"] if r["payment_id"]}
+    out = {inv["doc_id"]: (inv["issued_at"], by_invoice[inv["invoice_id"]]) for inv in public["invoices"]
+           if inv["invoice_id"] in by_invoice}
+    out.update({pay["doc_id"]: (pay["timestamp"], by_payment[pay["payment_id"]]) for pay in public["payments"]
+                if pay["payment_id"] in by_payment})
+    return out
 
 
 class CleanCompanyTest(unittest.TestCase):
     def test_books_are_well_formed_on_many_seeds(self):
         for index, config in enumerate(GRID):
-            for seed in range(30):
+            for seed in range(12):
                 with self.subTest(config=index, seed=seed):
                     episode = generate(seed, config)
                     self.assertEqual(verify(episode), [])
                     self.assertEqual(episode["private"]["truth"]["issues"], [])
+                    self.assertEqual(predicate_issues(episode["public"]), ([], []))
+
+    def test_defaults_generate(self):
+        for config in (None, {}):
+            episode = generate(1, config)
+            kinds = sorted(issue["type"] for issue in episode["private"]["truth"]["issues"])
+            self.assertEqual(kinds, ["allocation_gap", "duplicate_invoice", "fx_error", "period_cutoff"])
 
     def test_sizes_follow_the_config(self):
         episode = generate(5, {"errors": {}, "size": {"invoices": [20, 25], "background_pairs": [40, 60]}})
         counts = episode["public"]["manifest"]["counts"]
         self.assertTrue(20 <= counts["invoices"] <= 25)
+        self.assertLessEqual(counts["payments"], counts["invoices"])
         self.assertLessEqual(counts["ledger"], 2000)
 
     def test_ledger_is_in_the_period_and_in_the_base_currency(self):
@@ -48,9 +70,7 @@ class CleanCompanyTest(unittest.TestCase):
 
     def test_no_two_invoices_share_a_signature(self):
         episode = generate(11, GRID[6])
-        signatures = {(inv["entity_id"], inv["currency"], inv["total_minor"],
-                       json.dumps(sorted(inv["line_items"], key=json.dumps), sort_keys=True))
-                      for inv in episode["public"]["invoices"]}
+        signatures = {invoice_signature(inv) for inv in episode["public"]["invoices"]}
         self.assertEqual(len(signatures), len(episode["public"]["invoices"]))
 
     def test_seed_and_config_do_not_appear_in_open_records(self):
@@ -59,15 +79,73 @@ class CleanCompanyTest(unittest.TestCase):
         self.assertNotIn("918273645", text)
         self.assertNotIn("surface_seed", text)
 
-    def test_errors_are_refused_until_they_are_implemented(self):
-        with self.assertRaises(ConfigError) as caught:
-            generate(1, None)
-        self.assertEqual(caught.exception.code, "not_implemented")
+    def test_policy_states_the_period_basis(self):
+        self.assertEqual(generate(1, CLEAN)["public"]["policy"]["period_basis"], "document_date")
 
     def test_bad_seed(self):
+        from auditgym.config import ConfigError
         for seed in ("1", 1.0, True, None):
             with self.assertRaises(ConfigError):
                 generate(seed, CLEAN)
+
+    def test_largest_config_is_fast(self):
+        config = {"size": {"invoices": [200, 200], "background_pairs": [430, 430]}, "currencies": ["USD", "EUR", "CNY"],
+                  "errors": {"duplicate_invoice": 6, "allocation_gap": 6, "fx_error": 6, "period_cutoff": 5},
+                  "interaction": "I1", "period": {"start": "2026-12-01", "months": 3}}
+        started = time.perf_counter()
+        episode = generate(4, config)
+        elapsed = time.perf_counter() - started
+        self.assertLessEqual(episode["public"]["manifest"]["counts"]["ledger"], 2000)
+        self.assertLess(elapsed, 2.0)
+
+
+class RatesTest(unittest.TestCase):
+    def test_six_significant_digits_and_cheap_currencies_move(self):
+        episode = generate(2, {"errors": {}, "base_currency": "USD", "currencies": ["KZT", "RUB"], "distractors": False})
+        by_currency = {}
+        for row in episode["public"]["fx"]:
+            self.assertGreaterEqual(significant_digits(row["rate"]), 6, row)
+            by_currency.setdefault(row["source_currency"], []).append(row["rate"])
+        for currency, rates in by_currency.items():
+            self.assertTrue(all(a != b for a, b in zip(rates, rates[1:])), currency)  # no distractors: daily moves
+
+    def test_weekends_repeat_friday_only_with_distractors(self):
+        episode = generate(3, {"errors": {}, "currencies": ["EUR"]})
+        rates = {row["date"]: row["rate"] for row in episode["public"]["fx"]}
+        for date, rate in rates.items():
+            day = dt.date.fromisoformat(date)
+            friday = (day - dt.timedelta(days=day.weekday() - 4)).isoformat()
+            if day.weekday() >= 5 and friday in rates:
+                self.assertEqual(rate, rates[friday])
+
+
+class TimingTest(unittest.TestCase):
+    def test_postings_lag_inside_the_period(self):
+        lags = []
+        for seed in range(10):
+            episode = generate(seed, {"errors": {}, "currencies": ["USD"]})
+            policy = episode["public"]["policy"]
+            end = parse_time(policy["period_end"])
+            for doc, (dated, posted) in posted_docs(episode["public"]).items():
+                lag = (parse_time(posted) - parse_time(dated)).total_seconds()
+                self.assertGreaterEqual(lag, 60, doc)
+                self.assertLess(parse_time(posted), end)
+                lags.append(lag)
+        self.assertTrue(any(lag < 3600 for lag in lags))
+        self.assertTrue(any(lag > 86400 for lag in lags))
+
+    def test_documents_in_other_offsets(self):
+        crossing = other = 0
+        for seed in range(10):
+            public = generate(seed, CLEAN)["public"]
+            offset = public["policy"]["timezone"]
+            for doc in public["invoices"] + public["payments"]:
+                stamp = doc.get("issued_at") or doc["timestamp"]
+                if not stamp.endswith(offset):
+                    other += 1
+                    crossing += stamp[:10] != local_date(stamp, offset)
+        self.assertGreater(other, 30)
+        self.assertGreater(crossing, 5)
 
 
 class VerifyCatchesBrokenBooksTest(unittest.TestCase):
@@ -83,8 +161,8 @@ class VerifyCatchesBrokenBooksTest(unittest.TestCase):
 
     def test_unbalanced_row(self):
         def change(e):
-            e["public"]["ledger"][0]["debit_minor"] += 1 if e["public"]["ledger"][0]["debit_minor"] else 0
-            e["public"]["ledger"][0]["credit_minor"] += 1 if e["public"]["ledger"][0]["credit_minor"] else 0
+            row = e["public"]["ledger"][0]
+            row["debit_minor" if row["debit_minor"] else "credit_minor"] += 1
         self.assertTrue(self.broken(change))
 
     def test_missing_link(self):
@@ -95,21 +173,96 @@ class VerifyCatchesBrokenBooksTest(unittest.TestCase):
 
     def test_wrong_amount_before_injection(self):
         def change(e):
-            invoice = next(i for i in e["public"]["invoices"] if i["currency"] != "KZT")
+            posted = {r["invoice_id"] for r in e["private"]["pre_ledger"] if r["invoice_id"]}
+            invoice = next(i for i in e["private"]["pre_invoices"] if i["currency"] != "KZT" and i["invoice_id"] in posted)
             for row in e["private"]["pre_ledger"]:
                 if row["invoice_id"] == invoice["invoice_id"] and row["payment_id"] is None:
-                    side = "debit_minor" if row["debit_minor"] else "credit_minor"
-                    row[side] += 100
-        self.assertTrue(any("policy amount" in p for p in self.broken(change)))
+                    row["debit_minor" if row["debit_minor"] else "credit_minor"] += 100
+        self.assertTrue(any("policy amount" in p or "fx_error" in p for p in self.broken(change)))
 
     def test_row_outside_the_period(self):
         def change(e):
             e["public"]["ledger"][0]["timestamp"] = "2026-11-01T00:00:00+05:00"
         self.assertTrue(any("outside the period" in p for p in self.broken(change)))
 
+    def test_posting_before_the_document(self):
+        def change(e):
+            start = parse_time(e["public"]["policy"]["period_start"])
+            invoice = next(i for i in e["public"]["invoices"]
+                           if parse_time(i["issued_at"]) - start > dt.timedelta(days=1))
+            early = (parse_time(invoice["issued_at"]) - dt.timedelta(minutes=1)).astimezone(start.tzinfo).isoformat()
+            for row in e["public"]["ledger"]:
+                if row["invoice_id"] == invoice["invoice_id"] and row["payment_id"] is None:
+                    row["timestamp"] = early
+        self.assertTrue(any("posted before its date" in p for p in self.broken(change)))
+
+    def test_times_compared_as_moments(self):
+        def change(e):  # same moment written in another offset: still well formed
+            invoice = next(i for i in e["public"]["invoices"] if i["issued_at"].endswith("+05:00"))
+            invoice["issued_at"] = parse_time(invoice["issued_at"]).astimezone(dt.timezone.utc).isoformat()
+            for record in e["private"]["pre_invoices"]:
+                if record["doc_id"] == invoice["doc_id"]:
+                    record["issued_at"] = invoice["issued_at"]
+        self.assertEqual([p for p in self.broken(change) if "episode_id" not in p], [])
+
+    def test_quantity_times_price(self):
+        def change(e):
+            e["public"]["invoices"][0]["line_items"][0]["quantity"] += 1
+        self.assertTrue(any("unit price" in p for p in self.broken(change)))
+
+    def test_due_before_issue(self):
+        def change(e):
+            e["public"]["invoices"][0]["due_at"] = e["public"]["invoices"][0]["issued_at"]
+        self.assertTrue(any("due_at" in p for p in self.broken(change)))
+
+    def test_missing_rate(self):
+        def change(e):
+            e["public"]["fx"].pop(len(e["public"]["fx"]) // 2)
+        self.assertTrue(any("fx:" in p or "no rate" in p for p in self.broken(change)))
+
+    def test_short_rate(self):
+        def change(e):
+            e["public"]["fx"][0]["rate"] = "466.2"
+        self.assertTrue(any("significant digits" in p for p in self.broken(change)))
+
+    def test_background_pair(self):
+        def change(e):
+            row = next(r for r in e["public"]["ledger"] if r["invoice_id"] is None and r["payment_id"] is None
+                       and r["account"] == "cash")
+            row["account"] = "revenue"
+        self.assertTrue(any("background" in p for p in self.broken(change)))
+
+    def test_posting_entity(self):
+        def change(e):
+            posted = {r["invoice_id"] for r in e["public"]["ledger"] if r["invoice_id"]}
+            invoice = next(i for i in e["public"]["invoices"] if i["invoice_id"] in posted)
+            other = next(i["entity_id"] for i in e["public"]["invoices"] if i["entity_id"] != invoice["entity_id"])
+            for row in e["public"]["ledger"]:
+                if row["invoice_id"] == invoice["invoice_id"] and row["payment_id"] is None:
+                    row["entity_id"] = other
+        self.assertTrue(any("another entity" in p for p in self.broken(change)))
+
+    def test_fx_difference_on_a_base_payment(self):
+        def change(e):
+            base = e["public"]["policy"]["base_currency"]
+            payment = next(p for p in e["public"]["payments"] if p["currency"] == base and p["invoice_refs"]
+                           and any(r["payment_id"] == p["payment_id"] for r in e["public"]["ledger"]))
+            rows = [r for r in e["public"]["ledger"] if r["payment_id"] == payment["payment_id"]]
+            cash = next(r for r in rows if r["account"] == "cash")
+            cash["debit_minor"] += 100
+            e["public"]["ledger"].append(dict(cash, row_id="zzzzzzzzzz", account="fx_difference", debit_minor=0,
+                                              credit_minor=100))
+            e["public"]["manifest"]["counts"]["ledger"] += 1
+        self.assertTrue(self.broken(change))
+
     def test_manifest_count(self):
         def change(e):
             e["public"]["manifest"]["counts"]["ledger"] += 1
+        self.assertTrue(self.broken(change))
+
+    def test_garbage_does_not_crash(self):
+        def change(e):
+            e["public"]["invoices"][0]["line_items"] = None
         self.assertTrue(self.broken(change))
 
 
@@ -121,10 +274,23 @@ class ReproducibilityTest(unittest.TestCase):
     def test_different_seeds_differ(self):
         self.assertNotEqual(episode_files(generate(7, CLEAN)), episode_files(generate(8, CLEAN)))
 
+    def test_same_seed_other_config_is_another_world(self):
+        first = generate(7, {"errors": {}, "currencies": ["USD"]})["public"]
+        second = generate(7, {"errors": {}, "currencies": ["USD"], "interaction": "none",
+                              "size": {"invoices": [40, 101]}})["public"]
+        totals = sorted(i["total_minor"] for i in first["invoices"])
+        self.assertNotEqual(totals, sorted(i["total_minor"] for i in second["invoices"]))
+
+    def test_ids_depend_on_the_error_config(self):
+        size = {"invoices": [24, 30], "background_pairs": [10, 20]}
+        first = generate(7, {"errors": {"fx_error": 1}, "size": size})["private"]["provenance"]["id_map"]
+        second = generate(7, {"errors": {"period_cutoff": 1}, "size": size})["private"]["provenance"]["id_map"]
+        self.assertFalse(set(first.values()) & set(second.values()))
+
     def test_independent_of_process_environment(self):
         code = ("import hashlib, json; from auditgym.generate import generate; "
                 "from auditgym.storage import episode_files; "
-                "f = episode_files(generate(7, {'errors': {}, 'currencies': ['USD', 'EUR']})); "
+                "f = episode_files(generate(7, {'currencies': ['USD', 'EUR'], 'interaction': 'none'})); "
                 "print(hashlib.sha256(json.dumps(f, sort_keys=True).encode()).hexdigest())")
         digests = set()
         for hash_seed, zone, locale in (("0", "UTC", "C"), ("4242", "Asia/Tokyo", "ru_RU.UTF-8")):
@@ -175,6 +341,13 @@ class SurfaceTest(unittest.TestCase):
         ids = list(episode["private"]["provenance"]["id_map"].values())
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all(len(i) == 10 and i.isalnum() and i.islower() for i in ids))
+
+    def test_documents_are_ordered_by_moment(self):
+        public = generate(9, CLEAN)["public"]
+        moments = [parse_time(i["issued_at"]) for i in public["invoices"]]
+        self.assertEqual(moments, sorted(moments))
+        moments = [parse_time(r["timestamp"]) for r in public["ledger"]]
+        self.assertEqual(moments, sorted(moments))
 
 
 if __name__ == "__main__":

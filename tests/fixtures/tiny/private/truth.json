@@ -14,7 +14,27 @@
    "evidence_sets": [
     [
      "k7m2qa",
-     "z5c1ty"
+     "z5c1ty",
+     "a1",
+     "a3"
+    ],
+    [
+     "k7m2qa",
+     "z5c1ty",
+     "a1",
+     "a4"
+    ],
+    [
+     "k7m2qa",
+     "z5c1ty",
+     "a2",
+     "a3"
+    ],
+    [
+     "k7m2qa",
+     "z5c1ty",
+     "a2",
+     "a4"
     ]
    ]
   }

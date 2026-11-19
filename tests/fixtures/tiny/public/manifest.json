@@ -9,7 +9,7 @@
   "ledger": 12,
   "invoices": 3,
   "payments": 2,
-  "fx": 31
+  "fx": 41
  },
  "rounding": "half_even",
  "config_version": "1"
