@@ -16,7 +16,7 @@ from .rng import Rng
 _VALUE = {"KZT": 21, "USD": 10000, "EUR": 10900, "RUB": 110, "CNY": 1380}
 _SERVICES = ("Consulting", "Software licence", "Support plan", "Hosting", "Training",
              "Integration work", "Audit preparation", "Data migration", "Maintenance", "Design work")
-_TERMS_DAYS = (14, 30, 45)
+TERMS_DAYS = (14, 30, 45)
 FX_MARGIN_DAYS = 5
 
 
@@ -89,7 +89,7 @@ def build_world(rng: Rng, config: dict) -> dict:
             items = _line_items(stream, start, end)
             issued = _moment(stream, start, end)
             invoice = {"key": f"I{index}", "entity": stream.choice(customers), "currency": currency,
-                       "issued_at": issued, "due_at": issued + dt.timedelta(days=stream.choice(_TERMS_DAYS)),
+                       "issued_at": issued, "due_at": issued + dt.timedelta(days=stream.choice(TERMS_DAYS)),
                        "total_minor": sum(item["amount_minor"] for item in items), "line_items": items}
             signature = invoice_signature(invoice)
             if signature not in signatures:
