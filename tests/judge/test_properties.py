@@ -70,9 +70,9 @@ class FivePropertiesTest(unittest.TestCase):
                             self.assertLess(dup["reward"], base["reward"])
 
     def test_4_flag_everything_is_bad(self):
-        # Synthetic company with N invoices and the documented density limit (<= 1 issue per 5
-        # invoices). "Flag everything": one finding per invoice per type, capped at 30 by the
-        # case. Optimistic attacker: every issue among the flags is perfectly correct (TP = T).
+        # Synthetic company with N invoices and a density limit stricter than the documented one
+        # (<= 1 issue per 5 invoices; DECISIONS A3 allows only 1 per 8). "Flag everything": one
+        # finding per invoice per type, capped at 30 by the case. Optimistic attacker: every issue among the flags is perfectly correct (TP = T).
         for n_docs in range(5, 31):
             n_issues = n_docs // 5
             ep = helpers.episode(n_issues, n_filler_docs=n_docs - 2 * n_issues)

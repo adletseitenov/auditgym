@@ -39,7 +39,7 @@ class TinyFixtureTest(unittest.TestCase):
     def test_structure_error_shape(self):
         result = judge(self.ep, {"episode_id": "nope", "findings": []}, 5)
         self.assertEqual(result, {"reward": -1.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
-                                  "tp": 0, "fp": 0, "fn": 0, "structure_error": "wrong_episode_id"})
+                                  "tp": 0, "fp": 0, "fn": 1, "structure_error": "wrong_episode_id"})
 
     def test_judge_does_not_mutate_inputs(self):
         before = copy.deepcopy((self.ep, self.answer))
@@ -95,6 +95,48 @@ class KeyingTest(unittest.TestCase):
                                ep["public"])
         self.assertEqual(result["pairs"], [[1, "t00"]])
         self.assertEqual((result["tp"], result["fp"], result["fn"]), (1, 2, 0))
+
+
+class MaximumMatchingTest(unittest.TestCase):
+    """Review finding: with two truth issues on one key, a greedy pass made TP depend on order."""
+
+    def setUp(self):
+        self.ep = helpers.episode(0)
+        self.ep["public"]["invoices"] += [helpers._doc("p")]
+        self.ep["public"]["ledger"] += [helpers._row("r1"), helpers._row("r2")]
+        self.ep["private"]["truth"]["issues"] = [
+            {"issue_id": "t1", "type": "fx_error", "affected_ids": ["p"], "expected_amount_minor": 5,
+             "currency": "KZT", "evidence_sets": [["p", "r1"]]},
+            {"issue_id": "t2", "type": "fx_error", "affected_ids": ["p"], "expected_amount_minor": 5,
+             "currency": "KZT", "evidence_sets": [["p", "r2"]]},
+        ]
+
+    def finding(self, evidence):
+        return {"type": "fx_error", "affected_ids": ["p"], "claimed_amount_minor": 5, "currency": "KZT",
+                "evidence_ids": evidence, "explanation": ""}
+
+    def test_counts_do_not_depend_on_order_when_keys_repeat(self):
+        wide, narrow = self.finding(["p", "r1", "r2"]), self.finding(["p", "r1"])
+        truth = self.ep["private"]["truth"]
+        forward = matcher.match(truth, normalized(self.ep, [wide, narrow]), self.ep["public"])
+        backward = matcher.match(truth, normalized(self.ep, [narrow, wide]), self.ep["public"])
+        self.assertEqual((forward["tp"], forward["fp"], forward["fn"]), (2, 0, 0))
+        self.assertEqual((backward["tp"], backward["fp"], backward["fn"]), (2, 0, 0))
+        self.assertEqual(forward["pairs"], [[0, "t2"], [1, "t1"]])
+
+    def test_one_finding_still_takes_one_issue(self):
+        result = matcher.match(self.ep["private"]["truth"],
+                               normalized(self.ep, [self.finding(["p", "r1", "r2"])] * 3), self.ep["public"])
+        self.assertEqual((result["tp"], result["fp"], result["fn"]), (2, 1, 0))
+
+
+class SupersetDefaultTest(unittest.TestCase):
+    def test_missing_policy_key_means_allowed_as_the_task_text_says(self):
+        ep = helpers.episode(1)
+        del ep["public"]["policy"]["evidence_superset_allowed"]
+        f = helpers.oracle(ep)[0]
+        f["evidence_ids"] = f["evidence_ids"] + ["f00"]
+        self.assertEqual(judge(ep, helpers.submit(ep, [f]), 1)["tp"], 1)
 
 
 class OrderIndependenceTest(unittest.TestCase):

@@ -90,8 +90,11 @@ class FuzzTest(unittest.TestCase):
             codes.add(result["structure_error"])
             try:
                 parse_findings(payload, ep["public"]["manifest"]["episode_id"])
-            except StructureError:
-                pass
+                parsed_code = None
+            except StructureError as error:
+                parsed_code = error.code
+            # None is the truncation signal for judge (empty answer), not a submitted payload.
+            self.assertEqual(result["structure_error"], None if payload is None else parsed_code)
         self.assertIn(None, codes)
         self.assertGreater(len(codes), 6)  # the fuzz reaches many distinct checks
 

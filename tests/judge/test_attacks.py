@@ -22,12 +22,8 @@ class AttackTableTest(unittest.TestCase):
                 finding["explanation"] = text
             self.assertEqual(judge(episode, base, 10), reference)
 
-    def test_resubmission_is_not_rewarded_twice(self):
-        # The judge is pure: the same answer judged again gives the same result, never more.
-        episode = EPISODES["tiny"]()
-        answer = build_payload(episode, oracle_findings)
-        self.assertEqual(judge(episode, answer, 5), judge(episode, answer, 5))
-
+    # Resubmission is a protocol rule (the second submit gets `episode_over`, no reward), so it
+    # is tested where it lives: tests/env/test_evaluator.py. The pure judge has no state.
 
 if __name__ == "__main__":
     unittest.main()

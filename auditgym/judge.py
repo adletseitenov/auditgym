@@ -2,7 +2,8 @@
 
 `payload=None` means the episode was truncated (step or time limit): the answer is empty and
 `inspection_steps` is used as given (the evaluator passes 100). Invalid structure gives reward
--1.0, zero metrics and counts, and `structure_error` set to the StructureError code.
+-1.0, zero metrics, tp = fp = 0, fn = number of truth issues (none was found), and
+`structure_error` set to the StructureError code.
 """
 from __future__ import annotations
 
@@ -23,7 +24,8 @@ def judge(episode: dict, payload: object, inspection_steps: int) -> dict:
             findings = parse_findings(payload, public["manifest"]["episode_id"])
         except StructureError as error:
             return {"reward": -1.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
-                    "tp": 0, "fp": 0, "fn": 0, "structure_error": error.code}
+                    "tp": 0, "fp": 0, "fn": len(truth.get("issues", [])),
+                    "structure_error": error.code}
     counts = match(truth, findings, public)
     exact = metrics_exact(counts["tp"], counts["fp"], counts["fn"])
     reward = terminal_reward_exact(exact["f1"], inspection_steps)
