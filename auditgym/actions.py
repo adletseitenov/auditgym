@@ -109,7 +109,10 @@ TASK_TEXT = (
     "get_record(table, id), get_document(doc_id), calculator(expression), submit(findings). "
     "Таблицы: ledger, invoices, payments, fx; ID курса — \"дата|из|в\". "
     "Страница — до 50 записей, next_cursor = null на последней. Каждое действие, в том числе "
-    "с ошибкой, расходует шаг; submit завершает эпизод. Ответ — findings по схеме, "
+    "с ошибкой, расходует шаг; submit завершает эпизод. "
+    f"Бюджет — {MAX_STEPS} шагов, и submit входит в него: последним шагом должен быть submit, "
+    f"не позже {MAX_STEPS}-го. Если {MAX_STEPS} шагов прошли без submit, эпизод обрезается "
+    "и ответ считается пустым. Ответ — findings по схеме, "
     "episode_id из manifest; ложные выводы снижают награду."
 )
 

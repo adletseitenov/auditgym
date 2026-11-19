@@ -73,6 +73,24 @@ class ResetTest(unittest.TestCase):
         self.assertIn("episode_id", task["findings_schema"]["required"])
         self.assertTrue(task["text"])
 
+    def test_task_text_says_the_budget_includes_submit_and_matches_the_behaviour(self):
+        text = Evaluator(clock=FakeClock()).load(TINY)[0]["task"]["text"]
+        self.assertIn("Бюджет — 100 шагов, и submit входит в него", text)
+        self.assertIn("последним шагом должен быть submit, не позже 100-го", text)
+        self.assertIn("Если 100 шагов прошли без submit, эпизод обрезается", text)
+        # What the text says is what happens: submit as step 100 counts, step 100 without it truncates.
+        evaluator = tiny()
+        for _ in range(99):
+            evaluator.step({"action": "list_records", "table": "fx"})
+        _, reward, terminated, truncated, info = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
+        self.assertEqual((terminated, truncated, info["f1"], info["inspection_steps"]), (True, False, 1.0, 99))
+        evaluator = tiny()
+        for _ in range(100):
+            result = evaluator.step({"action": "list_records", "table": "fx"})
+        self.assertEqual(result[2:4], (False, True))
+        self.assertEqual(evaluator.step({"action": "submit", "findings": CORRECT_TINY})[0]["error"]["code"],
+                         "episode_over")
+
     def test_manifest_and_policy_are_the_open_files(self):
         evaluator = Evaluator(clock=FakeClock())
         observation, _ = evaluator.load(TINY)
