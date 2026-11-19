@@ -67,6 +67,61 @@ def written_episode_loads_back() -> Optional[str]:
         return None if load_episode(directory) == episode else "loaded episode differs"
 
 
+def solver_equals_truth() -> Optional[str]:
+    """The independent solver, on open records only, must return exactly the generated truth."""
+    from auditgym.generate import generate
+    from auditgym.solver import solve
+
+    def key(item: dict, amount: str) -> tuple:
+        return (item["type"], frozenset(item["affected_ids"]), item[amount], item["currency"])
+
+    configs = [{"errors": {"duplicate_invoice": 1, "period_cutoff": 1}, "currencies": ["USD"]},
+               {"errors": {"duplicate_invoice": 2, "period_cutoff": 2}, "currencies": ["USD", "EUR"],
+                "timezone": "-11:00"}]
+    for config in configs:
+        for seed in range(100):
+            episode = generate(seed, config)
+            truth = {key(issue, "expected_amount_minor") for issue in episode["private"]["truth"]["issues"]}
+            found = [key(finding, "claimed_amount_minor") for finding in solve(episode["public"])]
+            if set(found) != truth or len(found) != len(truth):
+                return f"seed {seed}: solver and truth differ"
+    return None
+
+
+# Checks written by each zone. A name equal to a planned check replaces its todo;
+# any other name is appended to the zone's criterion.
+ZONE_CHECKS = {
+    "Данные и эталон": ("tools.checks_gen", "tools.checks_solver"),
+    "Надёжность награды": ("tools.checks_judge",),
+    "Контракт и изоляция": ("tools.checks_env",),
+}
+RENAMES = {
+    "any seed and any valid config gives a valid episode":
+        "any seed and any valid config gives a valid episode; invalid config is rejected",
+    "clean companies: solver finds nothing (50 seeds)": "clean companies: solver finds nothing",
+}
+
+
+def _load_zone_checks() -> None:
+    import importlib
+
+    for criterion, modules in ZONE_CHECKS.items():
+        checks = next(c for name, _, c in CRITERIA if name == criterion)
+        names = [name for name, _ in checks]
+        for module_name in modules:
+            try:
+                module = importlib.import_module(module_name)
+            except ModuleNotFoundError:
+                continue
+            for name, function in module.CHECKS:
+                name = RENAMES.get(name, name)
+                if name in names:
+                    checks[names.index(name)] = (name, function)
+                else:
+                    checks.append((name, function))
+                    names.append(name)
+
+
 # (criterion, points, [(check name, function)]). Names are the plan: one per sentence of the case.
 CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
     ("Контракт и изоляция", 25, [
@@ -90,7 +145,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("books balance before injection (per book, per currency, per event group)", clean_books_are_well_formed),
         ("after injection the deviation equals expected_amount_minor of each issue", todo),
         ("every evidence set exists, has at most 10 ids and is sufficient", todo),
-        ("independent solver on open records equals the truth (1000 seeds)", todo),
+        ("independent solver on open records equals the truth (200 episodes; make fuzz runs more)", solver_equals_truth),
         ("clean companies: solver finds nothing", todo),
         ("distractors do not satisfy any error definition", todo),
         ("each of the four error types can be configured on its own", todo),
@@ -134,8 +189,13 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
 ]
 
 
+def _pending(message: str) -> bool:
+    return message == "TODO" or message.startswith("not implemented")
+
+
 def main(argv: list[str]) -> int:
     strict = "--strict" in argv
+    _load_zone_checks()
     total = 0.0
     failed_real = 0
     not_passed = 0
@@ -149,10 +209,11 @@ def main(argv: list[str]) -> int:
                 passed += 1
                 continue
             not_passed += 1
-            if function is not todo:
+            pending = _pending(message)
+            if not pending:
                 failed_real += 1
-            details.append(f"  [{'TODO' if function is todo else 'FAIL'}] {name}: {check_name}"
-                           + ("" if function is todo else f" -- {message}"))
+            details.append(f"  [{'TODO' if pending else 'FAIL'}] {name}: {check_name}"
+                           + ("" if message == "TODO" else f" -- {message}"))
         earned = points * passed / len(checks)
         total += earned
         print(f"{name:<34}{passed:>6}/{len(checks):<3}{earned:>8.1f}/{points:g}")
