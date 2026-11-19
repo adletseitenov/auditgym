@@ -142,6 +142,13 @@ class CalculatorRejectsTest(unittest.TestCase):
         self.assertEqual(len("1+" * 99 + "1"), 199)
         self.assertEqual(calculate("1+" * 99 + "1"), "100")
 
+    def test_nesting_of_exactly_100_levels_is_accepted(self):
+        """Docstring: nesting deeper than 100 levels is refused; 100 itself is fine (attacker E8 #6)."""
+        self.assertEqual(calculate("-" * 100 + "1"), "1")
+        self.rejects("-" * 101 + "1")
+        self.assertEqual(calculate("-(" * 50 + "1" + ")" * 50), "1")
+        self.rejects("-(" * 50 + "-1" + ")" * 50)
+
     def test_limit_is_200(self):
         self.assertEqual(MAX_LENGTH, 200)
         self.assertEqual(calculate("1" * 34 + " " * 166), "1" * 34)

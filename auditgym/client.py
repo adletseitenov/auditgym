@@ -33,6 +33,10 @@ Hardening of the process boundary:
 - A policy holding this object can still reach the pipes (Python has no private attributes), so
   the server gives the pipe no more power than reset/step: `load` is accepted only as the first
   request and only by a server started for Env.from_files; Env() starts it with `--no-load`.
+- That power is still enough to swap episodes: a policy running in the harness's process can find
+  this object (gc) and reset it to an episode of its choice before submitting. In a closed run,
+  run the policy in another process than the harness, and check that every judge-log line carries
+  the episode_id the harness got from its own reset (task E8; docs/AUDIT.md L2).
 """
 from __future__ import annotations
 

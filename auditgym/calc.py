@@ -78,7 +78,7 @@ class _Parser:
     def __init__(self, tokens: list[str]) -> None:
         self.tokens = tokens
         self.position = 0
-        self.depth = 0
+        self.depth = -1  # the outermost expression is level 0: each "(" or unary "-" adds one
         self.context = CONTEXT.copy()
 
     def peek(self) -> str | None:
