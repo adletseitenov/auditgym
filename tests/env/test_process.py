@@ -17,9 +17,11 @@ from auditgym.generate import generate
 from auditgym.storage import write_episode
 from tests.env.helpers import (CLEAN, ROOT, TINY, FakeClock, assert_no_leak, full_walk, strict_json)
 
+# DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
+# invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
 CORRECT_TINY = {"episode_id": "ep_tiny0001", "findings": [{
     "type": "duplicate_invoice", "affected_ids": ["k7m2qa", "z5c1ty"], "claimed_amount_minor": 5000000,
-    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty"], "explanation": "Same customer and total."}]}
+    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty", "a1", "a3"], "explanation": "Same customer and total."}]}
 
 
 class _EnvAdapter:

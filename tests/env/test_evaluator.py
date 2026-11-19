@@ -19,9 +19,11 @@ KEYS = {
     "error": {"type", "error", "steps_remaining"},
     "final": {"type", "steps_remaining"},
 }
+# DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
+# invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
 CORRECT_TINY = {"episode_id": "ep_tiny0001", "findings": [{
     "type": "duplicate_invoice", "affected_ids": ["z5c1ty", "k7m2qa"], "claimed_amount_minor": 5000000,
-    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty"], "explanation": "Same customer and total."}]}
+    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty", "a1", "a3"], "explanation": "Same customer and total."}]}
 
 
 def walk_table(evaluator, table, limit=None):
@@ -152,7 +154,7 @@ class StepShapeTest(unittest.TestCase):
     def test_fx_record_by_composite_key(self):
         observation = tiny().step({"action": "get_record", "table": "fx", "id": "2026-10-01|USD|KZT"})[0]
         self.assertEqual(observation["record"], {"date": "2026-10-01", "source_currency": "USD",
-                                                 "target_currency": "KZT", "rate": "466.21"})
+                                                 "target_currency": "KZT", "rate": "466.2100"})
 
     def test_missing_links_are_null(self):
         observation = tiny().step({"action": "get_record", "table": "ledger", "id": "b2"})[0]

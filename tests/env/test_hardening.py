@@ -12,9 +12,11 @@ from unittest import mock
 from auditgym import Env
 from tests.env.helpers import TINY
 
+# DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
+# invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
 CORRECT_TINY = {"episode_id": "ep_tiny0001", "findings": [{
     "type": "duplicate_invoice", "affected_ids": ["k7m2qa", "z5c1ty"], "claimed_amount_minor": 5000000,
-    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty"], "explanation": "x"}]}
+    "currency": "KZT", "evidence_ids": ["k7m2qa", "z5c1ty", "a1", "a3"], "explanation": "x"}]}
 
 
 def _raw(env, message: dict) -> dict:
