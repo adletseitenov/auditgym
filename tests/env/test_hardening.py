@@ -91,8 +91,10 @@ class PipeInjectionTest(unittest.TestCase):
         with Env() as env:
             reply = _raw(env, {"op": "load", "directory": str(TINY)})
             self.assertEqual(reply["observation"]["error"]["code"], "bad_request")
+            # The refused load loaded nothing: reset() without a seed generates the default episode.
             reply = _raw(env, {"op": "reset"})
-            self.assertEqual(reply["observation"]["error"]["code"], "not_loaded")
+            self.assertEqual(reply["observation"]["type"], "reset")
+            self.assertNotEqual(reply["observation"]["manifest"]["episode_id"], "ep_tiny0001")
 
     def test_server_stderr_is_not_connected_to_the_client(self):
         seen = {}
