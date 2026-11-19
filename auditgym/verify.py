@@ -23,12 +23,12 @@ import datetime as dt
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
-from .money import convert, fx_key, local_date, parse_offset, parse_time, significant_digits
+from .limits import MAX_EVIDENCE_IDS as MAX_EVIDENCE
+from .limits import MAX_LEDGER_ROWS
+from .money import closed_share, convert, fx_key, local_date, parse_offset, parse_time, significant_digits
 
 LEDGER_FIELDS = ["row_id", "timestamp", "account", "debit_minor", "credit_minor", "currency",
                  "entity_id", "invoice_id", "payment_id"]
-MAX_EVIDENCE = 10
-MAX_LEDGER_ROWS = 2000
 FX_MARGIN_DAYS = 5
 FX_MIN_MINOR = 100
 FX_MIN_PER_MILLE = 5
@@ -151,8 +151,10 @@ def predicate_issues(public: dict) -> tuple[list[dict], list[str]]:
         if correct is None:
             undefined.append(f"invoice {invoice['doc_id']}: no rate for its date")
             continue
-        values = [r["debit_minor"] for r in rows if r["account"] == acc["receivable"]]
-        values += [r["credit_minor"] for r in rows if r["account"] == acc["revenue"]]
+        # Conversion rows only: the receivable debit and the revenue credit (an extra receivable credit
+        # in the invoice's group is not a conversion of the invoice and is not compared).
+        values = [r["debit_minor"] for r in rows if r["account"] == acc["receivable"] and r["debit_minor"] > 0]
+        values += [r["credit_minor"] for r in rows if r["account"] == acc["revenue"] and r["credit_minor"] > 0]
         deviation = max(abs(value - correct) for value in values) if values else 0
         if deviation > tolerance:
             issues.append({"type": "fx_error", "affected_ids": [invoice["doc_id"]], "amount": deviation,
@@ -165,7 +167,11 @@ def predicate_issues(public: dict) -> tuple[list[dict], list[str]]:
         if correct is None:
             undefined.append(f"payment {payment['doc_id']}: no rate for its date")
             continue
-        cash = sum(r["debit_minor"] - r["credit_minor"] for r in rows if r["account"] == acc["cash"])
+        cash_rows = [r for r in rows if r["account"] == acc["cash"]]
+        if not cash_rows:  # nothing converted the payment: no fx_error (the solver reads it the same way)
+            undefined.append(f"payment {payment['doc_id']}: posted without a cash row")
+            continue
+        cash = sum(r["debit_minor"] - r["credit_minor"] for r in cash_rows)
         if abs(cash - correct) > tolerance:
             issues.append({"type": "fx_error", "affected_ids": [payment["doc_id"]], "amount": abs(cash - correct),
                            "currency": books.base})
@@ -276,6 +282,9 @@ def _check_documents(books: Books, name: str) -> list[str]:
                 problems.append(f"{name}: payment {doc}: invoices of several customers")
             if len(refs) > 1 and payment["amount_minor"] != sum(inv["total_minor"] for inv in invoices):
                 problems.append(f"{name}: payment {doc}: several references but not their full total")
+        if refs is not None and any(parse_time(payment["timestamp"]) < parse_time(books.invoices[ref]["issued_at"])
+                                    for ref in refs if ref in books.invoices):
+            problems.append(f"{name}: payment {doc} is dated before its invoice")
         if payment["amount_minor"] < 0 and (refs is None or len(refs) != 1):
             problems.append(f"{name}: refund {doc} must refer to exactly one invoice")
         if books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"]) is None:
@@ -311,8 +320,8 @@ def _check_fx(public: dict, books: Books) -> list[str]:
 
 def expected_closings(books: Books) -> dict[str, dict]:
     """Per posted payment: the policy closings {"closes": {invoice_id: base}, "unallocated": base}
-    and a rule problem (or None), by the payment rule of auditgym/books.py."""
-    remaining = {iid: inv["total_minor"] for iid, inv in books.invoices.items()}
+    and a rule problem (or None), by policy.payment_rule (money.closed_share)."""
+    paid: dict[str, int] = defaultdict(int)
     closed: dict[str, int] = defaultdict(int)
     count: dict[str, int] = defaultdict(int)
     out = {}
@@ -330,21 +339,23 @@ def expected_closings(books: Books) -> dict[str, dict]:
         elif len(refs) > 1:
             for ref in refs:
                 closes[ref] = books.booked(ref) - closed[ref]
-                remaining[ref] -= books.invoices[ref]["total_minor"]
+                paid[ref] = books.invoices[ref]["total_minor"]
         else:
             ref = refs[0]
-            if amount < 0:
-                closes[ref] = value
-            elif amount < remaining[ref]:
-                closes[ref] = value
+            total, booked = books.invoices[ref]["total_minor"], books.booked(ref)
+            after = paid[ref] + amount
+            if amount > 0 and after > total:
+                closes[ref] = booked - closed[ref]
+                unallocated = books.policy_amount(after - total, payment["currency"], payment["timestamp"])
+                if count[ref]:
+                    rule = "overpayment after another payment"
+                after = total
+            elif after < 0:
+                rule = "a refund larger than what was paid"
+                after = 0
             else:
-                closes[ref] = books.booked(ref) - closed[ref]
-                if amount > remaining[ref]:
-                    unallocated = books.policy_amount(amount - remaining[ref], payment["currency"], payment["timestamp"])
-                    if count[ref]:
-                        rule = "overpayment after another payment"
-            if amount > 0:
-                remaining[ref] -= amount
+                closes[ref] = closed_share(booked, total, after) - closed[ref]
+            paid[ref] = after
         for ref, part in closes.items():
             closed[ref] += part
             count[ref] += 1
@@ -499,24 +510,43 @@ def _evidence_problem(books: Books, issue: dict) -> str | None:
         credit = [r["row_id"] for r in rows if r["credit_minor"] > 0]
         return debit + credit if len(debit) == 1 and len(credit) == 1 and len(rows) == 2 else []
 
+    def rate_key(doc: dict) -> str:
+        moment = doc.get("issued_at", doc.get("timestamp"))
+        return fx_key(local_date(moment, books.offset), doc["currency"], books.base)
+
     kind = issue["type"]
     if kind == "duplicate_invoice":
         a, b = (sides(doc) for doc in docs)
         want = sorted(sorted(affected + [ra, rb]) for ra in a for rb in b)
         return None if a and b and sets == want else "duplicate_invoice needs the four [docA, docB, rowA, rowB] sets"
+    acc = books.accounts
     if kind == "allocation_gap":
         payment = next((d for d in docs if "payment_id" in d), None)
-        rows = [r for r in books.by_payment.get(payment["payment_id"], []) if r["account"] == books.accounts["unallocated"]] \
-            if payment else []
-        return None if len(rows) == 1 and sets == [sorted(affected + [rows[0]["row_id"]])] \
-            else "allocation_gap needs [payment, invoice, unallocated row]"
+        invoice = next((d for d in docs if "line_items" in d), None)
+        if payment is None or invoice is None:
+            return "allocation_gap needs a payment and an invoice"
+        rows = books.by_payment.get(payment["payment_id"], [])
+        unallocated = [r["row_id"] for r in rows if r["account"] == acc["unallocated"]]
+        closing = [r["row_id"] for r in rows if r["account"] == acc["receivable"]
+                   and r["invoice_id"] == invoice["invoice_id"] and r["credit_minor"] > 0]
+        debit = [r["row_id"] for r in books.own.get(invoice["invoice_id"], [])
+                 if r["account"] == acc["receivable"] and r["debit_minor"] > 0]
+        ok = len(unallocated) == len(closing) == len(debit) == 1
+        return None if ok and sets == [sorted(affected + unallocated + debit + closing)] \
+            else "allocation_gap needs [payment, invoice, unallocated row, invoice receivable debit, payment receivable credit]"
     doc = docs[0]
+    key = rate_key(doc) if kind == "fx_error" else None
+    if kind == "fx_error" and key not in books.rates:
+        return "fx_error: no rate for the document's date"
     if kind == "fx_error" and "payment_id" in doc:
-        rows = [r["row_id"] for r in own_rows(doc) if r["account"] == books.accounts["cash"]]
-        return None if len(rows) == 1 and sets == [sorted([doc["doc_id"], rows[0]])] else "fx_error on a payment needs [doc, cash row]"
+        rows = [r["row_id"] for r in own_rows(doc) if r["account"] == acc["cash"]]
+        return None if len(rows) == 1 and sets == [sorted([doc["doc_id"], rows[0], key])] \
+            else "fx_error on a payment needs [doc, cash row, fx key]"
     pair = sides(doc)
-    want = sorted(sorted([doc["doc_id"], row]) for row in pair)
-    return None if pair and sets == want else f"{kind} needs [doc, debit row] and [doc, credit row]"
+    extra = [key] if kind == "fx_error" else []
+    want = sorted(sorted([doc["doc_id"], row, *extra]) for row in pair)
+    return None if pair and sets == want else f"{kind} needs [doc, debit row] and [doc, credit row]" + \
+        (" with the fx key" if extra else "")
 
 
 def _check_rules(books: Books, issue: dict, operator: str) -> str | None:

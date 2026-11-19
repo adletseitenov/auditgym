@@ -37,6 +37,17 @@ def convert(amount_minor: int, rate: Decimal, exponent_source: int, exponent_bas
     return int(scaled.quantize(Decimal(1), rounding=ROUND_HALF_EVEN))
 
 
+def closed_share(booked_minor: int, total_minor: int, paid_minor: int) -> int:
+    """Payment rule (policy.payment_rule): the part of an invoice's booked base amount that payments
+    of `paid_minor` out of `total_minor` (document currency) have closed, half-even. A payment
+    closes the difference of this value before and after it, so the receivable closes in proportion
+    at the invoice's booked rate and the last payment closes exactly what is left."""
+    if total_minor <= 0:
+        raise ValueError("an invoice total must be positive")
+    share = Decimal(booked_minor) * Decimal(paid_minor) / Decimal(total_minor)
+    return int(share.quantize(Decimal(1), rounding=ROUND_HALF_EVEN))
+
+
 def fx_key(date: str, source: str, target: str) -> str:
     return f"{date}|{source}|{target}"
 

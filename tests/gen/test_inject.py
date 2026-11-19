@@ -7,7 +7,7 @@ from collections import Counter
 from auditgym.books import build_books, payment_parts
 from auditgym.config import normalize_config
 from auditgym.generate import generate
-from auditgym.inject import _cutoff_moment, interaction_i1, period_cutoff
+from auditgym.inject import interaction_i1
 from auditgym.judge import judge
 from auditgym.money import in_period, local_date, parse_time
 from auditgym.rng import Rng
@@ -114,30 +114,44 @@ class OperatorTest(unittest.TestCase):
                 self.assertTrue(originals.isdisjoint(issue["affected_ids"]))  # one copy per original
                 originals |= set(issue["affected_ids"])
 
-    def test_cutoff_dates_cover_both_sides_and_shift_the_service_period(self):
+    def test_cutoff_posts_an_unposted_neighbouring_period_invoice(self):
+        """D4: the target is a legitimately unposted invoice of the neighbouring period; its document
+        does not change and the ledger gains exactly its two rows at the policy amount."""
         directions, near, on_edge, paid = Counter(), 0, 0, 0
         for seed in range(120):
             episode = generate(seed, config(cut=1, currencies=["USD"], timezone="-11:00"))
-            policy = episode["public"]["policy"]
-            step = episode["private"]["provenance"]["steps"][0]
+            public, private = episode["public"], episode["private"]
+            policy = public["policy"]
+            step = private["provenance"]["steps"][0]
             params = step["params"]
             directions[params["direction"]] += 1
-            near += params["seconds_outside"] <= 6 * 3600
-            on_edge += params["seconds_outside"] <= 1
             paid += params["paid"]
-            invoice = next(r for r in step["after"] if "line_items" in r)
+            (issue,) = issues_of(episode)
+            doc = issue["affected_ids"][0]
+            invoice = by_id(public["invoices"], "doc_id")[doc]
+            self.assertEqual(by_id(private["pre_invoices"], "doc_id")[doc], invoice)  # document unchanged
+            self.assertEqual([r for r in step["before"] if "line_items" in r], [r for r in step["after"] if "line_items" in r])
             self.assertFalse(in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]))
             edge = policy["period_start"] if params["direction"] == "before_start" else policy["period_end"]
-            self.assertLess(abs(parse_time(invoice["issued_at"]) - parse_time(edge)), dt.timedelta(days=4))  # ruling 3
+            distance = abs(parse_time(invoice["issued_at"]) - parse_time(edge))
+            self.assertLess(distance, dt.timedelta(days=4))  # ruling G3
+            near += distance <= dt.timedelta(hours=6)
+            on_edge += distance <= dt.timedelta(seconds=1)
             first, last = local_date(policy["period_start"], "-11:00"), "2026-10-31"
             for item in invoice["line_items"]:
                 self.assertTrue(item["service_end"] < first or item["service_start"] > last)
-            fx_dates = {r["date"] for r in episode["public"]["fx"]}
-            self.assertIn(local_date(invoice["issued_at"], policy["timezone"]), fx_dates)
-            rows = [r for r in episode["public"]["ledger"] if r["invoice_id"] == invoice["invoice_id"] and not r["payment_id"]]
-            issue = issues_of(episode)[0]
+            added = [r for r in step["after"] if "row_id" in r]
+            self.assertEqual([r for r in step["before"] if "row_id" in r], [])
+            self.assertEqual(sorted(r["account"] for r in added), ["receivable", "revenue"])
+            pre_ids = {r["row_id"] for r in private["pre_ledger"]}
+            self.assertEqual({r["row_id"] for r in public["ledger"]} - pre_ids, {r["row_id"] for r in added})
+            rate = by_id(public["fx"], "date").get(local_date(invoice["issued_at"], policy["timezone"]))
+            if invoice["currency"] == policy["base_currency"]:
+                self.assertEqual({r["debit_minor"] + r["credit_minor"] for r in added}, {invoice["total_minor"]})
+            else:
+                self.assertIsNotNone(rate)
             self.assertEqual(sorted(map(sorted, issue["evidence_sets"])),
-                             sorted(sorted([invoice["doc_id"], r["row_id"]]) for r in rows))
+                             sorted(sorted([doc, r["row_id"]]) for r in added))
         self.assertGreater(directions["before_start"], 35)
         self.assertGreater(directions["after_end"], 35)
         self.assertGreater(near, 30)
@@ -160,6 +174,13 @@ class OperatorTest(unittest.TestCase):
                     self.assertGreater(doc["amount_minor"], 0)  # ruling 5: no refunds or advances as targets
                     self.assertIsNotNone(doc["invoice_refs"])
                     self.assertEqual(len(issue["evidence_sets"]), 1)
+                key = f"{local_date(doc.get('issued_at', doc.get('timestamp')), 'policy' and episode['public']['policy']['timezone'])}" \
+                      f"|{doc['currency']}|{episode['public']['policy']['base_currency']}"
+                for group in issue["evidence_sets"]:  # D1: doc, one conversion row, the fx key
+                    self.assertEqual(len(group), 3)
+                    self.assertIn(doc["doc_id"], group)
+                    self.assertIn(key, group)
+                self.assertEqual(len(issue["evidence_sets"]), 1 if "payment_id" in doc else 2)
         self.assertGreater(modes["wrong_date"], 20)
         self.assertGreater(modes["wrong_rate"], 20)
         self.assertGreater(payments, 10)
@@ -182,6 +203,13 @@ class OperatorTest(unittest.TestCase):
                                and r["account"] == "unallocated"]
                 self.assertEqual(len(unallocated), 1)
                 self.assertEqual(unallocated[0]["credit_minor"], issue["expected_amount_minor"])
+                debit = [r["row_id"] for r in public["ledger"] if r["invoice_id"] == invoice["invoice_id"]
+                         and not r["payment_id"] and r["account"] == "receivable"]
+                credit = [r["row_id"] for r in public["ledger"] if r["payment_id"] == payment["payment_id"]
+                          and r["account"] == "receivable"]
+                self.assertEqual(issue["evidence_sets"],  # D1
+                                 [sorted([payment["doc_id"], invoice["doc_id"]]) + sorted(
+                                     [unallocated[0]["row_id"], debit[0], credit[0]])])
                 others = [p for p in public["payments"] if invoice["invoice_id"] in (p["invoice_refs"] or [])]
                 self.assertEqual(others, [payment])
 
@@ -220,28 +248,26 @@ class OperatorTest(unittest.TestCase):
 
 
 class RulingTest(unittest.TestCase):
-    def test_shifted_cutoff_never_duplicates_another_invoice(self):
-        """Ruling 1: a move that would give the signature of a recurring twin is skipped."""
-        checked = 0
-        for seed in range(60):
-            cfg = normalize_config({"errors": {}, "size": SMALL})
-            world = build_world(Rng(seed, "story"), cfg)
-            start = world["period_start"].date().isoformat()
-            twins = [inv for inv in world["invoices"] if inv["posted_at"] and inv["line_items"][0]["service_end"] < start]
-            for twin in twins:
-                like = next((inv for inv in world["invoices"] if inv is not twin and inv["posted_at"]
-                             and inv["entity"] == twin["entity"] and inv["total_minor"] == twin["total_minor"]
-                             and inv["currency"] == twin["currency"]), None)
-                if like is None:
+    def test_recurring_twins_split_the_period_service(self):
+        """D3: a recurring twin bills the other half of the period's service, never a neighbouring month."""
+        twins = 0
+        for seed in range(30):
+            public = generate(seed, {"errors": {}, "currencies": ["USD"]})["public"]
+            policy = public["policy"]
+            self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period")
+            first, last = "2026-10-01", "2026-10-31"
+            posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
+            loose = Counter()
+            for invoice in public["invoices"]:
+                if invoice["invoice_id"] not in posted:
                     continue
-                other = next(inv["key"] for inv in world["invoices"] if inv["posted_at"] and inv not in (twin, like))
-                for case in range(12):
-                    direction = _cutoff_moment(Rng(case), world["period_start"], world["period_end"])[1]
-                    _, injection = period_cutoff(Rng(case), world, [like["key"], other], set())
-                    target = injection["affected"][0]
-                    self.assertEqual(target == "D:" + like["key"], direction == "after_end")
-                    checked += 1
-        self.assertGreater(checked, 20)
+                for item in invoice["line_items"]:
+                    self.assertTrue(first <= item["service_start"] <= item["service_end"] <= last, item)
+                loose[(invoice["entity_id"], invoice["total_minor"],
+                       json.dumps(sorted((x["description"], x["quantity"]) for x in invoice["line_items"])))] += 1
+            twins += sum(1 for n in loose.values() if n == 2)
+            self.assertEqual(predicate_issues(public), ([], []))
+        self.assertGreater(twins, 20)
 
     def test_i2_copy_keeps_line_items(self):
         """Ruling 2."""
@@ -268,7 +294,7 @@ class RulingTest(unittest.TestCase):
 
 class InteractionTest(unittest.TestCase):
     def test_i1(self):
-        boundary = crossing = 0
+        boundary = 0
         for seed in range(40):
             episode = generate(seed, config(currencies=["USD"], interaction="I1"))
             gap = issues_of(episode, "allocation_gap")[0]
@@ -281,9 +307,24 @@ class InteractionTest(unittest.TestCase):
             self.assertNotEqual(payment["currency"], public["policy"]["base_currency"])
             end = parse_time(public["policy"]["period_end"])
             boundary += end - parse_time(payment["timestamp"]) <= dt.timedelta(hours=48)
-            crossing += payment["timestamp"][:10] != local_date(payment["timestamp"], public["policy"]["timezone"])
+            self.assertEqual(len(gap["evidence_sets"][0]), 5)  # D1
         self.assertEqual(boundary, 40)
-        self.assertGreater(crossing, 5)
+
+    def test_i1_payment_offset_is_drawn_like_any_payment(self):
+        """D8: the I1 payment is written in another offset as often as an ordinary payment."""
+        i1 = i1_other = ordinary = ordinary_other = 0
+        for seed in range(200):
+            episode = generate(seed, config(currencies=["USD"], interaction="I1"))
+            public = episode["public"]
+            fx = issues_of(episode, "fx_error")[0]["affected_ids"][0]
+            zone = public["policy"]["timezone"]
+            for payment in public["payments"]:
+                other = not payment["timestamp"].endswith(zone)
+                if payment["doc_id"] == fx:
+                    i1, i1_other = i1 + 1, i1_other + other
+                else:
+                    ordinary, ordinary_other = ordinary + 1, ordinary_other + other
+        self.assertLess(abs(i1_other / i1 - ordinary_other / ordinary), 0.07, (i1_other / i1, ordinary_other / ordinary))
 
     def test_i1_amounts_do_not_depend_on_order(self):
         for seed in range(20):
@@ -314,6 +355,27 @@ class InteractionTest(unittest.TestCase):
             rows = [r for r in public["ledger"] if r["invoice_id"] == copy_invoice["invoice_id"]]
             self.assertEqual(len(rows), 2)
             self.assertEqual(len(issues_of(episode)), 2)
+            for step in episode["private"]["provenance"]["steps"]:  # D7: the scenario is not an id
+                self.assertEqual(step["params"]["scenario"], "I2")
+
+    def test_i2_copy_is_paid_like_any_invoice_outside_the_period(self):
+        """D8: the copy is paid as often as a legitimate invoice of the neighbouring period."""
+        copies = paid_copies = outside = paid_outside = 0
+        for seed in range(200):
+            episode = generate(seed, config(interaction="I2"))
+            public, policy = episode["public"], episode["public"]["policy"]
+            copy_id = issues_of(episode, "period_cutoff")[0]["affected_ids"][0]
+            refs = Counter(ref for p in public["payments"] for ref in p["invoice_refs"] or [])
+            for invoice in public["invoices"]:
+                if in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
+                    continue
+                if invoice["doc_id"] == copy_id:
+                    copies, paid_copies = copies + 1, paid_copies + bool(refs[invoice["invoice_id"]])
+                else:
+                    outside, paid_outside = outside + 1, paid_outside + bool(refs[invoice["invoice_id"]])
+        self.assertGreater(paid_outside, 50)  # L6: a paid invoice outside the period is often legitimate
+        self.assertLess(abs(paid_copies / copies - paid_outside / outside), 0.1, (paid_copies / copies,
+                                                                                 paid_outside / outside))
 
 
 class DistractorTest(unittest.TestCase):
@@ -370,11 +432,11 @@ class LeakTest(unittest.TestCase):
             pre = dict(episode["public"], ledger=episode["private"]["pre_ledger"],
                        invoices=episode["private"]["pre_invoices"], payments=episode["private"]["pre_payments"])
             policy = pre["policy"]
-            paid = posted_payments(pre)
-            for invoice in pre["invoices"]:
-                if in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
+            refs = Counter(ref for p in pre["payments"] for ref in p["invoice_refs"] or [])
+            for invoice in pre["invoices"]:  # the pool: invoices of the neighbouring periods (D4)
+                if not in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
                     population += 1
-                    paid_population += invoice["invoice_id"] in paid
+                    paid_population += bool(refs[invoice["invoice_id"]])
             for step in episode["private"]["provenance"]["steps"]:
                 targets += 1
                 paid_targets += step["params"]["paid"]
@@ -452,7 +514,8 @@ class LeakTest(unittest.TestCase):
         """Literal: silence is -1 on books with errors, so any true positive beats it; the meaningful
         reading is that flagging the unpaid invoices is no better than flagging as many random posted
         invoices, and that flagging every invoice never beats silence (> 30 findings) and, capped at
-        30, stays negative."""
+        30, stays negative. Invoices dated outside the period are left out of the unpaid/random
+        comparison: the definition itself finds every posted one (D4), with or without payment."""
         unpaid_rewards, random_rewards = [], []
         for seed in range(120):
             for cfg in (MAX_CUTOFF, config(cut=2, dup=1, gap=1, fx=1, currencies=["USD"])):
@@ -461,15 +524,19 @@ class LeakTest(unittest.TestCase):
                 posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
                 invoices = [i for i in public["invoices"] if i["invoice_id"] in posted]
                 paid = posted_payments(public)
-                unpaid = [i for i in invoices if i["invoice_id"] not in paid][:30]
-                pool = list(invoices)
+                policy = public["policy"]
+                dated_inside = [i for i in invoices if in_period(i["issued_at"], policy["period_start"], policy["period_end"])]
+                unpaid = [i for i in dated_inside if i["invoice_id"] not in paid][:30]
+                pool = list(dated_inside)
                 Rng(seed, "leak").shuffle(pool)
                 silence = judge(episode, {"episode_id": public["manifest"]["episode_id"], "findings": []}, 10)["reward"]
                 unpaid_rewards.append(judge(episode, self.answer(episode, unpaid), 10)["reward"])
                 random_rewards.append(judge(episode, self.answer(episode, pool[:len(unpaid)]), 10)["reward"])
                 everything = judge(episode, self.answer(episode, invoices), 10)["reward"]
                 self.assertLessEqual(everything, silence)
-                capped = judge(episode, self.answer(episode, pool[:30]), 10)["reward"]
+                everyone = list(invoices)
+                Rng(seed, "leak").shuffle(everyone)
+                capped = judge(episode, self.answer(episode, everyone[:30]), 10)["reward"]
                 self.assertLess(capped, 0)
         mean_unpaid = sum(unpaid_rewards) / len(unpaid_rewards)
         mean_random = sum(random_rewards) / len(random_rewards)

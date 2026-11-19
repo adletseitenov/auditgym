@@ -63,12 +63,13 @@ def assign_ids(rng: Rng, keys: set[str]) -> dict[str, str]:
 
 
 def public_tables(world: dict, ledger: list[dict], id_map: dict[str, str]) -> dict:
-    """Open tables. Documents are ordered by moment, rows by posting moment, ties by the random id:
-    position says nothing about injection."""
-    invoices = sorted(world["invoices"], key=lambda r: (r["issued_at"], id_map["D:" + r["key"]]))
-    payments = sorted(world["payments"], key=lambda r: (r["timestamp"], id_map["D:" + r["key"]]))
-    rows = sorted(ledger, key=lambda r: (r["timestamp"], id_map[r["key"]]))
+    """Open tables, each ordered by its public id (docs/AUDIT.md R6): rows by row_id, documents by
+    doc_id, rates by (date, currency). Ids are random, so a position says nothing about a record's
+    date, its story or an injection."""
+    invoices = [public_invoice(r, id_map) for r in world["invoices"]]
+    payments = [public_payment(r, id_map) for r in world["payments"]]
+    rows = [public_row(r, id_map) for r in ledger]
     fx = sorted((dict(row) for row in world["fx"]), key=lambda r: (r["date"], r["source_currency"]))
-    return {"ledger": [public_row(r, id_map) for r in rows],
-            "invoices": [public_invoice(r, id_map) for r in invoices],
-            "payments": [public_payment(r, id_map) for r in payments], "fx": fx}
+    return {"ledger": sorted(rows, key=lambda r: r["row_id"]),
+            "invoices": sorted(invoices, key=lambda r: r["doc_id"]),
+            "payments": sorted(payments, key=lambda r: r["doc_id"]), "fx": fx}

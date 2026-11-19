@@ -5,19 +5,20 @@ The books are a pure function of the world: error operators change documents (an
 derived from its document and role ("R:I3:dr", "R:P5:ar:I3", ...). Keys never reach the public
 files; surface.py maps them to opaque ids.
 
-Payment rule (published in the design note; verify.py checks it independently). Payments of an
-invoice are taken in document-time order; `remaining` is the invoice total minus earlier positive
-single-reference payments, in the document currency:
-- several references: each invoice closed at its booked (posted) amount; amount = sum of totals;
-- refund (amount < 0, one reference): receivable debited at the policy value of the refund;
-- amount < remaining: partial, receivable credited at the policy value of the payment;
-- amount = remaining: final, receivable credited with what is still open (booked - closed);
-- amount > remaining (only as the sole payment): overpayment, the invoice closed in full and the
-  excess, at the policy value, credited to unallocated;
+Payment rule (policy.json "payment_rule"; verify.py checks it independently with the same
+published helper money.closed_share). Posted payments of an invoice are taken in document-time
+order; `paid` is what earlier posted single-reference payments paid, in the document currency:
+- several references: each invoice closed at its booked amount minus what is already closed;
+- one reference, paid + amount <= total (refunds included): the receivable moves by
+  closed_share(booked, total, paid + amount) - closed_share(booked, total, paid), so it closes in
+  proportion at the invoice's booked rate and a refund reopens it the same way;
+- one reference, paid + amount > total (only as the sole payment): overpayment, the invoice closed
+  in full and the excess, at the payment date's policy rate, credited to unallocated;
 - no reference: advance, the whole policy value on unallocated.
 Cash is the policy value of the payment (or the wrong rate of an fx_error); an allocation_gap
-moves `gap_minor` from the receivable credit to unallocated; the rest is fx_difference. Closings
-never depend on the posted cash, so two errors on one payment do not interact.
+moves `gap_minor` from the receivable credit to unallocated; the rest of every foreign payment is
+its own fx_difference row. Closings never depend on the posted cash or on a gap, so two errors on
+one payment do not interact.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ import datetime as dt
 from collections import defaultdict
 from decimal import Decimal
 
-from .money import convert
+from .money import closed_share, convert
 
 
 def rate_on(world: dict, currency: str, moment: dt.datetime) -> Decimal:
@@ -76,7 +77,7 @@ def payment_order(payment: dict) -> tuple:
 def payment_parts(world: dict) -> dict[str, dict]:
     """Per posted payment: {"cash", "correct_cash", "closes": {invoice: base amount}, "unallocated"}."""
     invoices = {inv["key"]: inv for inv in world["invoices"]}
-    remaining = {key: inv["total_minor"] for key, inv in invoices.items()}
+    paid: dict[str, int] = defaultdict(int)
     closed: dict[str, int] = defaultdict(int)
     parts = {}
     for payment in sorted((p for p in world["payments"] if p["posted_at"] is not None), key=payment_order):
@@ -90,25 +91,24 @@ def payment_parts(world: dict) -> dict[str, dict]:
         elif len(refs) > 1:
             for ref in refs:
                 closes[ref] = booked(world, invoices[ref]) - closed[ref]
-                remaining[ref] -= invoices[ref]["total_minor"]
+                paid[ref] = invoices[ref]["total_minor"]
         else:
             ref = refs[0]
-            if amount < 0:
-                closes[ref] = correct  # negative: the receivable is debited
-            elif amount < remaining[ref]:
-                closes[ref] = correct
+            total, value = invoices[ref]["total_minor"], booked(world, invoices[ref])
+            after = paid[ref] + amount
+            if amount > 0 and after > total:
+                closes[ref] = value - closed[ref]
+                unallocated = to_base(world, after - total, currency, at)
+                after = total
             else:
-                closes[ref] = booked(world, invoices[ref]) - closed[ref]
-                if amount > remaining[ref]:
-                    unallocated = to_base(world, amount - remaining[ref], currency, at)
-            if amount > 0:
-                remaining[ref] -= amount
+                closes[ref] = closed_share(value, total, after) - closed[ref]
+            paid[ref] = after
+        for ref, part in closes.items():
+            closed[ref] += part
         if payment["gap_minor"]:
             ref = refs[0]
             closes[ref] -= payment["gap_minor"]
             unallocated += payment["gap_minor"]
-        for ref, value in closes.items():
-            closed[ref] += value
         parts[payment["key"]] = {"cash": cash, "correct_cash": correct, "closes": closes, "unallocated": unallocated}
     return parts
 

@@ -6,20 +6,31 @@ surface.py, after errors are injected, so ids carry no information about the sto
 Times are aware datetimes. A document keeps its own UTC offset (usually the company's; with
 distractors some documents are written in another offset, so their naive date differs from the
 company-local date). A posted document has `posted_at`: the moment of its ledger postings, a
-random lag (one minute to four days) after the document date and always inside the period.
-Documents dated outside the period are never posted by the clean story.
+random lag (one minute to three weeks) after the document date and always inside the period.
+
+Invoices of the neighbouring periods (dated just before or after the period, with that period's
+service) are part of every story and are never posted by it: they are the pool period_cutoff
+posts from (docs/AUDIT.md D4). They are paid with the usual probability, by payments dated on
+their own side of the period, which are not posted either.
 
 With `config["distractors"]` the story also contains legitimate cases that look suspicious but
 satisfy no error definition (docs/SPEC.md): overpayments, advances, partial and split payments,
-refunds, recurring invoices for another service period, documents at the period boundary on
-both sides, documents in other offsets, weekend rates equal to Friday's.
+refunds, recurring invoices that split the period's service in two halves, extra neighbouring-
+period invoices, documents at the period boundary, documents in other offsets, weekend rates
+equal to Friday's.
+
+The rates are drawn last, from a stream keyed by a digest of the whole story: the first rate of
+an episode cannot be computed from the seed without building the story (docs/AUDIT.md L1).
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 from decimal import Decimal
 
-from .config import CURRENCY_EXPONENTS, ROWS_PER_INVOICE
+from .config import CURRENCY_EXPONENTS, interaction_issue_count
+from .limits import MAX_LEDGER_ROWS, ROWS_PER_INVOICE, ROWS_PER_ISSUE
 from .money import parse_offset, round_rate
 from .rng import Rng
 
@@ -38,8 +49,11 @@ CUSTOMERS = (4, 40)  # number of customers: its own range, independent of the in
 EDGE_GAP = dt.timedelta(seconds=120)  # in-period documents are dated at least this long before the end
 PAY_AFTER = dt.timedelta(hours=1)  # a payment comes at least this long after its invoice
 PAID_CHANCE = (7, 10)
-MIN_LAG, MAX_LAG = 60, 4 * 86400
+MIN_LAG, MAX_LAG = 60, 21 * 86400  # legitimate posting lag: a minute to three weeks
 BOUNDARY_DAYS = 4  # documents outside the period stay this close to it (inside the fx margin)
+# Overpayment excess and allocation gap: the same share of a document amount, converted the same
+# way, so their roundness does not tell them apart (docs/AUDIT.md L6).
+SHARE_PERCENT = (2, 30)
 
 
 def period_bounds(config: dict) -> tuple[dt.datetime, dt.datetime]:
@@ -68,20 +82,47 @@ def moment_between(rng: Rng, low: dt.datetime, high: dt.datetime) -> dt.datetime
     return low + dt.timedelta(seconds=rng.below(span)) if span > 0 else low
 
 
-def posting_lag(rng: Rng, moment: dt.datetime, end: dt.datetime) -> dt.datetime:
-    """Posting moment of a document dated `moment` (>= EDGE_GAP before `end`): minutes, hours or a few
-    days later, never on the document's own second and never after the period."""
+def draw_lag(rng: Rng) -> int:
+    """Seconds between a document and its posting: minutes, hours, days or a few weeks."""
     band = rng.below(20)
-    if band < 8:
-        lag = rng.randint(MIN_LAG, 3599)
-    elif band < 15:
-        lag = rng.randint(3600, 86399)
-    else:
-        lag = rng.randint(86400, MAX_LAG)
+    if band < 7:
+        return rng.randint(MIN_LAG, 3599)
+    if band < 13:
+        return rng.randint(3600, 86399)
+    if band < 17:
+        return rng.randint(86400, 4 * 86400)
+    return rng.randint(4 * 86400, MAX_LAG)
+
+
+def posting_lag(rng: Rng, moment: dt.datetime, end: dt.datetime) -> dt.datetime:
+    """Posting moment of a document dated `moment` (>= EDGE_GAP before `end`): a drawn lag later,
+    never on the document's own second and never after the period."""
+    lag = draw_lag(rng)
     room = int((end - moment).total_seconds()) - 1
     if lag > room:
         lag = rng.randint(MIN_LAG, room)
     return moment + dt.timedelta(seconds=lag)
+
+
+def outside_posting(rng: Rng, world: dict, issued: dt.datetime) -> dt.datetime:
+    """A posting moment inside the period for a document dated just outside it (period_cutoff and
+    I2): a lag drawn like a legitimate one, counted from the document or from the nearer edge."""
+    start, end = world["period_start"], world["period_end"]
+    lag = draw_lag(rng)
+    if issued < start:
+        posted = issued + dt.timedelta(seconds=lag)
+        if posted < start:
+            posted = start + dt.timedelta(seconds=rng.randint(MIN_LAG, lag))
+    else:
+        posted = end - dt.timedelta(seconds=rng.randint(1, lag))
+    if not start <= posted < end:
+        posted = moment_between(rng, start, end)
+    return posted.astimezone(world["zone"])
+
+
+def share_of(rng: Rng, amount: int) -> int:
+    """A share (SHARE_PERCENT) of a positive document amount, at least one minor unit."""
+    return max(1, amount * rng.randint(*SHARE_PERCENT) // 100)
 
 
 def doc_zone(rng: Rng, world: dict, numerator: int = 3) -> dt.timezone:
@@ -131,6 +172,14 @@ def line_items(rng: Rng, currency: str, service: tuple[str, str]) -> list[dict]:
     return items
 
 
+def service_halves(world: dict) -> tuple[tuple[str, str], tuple[str, str]]:
+    """The reporting period's service split in two halves, both inside the period (recurring twins)."""
+    first, last = (dt.date.fromisoformat(day) for day in service_period(world, 0))
+    middle = first + dt.timedelta(days=(last - first).days // 2 + 1)
+    return ((first.isoformat(), (middle - dt.timedelta(days=1)).isoformat()),
+            (middle.isoformat(), last.isoformat()))
+
+
 def invoice_signature(invoice: dict) -> tuple:
     """Two invoices with the same signature are duplicates by definition (docs/SPEC.md)."""
     items = sorted((item["description"], item["quantity"], item["unit_price_minor"], item["amount_minor"],
@@ -161,6 +210,18 @@ def paid_like_clean(rng: Rng, world: dict, issued: dt.datetime) -> dt.datetime |
     return moment_between(rng, issued + PAY_AFTER, latest)
 
 
+def paid_outside(rng: Rng, world: dict, issued: dt.datetime) -> dt.datetime | None:
+    """The payment rule for an invoice dated outside the period: paid with PAID_CHANCE, at a moment
+    on the same side of the period (so the payment is not posted either). None means unpaid."""
+    if issued < world["period_start"]:
+        low, high = issued + PAY_AFTER, world["period_start"]
+    else:
+        low, high = issued + PAY_AFTER, world["period_end"] + dt.timedelta(days=FX_MARGIN_DAYS)
+    if low >= high or not rng.chance(*PAID_CHANCE):
+        return None
+    return moment_between(rng, low, high)
+
+
 def _edge_moment(rng: Rng, world: dict) -> dt.datetime:
     """A moment inside the period within six hours of one of its ends."""
     start, end = world["period_start"], world["period_end"] - EDGE_GAP
@@ -170,14 +231,35 @@ def _edge_moment(rng: Rng, world: dict) -> dt.datetime:
 
 
 def outside_moment(rng: Rng, world: dict, before: bool) -> dt.datetime:
-    """A moment just outside the period, within BOUNDARY_DAYS (the end itself is already outside)."""
-    distance = dt.timedelta(seconds=rng.randint(1, BOUNDARY_DAYS * 86400 - 1))
-    return world["period_start"] - distance if before else world["period_end"] + distance - dt.timedelta(seconds=1)
+    """A moment just outside the period, within BOUNDARY_DAYS: one in ten exactly on the edge
+    (start - 1 s, or the end itself, which is already outside), four in ten within six hours."""
+    band = rng.below(10)
+    if band == 0:
+        distance = 1 if before else 0
+    elif band <= 4:
+        distance = rng.randint(1, 6 * 3600)
+    else:
+        distance = rng.randint(1, BOUNDARY_DAYS * 86400 - 1)
+    if before:
+        return world["period_start"] - dt.timedelta(seconds=distance)
+    return world["period_end"] + dt.timedelta(seconds=distance)
 
 
 def _payment_rows(payment: dict, foreign: bool, unallocated: bool) -> int:
     refs = payment["invoice_refs"] or []
     return 1 + len(refs) + int(unallocated) + int(foreign)
+
+
+def _story_digest(world: dict) -> str:
+    """A digest of every document and background pair: keys the rate stream (docs/AUDIT.md L1)."""
+    def moment(value):
+        return None if value is None else value.isoformat()
+    body = [[inv["key"], inv["entity"], inv["currency"], inv["total_minor"], moment(inv["issued_at"]),
+             moment(inv["posted_at"])] for inv in world["invoices"]]
+    body += [[pay["key"], pay["entity"], pay["currency"], pay["amount_minor"], moment(pay["timestamp"])]
+             for pay in world["payments"]]
+    body += [[pair["key"], pair["entity"], pair["amount_minor"], moment(pair["timestamp"])] for pair in world["background"]]
+    return hashlib.sha256(json.dumps(body).encode("utf-8")).hexdigest()
 
 
 def build_world(rng: Rng, config: dict) -> dict:
@@ -187,19 +269,19 @@ def build_world(rng: Rng, config: dict) -> dict:
              "period_start": start, "period_end": end, "months": config["period"]["months"],
              "distractors": config["distractors"],
              "currency_exponents": {c: CURRENCY_EXPONENTS[c] for c in [base, *config["currencies"]]}}
-    world["fx"] = _rates(rng, config, start, end)
-    world["rates"] = {(row["date"], row["source_currency"]): Decimal(row["rate"]) for row in world["fx"]}
 
     low, high = config["size"]["invoices"]
-    invoice_count = rng.randint(low, high)
-    customers = [f"E{i}" for i in range(rng.randint(*CUSTOMERS))]
-    vendors = [f"E{len(customers) + i}" for i in range(rng.randint(3, 6))]
+    shape = rng.child("shape")
+    invoice_count = shape.randint(low, high)
+    customers = [f"E{i}" for i in range(shape.randint(*CUSTOMERS))]
+    vendors = [f"E{len(customers) + i}" for i in range(shape.randint(3, 6))]
     world["entities"], world["customers"] = customers + vendors, customers
     distractors = config["distractors"]
     plan = rng.child("distractor_plan")
-    outside_count = plan.randint(1, 3) if distractors else 0
-    recurring_count = plan.randint(1, max(1, invoice_count // 20)) if distractors else 0
-    regular_count = invoice_count - outside_count - recurring_count
+    # Neighbouring-period invoices: one per configured cutoff (its pool), plus legitimate extras.
+    outside_count = config["errors"]["period_cutoff"] + (plan.randint(1, 3) if distractors else 0)
+    recurring_pairs = plan.randint(1, max(1, invoice_count // 20)) if distractors else 0
+    regular_count = invoice_count - outside_count - 2 * recurring_pairs
 
     invoices: list[dict] = []
     signatures: set = set()
@@ -217,35 +299,40 @@ def build_world(rng: Rng, config: dict) -> dict:
     def currency_of(s: Rng) -> str:
         return s.choice(config["currencies"]) if config["currencies"] and s.chance(2, 5) else base
 
+    def inside_invoice(s: Rng, entity: str, currency: str, items: list[dict], edge: bool = False) -> dict:
+        if edge:
+            issued = _edge_moment(s, world).astimezone(doc_zone(s, world, numerator=10))
+        else:
+            issued = moment_between(s, start, end - EDGE_GAP).astimezone(doc_zone(s, world))
+        invoice = new_invoice(world, f"I{len(invoices)}", entity, currency, issued, s.choice(TERMS_DAYS), items)
+        invoice["posted_at"] = posting_lag(s, issued, end)
+        return invoice
+
     for _ in range(regular_count):
         while True:  # bounded in practice: the signature space is far larger than the invoice count
             currency = currency_of(stream)
             items = line_items(stream, currency, own_service)
-            if distractors and stream.chance(1, 12):
-                issued = _edge_moment(stream, world).astimezone(doc_zone(stream, world, numerator=10))
-            else:
-                issued = moment_between(stream, start, end - EDGE_GAP).astimezone(doc_zone(stream, world))
-            invoice = new_invoice(world, f"I{len(invoices)}", stream.choice(customers), currency, issued,
-                                  stream.choice(TERMS_DAYS), items)
-            invoice["posted_at"] = posting_lag(stream, issued, end)
-            if add(invoice):
+            edge = distractors and stream.chance(1, 12)
+            if add(inside_invoice(stream, stream.choice(customers), currency, items, edge)):
                 break
 
-    # Recurring: the same customer, items and total for the neighbouring service period. Not a duplicate.
+    # Recurring: the same customer, items and total for the two halves of the period's service.
+    # Both are legitimate; their signatures differ by the service period (docs/AUDIT.md D3).
     stream = rng.child("recurring")
-    regular = list(invoices)
-    for _ in range(recurring_count):
+    halves = service_halves(world)
+    for _ in range(recurring_pairs):
         while True:
-            like = stream.choice(regular)
-            shift = stream.choice((-1, 1))
-            service = service_period(world, shift)
-            items = [dict(item, service_start=service[0], service_end=service[1]) for item in like["line_items"]]
-            issued = moment_between(stream, start, end - EDGE_GAP).astimezone(doc_zone(stream, world))
-            twin = new_invoice(world, f"I{len(invoices)}", like["entity"], like["currency"], issued,
-                               stream.choice(TERMS_DAYS), items)
-            twin["posted_at"] = posting_lag(stream, issued, end)
-            if add(twin):
-                break
+            currency, entity = currency_of(stream), stream.choice(customers)
+            items = line_items(stream, currency, halves[0])
+            first = inside_invoice(stream, entity, currency, items)
+            twin_items = [dict(item, service_start=halves[1][0], service_end=halves[1][1]) for item in items]
+            second = inside_invoice(stream, entity, currency, twin_items)
+            if invoice_signature(first) in signatures or invoice_signature(second) in signatures:
+                continue
+            add(first)
+            second["key"] = f"I{len(invoices)}"
+            add(second)
+            break
 
     # Just outside the period on both sides: dated outside, not posted, service of that period.
     stream = rng.child("outside")
@@ -262,8 +349,23 @@ def build_world(rng: Rng, config: dict) -> dict:
 
     world["invoices"] = invoices
     world["payments"] = _payments(rng.child("payments"), world, invoice_count)
-    world["background"] = _background(rng.child("background"), config, vendors, start, end)
+    issues = sum(config["errors"].values()) + interaction_issue_count(config["interaction"])
+    world["background"] = _background(rng.child("background"), config, vendors, start, end,
+                                      _background_cap(world, issues))
+    fx_stream = Rng(f"{rng.child('fx').token(26)}|{_story_digest(world)}", "fx")
+    world["fx"] = _rates(fx_stream, config, start, end)
+    world["rates"] = {(row["date"], row["source_currency"]): Decimal(row["rate"]) for row in world["fx"]}
     return world
+
+
+def _background_cap(world: dict, issues: int) -> int:
+    """Background pairs that still fit: the whole ledger, with every issue's extra rows, stays within
+    MAX_LEDGER_ROWS (config.check_size guarantees the configured minimum fits)."""
+    base = world["base_currency"]
+    rows = 2 * sum(1 for inv in world["invoices"] if inv["posted_at"] is not None)
+    rows += sum(_payment_rows(pay, pay["currency"] != base, True) for pay in world["payments"]
+                if pay["posted_at"] is not None)
+    return max(0, (MAX_LEDGER_ROWS - rows - issues * ROWS_PER_ISSUE) // 2)
 
 
 def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
@@ -287,6 +389,14 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
             payment["posted_at"] = posting_lag(stream, payment["timestamp"], end)
         payments.append(payment)
         return True
+
+    # Invoices of the neighbouring periods first: their payment chance must not depend on the budget.
+    for invoice in world["invoices"]:
+        if invoice["posted_at"] is None:
+            moment = paid_outside(stream, world, invoice["issued_at"])
+            if moment is not None:
+                add(new_payment("", invoice["entity"], invoice["currency"], moment, invoice["total_minor"],
+                                [invoice["key"]]))
 
     plans = []
     for invoice in posted:
@@ -314,7 +424,7 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
         roll = stream.below(100) if distractors else 99
         total = invoice["total_minor"]
         if roll < 6:  # overpayment: the excess legitimately stays on unallocated
-            amount = total + max(1, total * stream.randint(1, 15) // 100)
+            amount = total + share_of(stream, total)
             if add(new_payment("", invoice["entity"], invoice["currency"], moment, amount, [invoice["key"]]), True):
                 kinds[invoice["key"]] = "over"
                 continue
@@ -362,11 +472,12 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
     return payments
 
 
-def _background(stream: Rng, config: dict, vendors: list[str], start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Background activity without documents: balanced expense/cash pairs."""
+def _background(stream: Rng, config: dict, vendors: list[str], start: dt.datetime, end: dt.datetime,
+                cap: int) -> list[dict]:
+    """Background activity without documents: balanced expense/cash pairs, at most `cap` of them."""
     background, taken = [], set()
     low, high = config["size"]["background_pairs"]
-    for _ in range(stream.randint(low, high)):
+    for _ in range(min(stream.randint(low, high), cap)):
         while True:
             moment, vendor = moment_between(stream, start, end), stream.choice(vendors)
             if (moment, vendor) not in taken:  # the pair is its own event group

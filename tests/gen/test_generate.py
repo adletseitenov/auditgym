@@ -133,6 +133,7 @@ class TimingTest(unittest.TestCase):
                 lags.append(lag)
         self.assertTrue(any(lag < 3600 for lag in lags))
         self.assertTrue(any(lag > 86400 for lag in lags))
+        self.assertTrue(any(lag > 7 * 86400 for lag in lags))
 
     def test_documents_in_other_offsets(self):
         crossing = other = 0
@@ -342,12 +343,160 @@ class SurfaceTest(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all(len(i) == 10 and i.isalnum() and i.islower() for i in ids))
 
-    def test_documents_are_ordered_by_moment(self):
-        public = generate(9, CLEAN)["public"]
+    def test_tables_are_ordered_by_public_id(self):
+        """R6: position carries no date, so "first and last N records" says nothing."""
+        public = generate(9, {"errors": {"period_cutoff": 2}})["public"]
+        self.assertEqual([r["row_id"] for r in public["ledger"]], sorted(r["row_id"] for r in public["ledger"]))
+        for name in ("invoices", "payments"):
+            self.assertEqual([d["doc_id"] for d in public[name]], sorted(d["doc_id"] for d in public[name]))
+        self.assertEqual([(r["date"], r["source_currency"]) for r in public["fx"]],
+                         sorted((r["date"], r["source_currency"]) for r in public["fx"]))
         moments = [parse_time(i["issued_at"]) for i in public["invoices"]]
-        self.assertEqual(moments, sorted(moments))
-        moments = [parse_time(r["timestamp"]) for r in public["ledger"]]
-        self.assertEqual(moments, sorted(moments))
+        self.assertNotEqual(moments, sorted(moments))
+
+
+class SecretTest(unittest.TestCase):
+    """L1: the evaluator's secret is mixed into the root stream; the default keeps reproducibility."""
+
+    def test_secret_changes_everything_and_default_reproduces(self):
+        plain = generate(11, CLEAN)
+        self.assertEqual(episode_files(plain), episode_files(generate(11, CLEAN, secret="")))
+        hidden = generate(11, CLEAN, secret="evaluator-only")
+        self.assertEqual(verify(hidden), [])
+        self.assertNotEqual(plain["public"]["fx"], hidden["public"]["fx"])
+        self.assertNotEqual(plain["public"]["manifest"]["episode_id"], hidden["public"]["manifest"]["episode_id"])
+        self.assertNotIn("evaluator-only", json.dumps(hidden))
+        self.assertEqual(episode_files(hidden), episode_files(generate(11, CLEAN, secret="evaluator-only")))
+
+    def test_first_rate_depends_on_the_whole_story(self):
+        """The rates are keyed by a digest of the story: two stories from one stream differ in rates."""
+        from auditgym.config import normalize_config
+        from auditgym.rng import Rng
+        from auditgym.world import build_world
+        config = normalize_config({"errors": {}})
+        first = build_world(Rng(5, "world"), config)
+        second = build_world(Rng(5, "world"), dict(config, size={"invoices": [60, 60], "background_pairs": [150, 300]}))
+        self.assertNotEqual(first["fx"][0]["rate"], second["fx"][0]["rate"])
+
+
+class PolicyTest(unittest.TestCase):
+    """Q2/S4, D2, D3, D6: policy.json is a whitelist and states the published rules."""
+
+    def test_policy_is_the_whitelist_and_states_the_rules(self):
+        from auditgym.generate import POLICY_KEYS
+        policy = generate(1, CLEAN)["public"]["policy"]
+        self.assertEqual(tuple(policy), POLICY_KEYS)
+        self.assertEqual(policy["period_interval"], "[start, end)")
+        self.assertIn("booked", policy["payment_rule"])
+        self.assertNotIn("\n", policy["payment_rule"])
+        self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period")
+
+    def test_no_truth_derived_value_in_public_files(self):
+        """Episodes that differ only in errors and interaction expose the same policy, the same manifest
+        keys, no error type outside the fixed tolerance table, and no scenario name."""
+        configs = [{"errors": {}}, {"errors": {"fx_error": 3}}, {"errors": {"period_cutoff": 2, "duplicate_invoice": 1}},
+                   {"interaction": "I1"}, {"interaction": "I2", "errors": {"allocation_gap": 2}}]
+        policies, manifests = set(), set()
+        for config in configs:
+            config = dict(config, size={"invoices": [48, 60], "background_pairs": [10, 20]}, currencies=["USD"])
+            episode = generate(3, config)
+            files = episode_files(episode)
+            policy = json.loads(files["public/policy.json"])
+            policies.add(json.dumps(policy, sort_keys=True))
+            manifest = json.loads(files["public/manifest.json"])
+            manifests.add(tuple(manifest))
+            public_text = "".join(text for name, text in files.items() if name.startswith("public/")
+                                  and name != "public/policy.json")
+            for word in ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff", '"I1"', '"I2"',
+                         "scenario", "issue_id", "errors", "interaction"):
+                self.assertNotIn(word, public_text, (config, word))
+            issues = len(episode["private"]["truth"]["issues"])
+            self.assertNotIn(issues, [value for value in manifest.values() if isinstance(value, int)])
+        self.assertEqual(len(policies), 1)
+        self.assertEqual(len(manifests), 1)
+
+
+class PaymentRuleTest(unittest.TestCase):
+    """D2: receivables close in proportion at the invoice's booked rate; every foreign payment carries its
+    own fx_difference row."""
+
+    def test_closings_follow_the_published_rule(self):
+        checked_partial = foreign_fx = 0
+        for seed in range(30):
+            public = generate(seed, {"errors": {}, "currencies": ["USD", "EUR"]})["public"]
+            base = public["policy"]["base_currency"]
+            invoices = {i["invoice_id"]: i for i in public["invoices"]}
+            ledger = public["ledger"]
+            booked = {r["invoice_id"]: r["debit_minor"] for r in ledger
+                      if r["invoice_id"] and not r["payment_id"] and r["account"] == "receivable"}
+            for payment in public["payments"]:
+                rows = [r for r in ledger if r["payment_id"] == payment["payment_id"]]
+                if not rows or not payment["invoice_refs"] or len(payment["invoice_refs"]) != 1:
+                    continue
+                invoice = invoices[payment["invoice_refs"][0]]
+                closing = sum(r["credit_minor"] - r["debit_minor"] for r in rows if r["account"] == "receivable")
+                cash = sum(r["debit_minor"] - r["credit_minor"] for r in rows if r["account"] == "cash")
+                unallocated = sum(r["credit_minor"] for r in rows if r["account"] == "unallocated")
+                fx_rows = [r for r in rows if r["account"] == "fx_difference"]
+                earlier = [p for p in public["payments"] if p["invoice_refs"] == payment["invoice_refs"]
+                           and parse_time(p["timestamp"]) < parse_time(payment["timestamp"])]
+                if 0 < payment["amount_minor"] < invoice["total_minor"] and payment["currency"] != base and not earlier:
+                    # The rule written out for a first partial payment: booked * amount / total, half-even.
+                    total = invoice["total_minor"]
+                    whole, rest = divmod(booked[invoice["invoice_id"]] * payment["amount_minor"], total)
+                    expected = whole + (1 if 2 * rest > total or (2 * rest == total and whole % 2) else 0)
+                    self.assertEqual(closing, expected, payment["doc_id"])
+                    checked_partial += 1
+                if payment["currency"] != base and cash != closing + unallocated:
+                    self.assertEqual(len(fx_rows), 1)
+                    foreign_fx += 1
+                if payment["currency"] == base:
+                    self.assertEqual(fx_rows, [])
+        self.assertGreater(checked_partial, 5)
+        self.assertGreater(foreign_fx, 20)
+
+
+class SurfaceRegularityTest(unittest.TestCase):
+    """D8/L6: no cheap surface rule tells injected records apart."""
+
+    def test_legitimate_postings_lag_by_weeks(self):
+        over_four_days = 0
+        for seed in range(10):
+            for dated, posted in posted_docs(generate(seed, CLEAN)["public"]).values():
+                over_four_days += parse_time(posted) - parse_time(dated) > dt.timedelta(days=4)
+        self.assertGreater(over_four_days, 30)
+
+    def test_late_posting_does_not_find_cutoffs(self):
+        """Rule "posted more than 4 days after the document": its precision on period_cutoff is low."""
+        flagged = hits = 0
+        for seed in range(60):
+            episode = generate(seed, {"errors": {"period_cutoff": 2}, "currencies": ["USD"]})
+            cut = {d for i in episode["private"]["truth"]["issues"] for d in i["affected_ids"]}
+            for doc, (dated, posted) in posted_docs(episode["public"]).items():
+                if parse_time(posted) - parse_time(dated) > dt.timedelta(days=4):
+                    flagged += 1
+                    hits += doc in cut
+        self.assertLess(hits / flagged, 0.25, (hits, flagged))
+
+    def test_overpayment_and_gap_amounts_look_alike(self):
+        def zeros(value):
+            count = 0
+            while value and value % 10 == 0:
+                value, count = value // 10, count + 1
+            return count
+
+        over, gap = [], []
+        for seed in range(150):
+            episode = generate(seed, {"errors": {"allocation_gap": 2}, "currencies": ["USD"]})
+            gaps = {i["expected_amount_minor"] for i in episode["private"]["truth"]["issues"]}
+            payments = {p["payment_id"]: p for p in episode["public"]["payments"]}
+            for row in episode["public"]["ledger"]:
+                if row["account"] == "unallocated" and payments[row["payment_id"]]["invoice_refs"]:
+                    (gap if row["credit_minor"] in gaps else over).append(zeros(row["credit_minor"]))
+        self.assertGreater(len(over), 30)
+        mean_over, mean_gap = sum(over) / len(over), sum(gap) / len(gap)
+        self.assertLess(abs(mean_over - mean_gap), 0.5, (mean_over, mean_gap))
+        self.assertLess(abs(sum(z >= 2 for z in over) / len(over) - sum(z >= 2 for z in gap) / len(gap)), 0.15)
 
 
 if __name__ == "__main__":
