@@ -1,0 +1,34 @@
+{
+ "ledger_currency": "base",
+ "base_currency": "KZT",
+ "timezone": "-11:00",
+ "period_start": "2026-10-01T00:00:00-11:00",
+ "period_end": "2026-11-01T00:00:00-11:00",
+ "fx_rate_date": "document_date_in_company_timezone",
+ "fx_formula": "round(amount_minor * 10^(exp_base - exp_src) * rate)",
+ "rounding": "half_even",
+ "currency_exponents": {
+  "KZT": 2,
+  "EUR": 2
+ },
+ "accounts": {
+  "cash": "cash",
+  "receivable": "receivable",
+  "revenue": "revenue",
+  "unallocated": "unallocated",
+  "fx_difference": "fx_difference",
+  "expense": "expense"
+ },
+ "document_date": {
+  "invoice": "issued_at",
+  "payment": "timestamp"
+ },
+ "refund": "payment with negative amount_minor and one invoice ref",
+ "amount_tolerance_minor": {
+  "duplicate_invoice": 0,
+  "allocation_gap": 0,
+  "fx_error": 1,
+  "period_cutoff": 0
+ },
+ "evidence_superset_allowed": true
+}

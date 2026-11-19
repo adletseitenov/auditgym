@@ -1,0 +1,44 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_58653e9906ed",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "5pechhg3xt"
+   ],
+   "expected_amount_minor": 695000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "5pechhg3xt",
+     "41qn75e5gg"
+    ],
+    [
+     "5pechhg3xt",
+     "0tetysvsmc"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t2",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "48fh8wnnam"
+   ],
+   "expected_amount_minor": 700000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "48fh8wnnam",
+     "w9p698kty2"
+    ],
+    [
+     "48fh8wnnam",
+     "g7w3f3atms"
+    ]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,38 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_bd786411f9cf",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "a5m150w5z0",
+    "jfpfjkk232"
+   ],
+   "expected_amount_minor": 290000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "a5m150w5z0",
+     "jfpfjkk232"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t2",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "7nkwexwy74",
+    "t5xzwc805m"
+   ],
+   "expected_amount_minor": 2455000,
+   "currency": "USD",
+   "evidence_sets": [
+    [
+     "7nkwexwy74",
+     "t5xzwc805m"
+    ]
+   ]
+  }
+ ]
+}

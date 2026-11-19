@@ -1,0 +1,146 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_7e7d16a254a5",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "c03d4z84z2",
+    "vtccmwfwxr"
+   ],
+   "expected_amount_minor": 2655000,
+   "currency": "RUB",
+   "evidence_sets": [
+    [
+     "c03d4z84z2",
+     "vtccmwfwxr"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t2",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "3zq4mtgjsp",
+    "zatpzwkybz"
+   ],
+   "expected_amount_minor": 2851000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "3zq4mtgjsp",
+     "zatpzwkybz"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t3",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "nm8ttk8706",
+    "vska9cekc4"
+   ],
+   "expected_amount_minor": 3816000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "nm8ttk8706",
+     "vska9cekc4"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t4",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "hbchm718wq",
+    "kfhjeq0y29"
+   ],
+   "expected_amount_minor": 440000,
+   "currency": "EUR",
+   "evidence_sets": [
+    [
+     "hbchm718wq",
+     "kfhjeq0y29"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t5",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "9t72erqbk6"
+   ],
+   "expected_amount_minor": 816000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "9t72erqbk6",
+     "dsf3fp6fth"
+    ],
+    [
+     "9t72erqbk6",
+     "6c72qsyn69"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t6",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "whez205pqg"
+   ],
+   "expected_amount_minor": 414000,
+   "currency": "RUB",
+   "evidence_sets": [
+    [
+     "whez205pqg",
+     "7mr3hbhjjc"
+    ],
+    [
+     "whez205pqg",
+     "2e0hp7w025"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t7",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "q6dhjbj0wc"
+   ],
+   "expected_amount_minor": 5964000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "q6dhjbj0wc",
+     "6sbjkzm78h"
+    ],
+    [
+     "q6dhjbj0wc",
+     "pxdagz5vsn"
+    ]
+   ]
+  },
+  {
+   "issue_id": "t8",
+   "type": "period_cutoff",
+   "affected_ids": [
+    "tp84qqj7e2"
+   ],
+   "expected_amount_minor": 1790000,
+   "currency": "EUR",
+   "evidence_sets": [
+    [
+     "tp84qqj7e2",
+     "jv5y9913g6"
+    ],
+    [
+     "tp84qqj7e2",
+     "jeanp36cpa"
+    ]
+   ]
+  }
+ ]
+}
