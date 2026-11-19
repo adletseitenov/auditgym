@@ -27,6 +27,18 @@ def rng_is_reproducible() -> Optional[str]:
     return None if first == second else "same seed gave different values"
 
 
+def _attack(name: str) -> Check:
+    """A check from tools/attack.py (zone judge), imported lazily so a broken judge fails only its checks."""
+    def run() -> Optional[str]:
+        try:
+            from tools import attack
+            return getattr(attack, name)()
+        except Exception as error:  # a crash is a failed check, not a crashed scorecard
+            return f"{type(error).__name__}: {error}"
+    run.__name__ = name
+    return run
+
+
 def core_is_deterministic_by_lint() -> Optional[str]:
     from tools import lint_determinism
 
@@ -65,18 +77,22 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("scripted policy solves the largest episode within 100 steps and 60 seconds", todo),
     ]),
     ("Надёжность награды", 25, [
-        ("F1 and reward formulas match the case, including the empty cases", todo),
-        ("full correct answer beats silence on books with errors, for every step count", todo),
-        ("silence beats false accusations on clean books", todo),
-        ("duplicate findings give no gain", todo),
+        ("F1 and reward formulas match the case, including the empty cases", _attack("check_formulas")),
+        ("full correct answer beats silence on books with errors, for every step count",
+         _attack("check_correct_beats_silence")),
+        ("silence beats false accusations on clean books", _attack("check_silence_beats_false_accusation")),
+        ("duplicate findings give no gain", _attack("check_duplicates_give_no_gain")),
+        # Needs generated episodes of every valid config (gen G5+); tiny alone does not prove it.
         ("flag-everything scores below silence on every valid config", todo),
-        ("saving steps separates equal answers only slightly", todo),
-        ("one-to-one matching is deterministic", todo),
-        ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP", todo),
+        ("saving steps separates equal answers only slightly", _attack("check_saving_steps_is_minor")),
+        ("one-to-one matching is deterministic", _attack("check_matching_is_deterministic")),
+        ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP",
+         _attack("check_wrong_fields_are_not_tp")),
+        # The -1 part is proven by check_limits; ending the episode and the log entry need the evaluator (env E4).
         ("invalid structure ends the episode with reward -1 and a judge log entry", todo),
-        ("limits: 30 findings, 10 evidence ids, 1000 characters", todo),
-        ("explanation text does not change the reward", todo),
-        ("guessed and non-existent ids give no gain", todo),
+        ("limits: 30 findings, 10 evidence ids, 1000 characters", _attack("check_limits")),
+        ("explanation text does not change the reward", _attack("check_explanation_does_not_matter")),
+        ("guessed and non-existent ids give no gain", _attack("check_guessed_ids_give_no_gain")),
     ]),
     ("Воспроизводимость и обобщение", 15, [
         ("rng: same seed gives the same stream", rng_is_reproducible),
