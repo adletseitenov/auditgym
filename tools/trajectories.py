@@ -207,6 +207,18 @@ def _ids_in(value, out: set) -> None:
         out.add(value)
 
 
+def _fx_keys_in(value, out: set) -> None:
+    """An fx row the agent was shown also shows its evidence key "date|source|target" (docs/AUDIT.md D1)."""
+    if isinstance(value, dict):
+        if all(isinstance(value.get(k), str) for k in ("date", "source_currency", "target_currency")):
+            out.add(f"{value['date']}|{value['source_currency']}|{value['target_currency']}")
+        for item in value.values():
+            _fx_keys_in(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _fx_keys_in(item, out)
+
+
 def _without_records(observation: dict) -> dict:
     return {key: value for key, value in observation.items() if key not in ("records", "record")}
 
@@ -296,6 +308,7 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
             if unseen:
                 problems.append(f"{where}: submitted ids the agent was never shown (truth in a training file)")
         _ids_in(observation, seen.setdefault(episode_id, set()))
+        _fx_keys_in(observation, seen[episode_id])
     return problems
 
 
