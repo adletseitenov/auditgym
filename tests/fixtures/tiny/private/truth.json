@@ -1,0 +1,22 @@
+{
+ "schema_version": "1",
+ "episode_id": "ep_tiny0001",
+ "issues": [
+  {
+   "issue_id": "t1",
+   "type": "duplicate_invoice",
+   "affected_ids": [
+    "k7m2qa",
+    "z5c1ty"
+   ],
+   "expected_amount_minor": 5000000,
+   "currency": "KZT",
+   "evidence_sets": [
+    [
+     "k7m2qa",
+     "z5c1ty"
+    ]
+   ]
+  }
+ ]
+}

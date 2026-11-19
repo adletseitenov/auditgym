@@ -1,0 +1,13 @@
+row_id,timestamp,account,debit_minor,credit_minor,currency,entity_id,invoice_id,payment_id
+b2,2026-10-15T12:00:00+05:00,expense,300000,0,KZT,v2s7lk,,
+a5,2026-10-10T09:15:00+05:00,receivable,1200000,0,KZT,t6w3pb,r2k7mh,
+a1,2026-10-03T10:00:00+05:00,receivable,5000000,0,KZT,e4h8rn,p3x9wd,
+a8,2026-10-12T11:00:00+05:00,receivable,0,5000000,KZT,e4h8rn,p3x9wd,y6d2ck
+a3,2026-10-05T16:30:00+05:00,receivable,5000000,0,KZT,e4h8rn,n8v4js,
+b1,2026-10-20T15:45:00+05:00,receivable,0,1200000,KZT,t6w3pb,r2k7mh,g1q5zr
+a2,2026-10-03T10:00:00+05:00,revenue,0,5000000,KZT,e4h8rn,p3x9wd,
+a7,2026-10-12T11:00:00+05:00,cash,5000000,0,KZT,e4h8rn,p3x9wd,y6d2ck
+a6,2026-10-10T09:15:00+05:00,revenue,0,1200000,KZT,t6w3pb,r2k7mh,
+a4,2026-10-05T16:30:00+05:00,revenue,0,5000000,KZT,e4h8rn,n8v4js,
+b3,2026-10-15T12:00:00+05:00,cash,0,300000,KZT,v2s7lk,,
+a9,2026-10-20T15:45:00+05:00,cash,1200000,0,KZT,t6w3pb,r2k7mh,g1q5zr
