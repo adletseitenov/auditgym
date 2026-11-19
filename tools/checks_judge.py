@@ -201,12 +201,24 @@ def wrong_fields_are_not_tp() -> Optional[str]:
 def invalid_structure_is_minus_one() -> Optional[str]:
     # The judge side: reward -1 and a structure_error code for the evaluator's log.
     return _rows(("wrong episode_id", "payload is a list", "findings is a dict", "unknown type",
-                  "negative amount", "bool amount", "float amount 125000.0", "string amount",
-                  "missing explanation", "id that is not a string", "huge payload in an ignored key",
+                  "negative amount", "bool amount", "float amount 125000.5", "string amount",
+                  "missing currency", "id that is not a string", "huge payload in an ignored key",
                   "NaN in an ignored key"))
 
 
+def tolerated_forms_are_scored() -> Optional[str]:
+    """R5: forms a reasonable oracle may produce are scored, not rejected with -1."""
+    return _rows(("float amount 125000.0 is the amount 125000", "type in capitals with spaces",
+                  "currency with spaces", "missing explanation is the empty string",
+                  "11 evidence entries that collapse to 2 ids count as 2",
+                  "25 evidence entries, 4 different ids: the full set repeated"))
+
+
 def limits_30_10_1000() -> Optional[str]:
+    """Also R5: the evidence limit counts different ids, and tolerated spellings are still scored."""
+    tolerated = tolerated_forms_are_scored()
+    if tolerated:
+        return tolerated
     return _rows(("30 findings (4 right + 26 junk)", "31 findings",
                   "10 evidence ids (full set + existing extras)", "11 evidence ids",
                   "explanation 1000 code points, 4-byte chars", "explanation 1001 code points, 2-byte chars"))

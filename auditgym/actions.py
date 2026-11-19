@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import json
 
+from .findings import MAX_MESSAGE_BYTES
+
 MAX_STEPS = 100
 PAGE_SIZE = 50
 MAX_FINDINGS = 30
 MAX_EVIDENCE_IDS = 10
 MAX_EXPLANATION_CHARS = 1000
-MAX_SUBMIT_BYTES = 65536
+MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 256 KiB: one constant for the limit (audit R2)
 MAX_EXPRESSION_CHARS = 200
 
 ACTIONS = ("list_records", "get_record", "get_document", "calculator", "submit")

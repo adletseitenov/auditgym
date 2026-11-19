@@ -44,20 +44,26 @@ CASES = [
     ("31 findings", msg(*[GOOD] * 31), "too_many_findings"),
     ("finding not an object", msg("dup"), "finding_not_object"),
     *[(f"missing {f}", msg(without(f)), "missing_field")
-      for f in ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids", "explanation")],
+      for f in ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids")],
+    ("missing explanation is the empty string (R5)", msg(without("explanation")), None),
     ("unknown type", msg(finding(type="fraud")), "unknown_type"),
     ("type not a string", msg(finding(type=["duplicate_invoice"])), "unknown_type"),
-    ("type case differs", msg(finding(type="Duplicate_Invoice")), "unknown_type"),
+    ("type case and spaces are normalised (R5)", msg(finding(type="  Duplicate_Invoice\t")), None),
+    ("type with a different letter is unknown", msg(finding(type="duplicate-invoice")), "unknown_type"),
     ("wrong episode_id", msg(GOOD, episode_id="ep_y"), "wrong_episode_id"),
     ("episode_id not a string", msg(GOOD, episode_id=1), "wrong_episode_id"),
     ("amount bool", msg(finding(claimed_amount_minor=True)), "amount_not_int"),
-    ("amount float 100.0", msg(finding(claimed_amount_minor=100.0)), "amount_not_int"),
+    ("amount float 100.0 is the int 100 (R5)", msg(finding(claimed_amount_minor=100.0)), None),
+    ("amount float 100.5", msg(finding(claimed_amount_minor=100.5)), "amount_not_int"),
+    ("amount float -100.0", msg(finding(claimed_amount_minor=-100.0)), "negative_amount"),
+    ("amount Infinity", msg(finding(claimed_amount_minor=float("inf"))), "non_finite"),
     ("amount string", msg(finding(claimed_amount_minor="100")), "amount_not_int"),
     ("amount None", msg(finding(claimed_amount_minor=None)), "amount_not_int"),
     ("amount negative", msg(finding(claimed_amount_minor=-1)), "negative_amount"),
     ("amount zero", msg(finding(claimed_amount_minor=0)), None),
     ("amount 10**30", msg(finding(claimed_amount_minor=10 ** 30)), None),
-    ("amount 10**70000 (too large)", msg(finding(claimed_amount_minor=10 ** 70000)), "message_too_large"),
+    ("amount 10**70000 fits in 256 KiB", msg(finding(claimed_amount_minor=10 ** 70000)), None),
+    ("amount 10**300000 (too large)", msg(finding(claimed_amount_minor=10 ** 300000)), "message_too_large"),
     ("amount NaN", msg(finding(claimed_amount_minor=float("nan"))), "non_finite"),
     ("Infinity in an extra key", msg(GOOD, extra=float("inf")), "non_finite"),
     ("affected_ids not a list", msg(finding(affected_ids="a")), "ids_not_list"),
@@ -66,7 +72,10 @@ CASES = [
     ("evidence id None", msg(finding(evidence_ids=[None])), "id_not_string"),
     ("10 evidence ids", msg(finding(evidence_ids=[str(i) for i in range(10)])), None),
     ("11 evidence ids", msg(finding(evidence_ids=[str(i) for i in range(11)])), "too_many_evidence_ids"),
-    ("11 evidence ids with repeats", msg(finding(evidence_ids=["a"] * 11)), "too_many_evidence_ids"),
+    ("11 different evidence ids among repeats", msg(finding(evidence_ids=[str(i % 11) for i in range(25)])),
+     "too_many_evidence_ids"),
+    ("the limit counts unique ids: 25 entries, 10 different (R5)",
+     msg(finding(evidence_ids=[str(i % 10) for i in range(25)])), None),
     ("empty affected and evidence", msg(finding(affected_ids=[], evidence_ids=[])), None),
     ("currency not a string", msg(finding(currency=840)), "currency_not_string"),
     ("explanation 1000 code points", msg(finding(explanation="ж" * 1000)), None),
@@ -76,7 +85,7 @@ CASES = [
     ("explanation empty", msg(finding(explanation="")), None),
     ("explanation not a string", msg(finding(explanation=None)), "explanation_not_string"),
     ("extra keys ignored", msg(finding(verdict="tp"), note={"x": [1, None, True]}), None),
-    ("payload over 64 KiB", msg(GOOD, pad="x" * MAX_MESSAGE_BYTES), "message_too_large"),
+    ("payload over 256 KiB", msg(GOOD, pad="x" * MAX_MESSAGE_BYTES), "message_too_large"),
     ("non-string dict key", msg(GOOD, extra={1: "a"}), "not_json"),
     ("set value", msg(GOOD, extra={"a"}), "not_json"),
     ("bytes value", msg(GOOD, extra=b"a"), "not_json"),
@@ -96,6 +105,19 @@ class StructureTableTest(unittest.TestCase):
 
 
 class NormalizationTest(unittest.TestCase):
+    def test_currency_is_trimmed_and_upper_and_type_is_lower(self):
+        [item] = parse_findings(msg(finding(currency=" usd\n", type=" FX_Error ")), EP)
+        self.assertEqual((item["currency"], item["type"]), ("USD", "fx_error"))
+
+    def test_integral_float_amount_becomes_an_int(self):
+        [item] = parse_findings(msg(finding(claimed_amount_minor=125000.0)), EP)
+        self.assertEqual(item["claimed_amount_minor"], 125000)
+        self.assertIs(type(item["claimed_amount_minor"]), int)
+
+    def test_explanation_defaults_to_empty(self):
+        [item] = parse_findings(msg(without("explanation")), EP)
+        self.assertEqual(item["explanation"], "")
+
     def test_ids_sorted_unique_and_currency_upper(self):
         [item] = parse_findings(msg(finding(affected_ids=["b", "a", "b"], evidence_ids=["b", "a", "a"])), EP)
         self.assertEqual(item["affected_ids"], ["a", "b"])
@@ -131,6 +153,27 @@ class MessageSizeTest(unittest.TestCase):
         value = 10 ** 4400  # above the 4300-digit str() limit of Python 3.11
         self.assertEqual(message_size([value]), 2 + 4401)
 
+    def test_limit_is_256_kib(self):
+        self.assertEqual(MAX_MESSAGE_BYTES, 262144)
+        base = message_size(msg(GOOD, pad=""))
+        parse_findings(msg(GOOD, pad="x" * (262144 - base)), EP)
+        with self.assertRaises(StructureError) as caught:
+            parse_findings(msg(GOOD, pad="x" * (262144 - base + 1)), EP)
+        self.assertEqual(caught.exception.code, "message_too_large")
+
+    def test_the_case_maximum_fits_in_cyrillic(self):
+        """R2: 30 findings x 10 evidence ids x 1000 characters is 68 KB and must not be -1."""
+        big = finding(explanation="ж" * 1000, evidence_ids=[f"e{i:02d}" for i in range(10)])
+        answer = msg(*[big] * 30)
+        self.assertGreater(message_size(answer), 65536)
+        self.assertEqual(len(parse_findings(answer, EP)), 30)
+
+    def test_huge_int_exact_digits(self):
+        for exponent in (9_999, 10_000, 100_000, 261_000):
+            value = 10 ** exponent
+            self.assertEqual(message_size([value]), 2 + exponent + 1, exponent)
+            self.assertEqual(message_size([value - 1]), 2 + exponent, exponent)
+
     def test_boundary_64_kib(self):
         base = message_size(msg(GOOD, pad=""))
         fits = msg(GOOD, pad="x" * (MAX_MESSAGE_BYTES - base))
@@ -146,9 +189,9 @@ class MessageSizeTest(unittest.TestCase):
         with self.assertRaises(StructureError):
             parse_findings(msg(GOOD, pad=loop), EP)
         deep = []
-        for _ in range(100_000):
+        for _ in range(150_000):
             deep = [deep]
-        with self.assertRaises(StructureError):  # 200 000 brackets > 64 KiB
+        with self.assertRaises(StructureError):  # 300 000 brackets > 256 KiB
             parse_findings(msg(GOOD, pad=deep), EP)
         shallow = []
         for _ in range(10_000):

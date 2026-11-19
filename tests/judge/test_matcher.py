@@ -18,6 +18,39 @@ def normalized(ep, findings):
     return parse_findings(helpers.submit(ep, findings), ep["public"]["manifest"]["episode_id"])
 
 
+class ToleranceDefaultTest(unittest.TestCase):
+    """M6: a type the policy does not list has tolerance 0, not some default above it."""
+
+    def test_missing_type_in_policy_means_zero(self):
+        ep = helpers.episode(4)
+        for policy in ({}, {"amount_tolerance_minor": {}},
+                       {"amount_tolerance_minor": {"duplicate_invoice": 5}}):
+            ep["public"]["policy"] = dict(policy, evidence_superset_allowed=True)
+            for issue in ep["private"]["truth"]["issues"]:
+                if policy.get("amount_tolerance_minor", {}).get(issue["type"]):
+                    continue
+                off = dict(helpers.correct(issue), claimed_amount_minor=issue["expected_amount_minor"] + 1)
+                exact = helpers.correct(issue)
+                result = matcher.match(ep["private"]["truth"], normalized(ep, [off]), ep["public"])
+                self.assertEqual((result["tp"], result["fp"]), (0, 1), (policy, issue["type"]))
+                result = matcher.match(ep["private"]["truth"], normalized(ep, [exact]), ep["public"])
+                self.assertEqual(result["tp"], 1)
+
+    def test_listed_tolerance_is_used_both_ways(self):
+        ep = helpers.episode(4)
+        ep["public"]["policy"]["amount_tolerance_minor"]["fx_error"] = 1
+        issue = next(i for i in ep["private"]["truth"]["issues"] if i["type"] == "fx_error")
+        for delta, tp in ((-2, 0), (-1, 1), (0, 1), (1, 1), (2, 0)):
+            finding = dict(helpers.correct(issue), claimed_amount_minor=issue["expected_amount_minor"] + delta)
+            self.assertEqual(matcher.match(ep["private"]["truth"], normalized(ep, [finding]), ep["public"])["tp"],
+                             tp, delta)
+
+    def test_bad_tolerance_value_is_an_error(self):
+        for bad in (-1, 1.0, True, "1"):
+            with self.assertRaises(ValueError):
+                matcher.tolerance({"amount_tolerance_minor": {"fx_error": bad}}, "fx_error")
+
+
 class TinyFixtureTest(unittest.TestCase):
     def setUp(self):
         self.ep = load_episode(str(TINY))
