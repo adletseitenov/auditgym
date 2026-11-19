@@ -36,7 +36,7 @@ CHECK: PASSED
 | Эпизоды | `episodes/train` (10) и `episodes/dev` (10), по `public/` и `private/` | `python3 -m tools.episodes --out episodes` (пересборка побайтно; `make episodes`) |
 | Тесты | `tests/` (среда, сопоставление и награда, генератор, решатель, схемы) | `python3 -m unittest discover -s tests` (`make test`) |
 | Базовые политики | `policies/`: `random_explorer`, `reconcile`, `flag_all*`, `oracle`, а также `silence` и `solver_policy` | `python3 -m tools.report --out docs/RESULTS.md` (`make report`) |
-| Траектории | `trajectories.jsonl` (поля `episode_id, step, action, observation, reward, terminated, truncated`; в наблюдениях нет эталона) | `python3 -m tools.trajectories --episodes episodes/train --out trajectories.jsonl` (`make trajectories`) |
+| Траектории | `trajectories.jsonl` (поля `episode_id, policy, step, action, observation, reward, terminated, truncated`; в последней строке эпизода ещё `metrics` с P, R, F1; политики `random_explorer`, `reconcile`, `flag_all` на 12 книгах train и dev, около 4,4 МБ; в наблюдениях нет эталона). Траектории oracle лежат отдельно, в `runs/trajectories.oracle.jsonl` (не сдаются: в действиях эталон) | `python3 -m tools.trajectories --out trajectories.jsonl --oracle-out runs/trajectories.oracle.jsonl` (`make trajectories`; `--all-episodes` берёт все 20 книг, около 9 МБ) |
 | Записка о дизайне | `docs/DESIGN.md` | — |
 | Демо | `python3 -m tools.demo` (`make demo`): один эпизод по шагам, разбор оценщика, атаки на тот же эпизод | `python3 -m tools.demo` |
 

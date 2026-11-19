@@ -2,15 +2,20 @@
 terminated, truncated; «В наблюдениях обучающих траекторий нет закрытого эталона»).
 
     python -m tools.trajectories [--out trajectories.jsonl] [--episodes DIR | --seeds 1 2 3]
-                                 [--config JSON] [--policies random,solver,oracle]
+                                 [--config JSON] [--policies random_explorer,reconcile,flag_all,oracle]
                                  [--policy module:Class ...] [--oracle-out PATH] [--mode train|eval]
 
-With no arguments it records the `random` and `solver` policies on the shipped train episodes
-(`episodes/train`) into `trajectories.jsonl` (`make trajectories`). The output directory is
+With no arguments it records the four baseline policies (random_explorer, reconcile, flag_all,
+oracle; `policies/`) on the shipped train and dev episodes (`episodes/train`, `episodes/dev`) into
+`trajectories.jsonl` (`make trajectories`); the oracle goes to `trajectories.oracle.jsonl`. The output directory is
 created when it does not exist.
 
-Each line has exactly the seven fields, in that order. Step 0 is the reset: action null, reward
-0.0, both flags false. `info` is never written, nor anything else.
+Each line has the case fields plus `policy` (the name of the policy that played the episode), in
+this order: episode_id, policy, step, action, observation, reward, terminated, truncated. The last
+line of an episode (terminated or truncated) also carries `metrics` {precision, recall, f1}, taken
+from the terminal info of a train-mode run (an eval-mode run has no metrics to give, so the key is
+absent). Step 0 is the reset: action null, reward 0.0, both flags false. Nothing else of `info`
+is written.
 
 For other engineers' policies: wrap the Env in a Recorder and drive it as usual.
 
@@ -42,10 +47,19 @@ import sys
 
 from auditgym.rng import Rng
 
-FIELDS = ("episode_id", "step", "action", "observation", "reward", "terminated", "truncated")
+FIELDS = ("episode_id", "policy", "step", "action", "observation", "reward", "terminated", "truncated")
+FINAL_FIELDS = FIELDS + ("metrics",)  # the last line of an episode of a train-mode run
+METRIC_KEYS = ("precision", "recall", "f1")
+BASELINES = ("random_explorer", "reconcile", "flag_all", "oracle")
 TABLES = ("ledger", "invoices", "payments", "fx")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEFAULT_EPISODES = ROOT / "episodes" / "train"
+DEFAULT_EPISODES = (ROOT / "episodes" / "train", ROOT / "episodes" / "dev")
+# The three reading baselines page every table, about 0.4 MB per episode and policy, so all 20
+# episodes would not fit the size we keep for the file (about 5 MB). The default takes six books
+# of each split: every error type, both interactions, and clean books; the two biggest books of
+# each split (ep_10 and the largest mixed ones) are left out. `--all-episodes` records everything.
+DEFAULT_PICK = {"train": ("ep_01", "ep_04", "ep_05", "ep_06", "ep_07", "ep_08"),
+                "dev": ("ep_02", "ep_03", "ep_05", "ep_06", "ep_08", "ep_09")}
 DEFAULT_OUT = "trajectories.jsonl"
 
 
@@ -70,9 +84,11 @@ class TrajectoryWriter:
         self._handle = open(path, mode, encoding="utf-8")
 
     def write(self, line: dict) -> None:
-        if tuple(line) != FIELDS:
-            raise TrajectoryError(f"trajectory line must have exactly {FIELDS}")
-        self._handle.write(json.dumps(line, ensure_ascii=False, allow_nan=False) + "\n")
+        if tuple(line) not in (FIELDS, FINAL_FIELDS):
+            raise TrajectoryError(f"trajectory line must have exactly {FIELDS} (and `metrics` on the last line)")
+        if "metrics" in line and tuple(line["metrics"]) != METRIC_KEYS:
+            raise TrajectoryError(f"metrics must have exactly {METRIC_KEYS}")
+        self._handle.write(json.dumps(line, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n")
         self.lines += 1
 
     def close(self) -> None:
@@ -93,13 +109,17 @@ class Recorder:
             raise TrajectoryError("a privileged policy must write to a separate oracle file")
         self.env = env
         self.writer = writer
+        self.policy_name = str(getattr(policy, "name", None) or type(policy).__name__)
         self.episode_id = None
         self.step_number = 0
 
-    def _write(self, action, observation, reward, terminated, truncated) -> None:
-        self.writer.write({"episode_id": self.episode_id, "step": self.step_number, "action": action,
-                           "observation": observation, "reward": reward, "terminated": terminated,
-                           "truncated": truncated})
+    def _write(self, action, observation, reward, terminated, truncated, info=None) -> None:
+        line = {"episode_id": self.episode_id, "policy": self.policy_name, "step": self.step_number,
+                "action": action, "observation": observation, "reward": reward, "terminated": terminated,
+                "truncated": truncated}
+        if (terminated or truncated) and info and all(key in info for key in METRIC_KEYS):
+            line["metrics"] = {key: info[key] for key in METRIC_KEYS}
+        self.writer.write(line)
 
     def reset(self, seed=None, config=None):
         observation, info = self.env.reset(seed, config) if seed is not None else self.env.reset()
@@ -113,12 +133,14 @@ class Recorder:
             raise TrajectoryError("reset first")
         observation, reward, terminated, truncated, info = self.env.step(action)
         self.step_number += 1
-        self._write(action, observation, reward, terminated, truncated)
+        self._write(action, observation, reward, terminated, truncated, info)
         return observation, reward, terminated, truncated, info
 
 
 def run_policy(recorder: Recorder, policy, seed=None, config=None, max_steps: int = 100) -> float:
     observation, _ = recorder.reset(seed, config)
+    if hasattr(policy, "reset"):  # the policies of policies/ take the first observation here
+        policy.reset(observation)
     reward = 0.0
     for _ in range(max_steps + 1):
         observation, reward, terminated, truncated, _ = recorder.step(policy.act(observation))
@@ -130,6 +152,8 @@ def run_policy(recorder: Recorder, policy, seed=None, config=None, max_steps: in
 # --- built-in policies ----------------------------------------------------------------------------
 class RandomPolicy:
     """Random explorer with a fixed seed: reads pages and records it has seen, then submits a guess."""
+
+    name = "random"
 
     def __init__(self, seed: int = 0) -> None:
         self.seed = seed
@@ -170,6 +194,8 @@ class RandomPolicy:
 class SolverPolicy:
     """Honest scripted policy: page every table through the contract, run auditgym.solver.solve, submit."""
 
+    name = "solver"
+
     def act(self, observation: dict) -> dict:
         if observation.get("type") == "reset":
             self.first = observation
@@ -194,6 +220,7 @@ class OracleSubmitPolicy:
     """Evaluator-side oracle (privileged): submits the truth with its first evidence sets at once."""
 
     privileged = True
+    name = "oracle"
 
     def __init__(self, answer: dict) -> None:
         self.answer = answer
@@ -255,8 +282,8 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
     problems = []
     words = ("truth", "provenance", "pre_ledger", "pre_invoices", "pre_payments", "id_map", "evidence_sets",
              "expected_amount", "issue_id", "generator_version", "surface_seed", "traceback")
-    expected_step: dict[str, int] = {}
-    seen: dict[str, set] = {}
+    expected_step: dict[tuple, int] = {}
+    seen: dict[tuple, set] = {}
     for number, raw in enumerate(pathlib.Path(path).read_text(encoding="utf-8").splitlines(), 1):
         where = f"line {number}"
         try:
@@ -264,15 +291,22 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
         except ValueError:
             problems.append(f"{where}: not JSON")
             continue
-        if not isinstance(line, dict) or tuple(line) != FIELDS:
+        if not isinstance(line, dict) or tuple(line) not in (FIELDS, FINAL_FIELDS):
             problems.append(f"{where}: fields {list(line) if isinstance(line, dict) else line}")
             continue
         episode_id, step, observation = line["episode_id"], line["step"], line["observation"]
-        if step != expected_step.get(episode_id, 0) and step != 0:
+        if not isinstance(line["policy"], str) or not line["policy"]:
+            problems.append(f"{where}: policy name")
+        if "metrics" in line and not (line["terminated"] or line["truncated"]):
+            problems.append(f"{where}: metrics on a line that does not end an episode")
+        if "metrics" in line and (not isinstance(line["metrics"], dict) or tuple(line["metrics"]) != METRIC_KEYS):
+            problems.append(f"{where}: metrics shape")
+        run = (episode_id, line["policy"])  # one policy plays one episode at a time
+        if step != expected_step.get(run, 0) and step != 0:
             problems.append(f"{where}: step {step} out of order")
-        expected_step[episode_id] = step + 1
+        expected_step[run] = step + 1
         if step == 0:
-            seen[episode_id] = set()
+            seen[run] = set()
         if not isinstance(observation, dict) or set(observation) != OBS_KEYS.get(observation.get("type"), set()):
             problems.append(f"{where}: observation shape")
             continue
@@ -311,11 +345,11 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
             if re.search(rf"(?<![0-9]){abs(seed)}(?![0-9])", text):
                 problems.append(f"{where}: the seed")
         if training:
-            unseen = _submitted_ids(line["action"]) - seen.get(episode_id, set())
+            unseen = _submitted_ids(line["action"]) - seen.get(run, set())
             if unseen:
                 problems.append(f"{where}: submitted ids the agent was never shown (truth in a training file)")
-        _ids_in(observation, seen.setdefault(episode_id, set()))
-        _fx_keys_in(observation, seen[episode_id])
+        _ids_in(observation, seen.setdefault(run, set()))
+        _fx_keys_in(observation, seen[run])
     return problems
 
 
@@ -332,29 +366,42 @@ def _load_policy(spec: str):
     return getattr(importlib.import_module(module_name), class_name)()
 
 
-def record(out, *, seeds=(), episodes_dir=None, config=None, policies=("random", "solver"), external=(),
+def _builtin(name: str, episode: dict):
+    """A policy by name: `random` and `solver` are the scripted ones of this module, every name of
+    policies.runner.NAMES is the baseline of that name (the oracle gets the truth: evaluator side)."""
+    from policies.runner import NAMES, make_policy
+
+    if name == "random":
+        return RandomPolicy(seed=7)
+    if name == "solver":
+        return SolverPolicy()
+    if name not in NAMES:
+        raise TrajectoryError(f"unknown policy {name!r}")
+    return make_policy(name, truth=episode["private"]["truth"] if name == "oracle" else None)
+
+
+def record(out, *, seeds=(), episodes_dir=None, config=None, policies=BASELINES, external=(),
            oracle_out=None, mode: str = "train") -> dict:
-    """Record every policy on every episode. Returns {"train": path, "oracle": path or None, "episodes": {...}}."""
+    """Record every policy on every episode. `episodes_dir` is one directory or a list of them
+    (each holds episode directories or is one). Returns {"train": path, "oracle": path or None,
+    "episodes": {...}}."""
     from auditgym import Env
     from auditgym.generate import generate
     from auditgym.storage import load_episode
-    from tools.metamorph import oracle_answer
 
     out = pathlib.Path(out)
     if oracle_out is None:
         oracle_out = out.with_name(out.name[:-len(out.suffix)] + ".oracle" + out.suffix if out.suffix
                                    else out.name + ".oracle.jsonl")
-    sources = [("seed", seed) for seed in seeds] + [("dir", d) for d in (_episode_dirs(episodes_dir) if episodes_dir
-                                                                         else [])]
+    roots = [episodes_dir] if isinstance(episodes_dir, (str, pathlib.Path)) else list(episodes_dir or ())
+    sources = [("seed", seed) for seed in seeds] + [("dir", d) for root in roots for d in _episode_dirs(root)]
     episodes = {}
     writers = {"train": TrajectoryWriter(out)}
     try:
         for kind, source in sources:
             episode = generate(source, config) if kind == "seed" else load_episode(source)
             episodes[episode["public"]["manifest"]["episode_id"]] = episode
-            named = [(name, {"random": lambda: RandomPolicy(seed=7), "solver": SolverPolicy,
-                             "oracle": lambda: OracleSubmitPolicy(oracle_answer(episode))}[name]())
-                     for name in policies]
+            named = [(name, _builtin(name, episode)) for name in policies]
             named += [(spec, _load_policy(spec)) for spec in external]
             for name, policy in named:
                 privileged = is_privileged(policy)
@@ -375,16 +422,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tools.trajectories")
     parser.add_argument("--out", default=DEFAULT_OUT)
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--episodes", help="episode directories (default: episodes/train of the repository)")
+    source.add_argument("--episodes", nargs="+",
+                        help="episode directories (default: DEFAULT_PICK of episodes/train and episodes/dev)")
     source.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--config", default=None, help="JSON config for --seeds")
-    parser.add_argument("--policies", default="random,solver")
+    parser.add_argument("--policies", default=",".join(BASELINES),
+                        help="random, solver or a name of policies.runner.NAMES")
     parser.add_argument("--policy", action="append", default=[], help="module:Class with act(observation)")
     parser.add_argument("--oracle-out", default=None)
+    parser.add_argument("--all-episodes", action="store_true",
+                        help="with the default directories: every episode, not DEFAULT_PICK")
     parser.add_argument("--mode", choices=("train", "eval"), default="train")
     arguments = parser.parse_args(argv)
     if arguments.episodes is None and not arguments.seeds:
-        arguments.episodes = str(DEFAULT_EPISODES)
+        arguments.episodes = [str(path) for path in DEFAULT_EPISODES]
+        if not arguments.all_episodes:
+            arguments.episodes = [str(path / name) for path in DEFAULT_EPISODES
+                                  for name in DEFAULT_PICK.get(path.name, ())]
     policies = tuple(p for p in arguments.policies.split(",") if p)
     config = json.loads(arguments.config) if arguments.config else None
     try:
@@ -394,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
     except TrajectoryError as exc:
         print(f"trajectories: {exc}", file=sys.stderr)
         return 2
-    paths = (str(pathlib.Path(arguments.episodes).resolve()),) if arguments.episodes else ()
+    paths = tuple(str(pathlib.Path(path).resolve()) for path in arguments.episodes or ())
     problems = scan_file(written["train"], written["episodes"], paths)
     if written["oracle"] is not None:
         problems += [f"oracle file: {p}" for p in scan_file(written["oracle"], written["episodes"], paths,

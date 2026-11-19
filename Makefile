@@ -28,7 +28,7 @@ episodes:
 	$(PY) -m tools.episodes --out episodes
 
 trajectories:
-	$(PY) -m tools.trajectories --episodes episodes/train --out trajectories.jsonl
+	$(PY) -m tools.trajectories --out trajectories.jsonl --oracle-out runs/trajectories.oracle.jsonl
 
 report:
 	$(PY) -m tools.report --out docs/RESULTS.md

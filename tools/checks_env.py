@@ -537,15 +537,16 @@ def external_transform() -> Optional[str]:
 
 def trajectory_logs() -> Optional[str]:
     from tools import metamorph
-    from tools.trajectories import FIELDS, scan_file, record
+    from tools.trajectories import FIELDS, FINAL_FIELDS, scan_file, record
 
     configs = [config for _, config in metamorph.supported_configs()]
     with tempfile.TemporaryDirectory(prefix="trajectory_check_") as directory:
         out = pathlib.Path(directory) / "trajectories.jsonl"
         written = record(out, seeds=(4_000_037,), config=configs[-1], policies=("random", "solver", "oracle"))
         lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
-        if not lines or any(tuple(line) != FIELDS for line in lines):
-            return "trajectory lines do not have exactly the seven case fields"
+        if not lines or any(tuple(line) != (FINAL_FIELDS if line["terminated"] or line["truncated"] else FIELDS)
+                            for line in lines):
+            return "trajectory lines do not have exactly the case fields, the policy and, last, the metrics"
         if sum(1 for line in lines if line["terminated"] or line["truncated"]) != 2:
             return "every recorded episode must end"
         problems = scan_file(out, written["episodes"], (directory,))

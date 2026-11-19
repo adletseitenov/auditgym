@@ -1,11 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "One line of trajectories.jsonl",
-  "description": "episode_id, step, action, observation, reward, terminated, truncated; the observation validates against the observation-* schema of its type (step 0 is the reset observation).",
+  "description": "episode_id, policy, step, action, observation, reward, terminated, truncated; the last line of an episode of a train-mode run also has metrics {precision, recall, f1}. The observation validates against the observation-* schema of its type (step 0 is the reset observation).",
   "type": "object",
   "properties": {
     "episode_id": {
       "type": "string"
+    },
+    "policy": {
+      "type": "string",
+      "description": "name of the policy that played the episode (policies/ or tools.trajectories)"
     },
     "step": {
       "type": "integer",
@@ -30,10 +34,37 @@
     },
     "truncated": {
       "type": "boolean"
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "precision": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "recall": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "f1": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "precision",
+        "recall",
+        "f1"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
     "episode_id",
+    "policy",
     "step",
     "action",
     "observation",

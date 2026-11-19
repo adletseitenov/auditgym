@@ -298,6 +298,33 @@ class TrajectoriesTest(Checker):
                 self.action(row["action"], f"line {number}")
             if not (row["terminated"] or row["truncated"]):
                 self.assertEqual(row["reward"], 0.0, f"line {number}")
+                self.assertNotIn("metrics", row, f"line {number}")
+
+    def test_every_baseline_policy_plays_and_every_episode_ends_with_metrics(self):
+        rows = [json.loads(line) for line in (ROOT / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual({row["policy"] for row in rows}, {"random_explorer", "reconcile", "flag_all"})
+        final = [row for row in rows if row["terminated"] or row["truncated"]]
+        starts = [row for row in rows if row["step"] == 0]
+        self.assertEqual(len(final), len(starts))
+        self.assertEqual({(r["episode_id"], r["policy"]) for r in final},
+                         {(r["episode_id"], r["policy"]) for r in starts})
+        episodes = {row["episode_id"] for row in rows}
+        self.assertGreaterEqual(len(episodes), 12)  # train and dev books
+        for row in final:
+            metrics = row["metrics"]
+            self.ok(row, "trajectory_row")
+            # reward = clip(2 F1 - 1 - 0.002 steps, -1, 1): the metrics are the ones of that reward
+            self.assertAlmostEqual(row["reward"], max(-1.0, min(1.0, 2 * metrics["f1"] - 1 - 0.002 * (row["step"] - 1))),
+                                   places=6, msg=row["episode_id"])
+
+    def test_the_row_schema_wants_policy_and_closed_metrics(self):
+        row = {"episode_id": "e", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+               "terminated": False, "truncated": False}
+        self.ok(row, "trajectory_row")
+        self.bad({key: value for key, value in row.items() if key != "policy"}, "trajectory_row")
+        self.bad(dict(row, metrics={"precision": 1.0, "recall": 1.0}), "trajectory_row")
+        self.bad(dict(row, metrics={"precision": 1.0, "recall": 1.0, "f1": 1.0, "tp": 1}), "trajectory_row")
+        self.ok(dict(row, metrics={"precision": 1.0, "recall": 1.0, "f1": 1.0}), "trajectory_row")
 
 
 if __name__ == "__main__":

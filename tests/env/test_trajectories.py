@@ -37,8 +37,9 @@ class TrajectoriesTest(unittest.TestCase):
 
     def test_exact_fields_and_steps(self):
         self.assertTrue(self.lines)
-        for line in self.lines:
-            self.assertEqual(tuple(line), FIELDS)
+        for line in self.lines:  # the seven case fields and the policy; `metrics` only on the last line
+            ended = line["terminated"] or line["truncated"]
+            self.assertEqual(tuple(line), trajectories.FINAL_FIELDS if ended else FIELDS)
         starts = [line for line in self.lines if line["step"] == 0]
         self.assertEqual(len(starts), 4)  # random and solver on two seeds
         self.assertTrue(all(line["action"] is None for line in starts))
@@ -68,7 +69,7 @@ class TrajectoriesTest(unittest.TestCase):
                 Recorder(env, writer, OracleSubmitPolicy({}))
         with TrajectoryWriter(self.tmp / "w.jsonl") as writer:
             with self.assertRaises(TrajectoryError):
-                writer.write({"episode_id": "x", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+                writer.write({"episode_id": "x", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
                               "terminated": False, "truncated": False, "info": {}})
 
     def test_scan_finds_planted_truth(self):
@@ -96,6 +97,46 @@ class TrajectoriesTest(unittest.TestCase):
         self.assertGreater(reward, 0.9)
         self.assertEqual(json.loads(lines[-1])["terminated"], True)
 
+    def test_every_line_names_its_policy_and_the_last_one_of_an_episode_has_metrics(self):
+        self.assertEqual({line["policy"] for line in self.lines}, {"random", "solver"})
+        for line in self.lines:
+            ended = line["terminated"] or line["truncated"]
+            self.assertEqual(tuple(line), trajectories.FINAL_FIELDS if ended else FIELDS)
+            if ended:
+                self.assertEqual(tuple(line["metrics"]), ("precision", "recall", "f1"))
+                self.assertTrue(all(0.0 <= value <= 1.0 for value in line["metrics"].values()))
+        self.assertEqual(len({(line["episode_id"], line["policy"]) for line in self.lines if line["step"] == 0}), 4)
+
+    def test_metrics_are_the_terminal_info_of_the_run(self):
+        from tests.env.helpers import TINY
+
+        path = self.tmp / "metrics.jsonl"
+        with Env.from_files(TINY) as env, TrajectoryWriter(path) as writer:
+            run_policy(Recorder(env, writer, SolverPolicy()), SolverPolicy())
+        last = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(last["policy"], "solver")
+        self.assertEqual(last["metrics"], {"precision": 1.0, "recall": 1.0, "f1": 1.0})
+
+    def test_the_writer_refuses_lines_without_policy_or_with_open_metrics(self):
+        with TrajectoryWriter(self.tmp / "strict.jsonl") as writer:
+            line = {"episode_id": "x", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+                    "terminated": False, "truncated": False}
+            writer.write(line)
+            with self.assertRaises(TrajectoryError):
+                writer.write({key: value for key, value in line.items() if key != "policy"})
+            with self.assertRaises(TrajectoryError):
+                writer.write(dict(line, metrics={"precision": 1.0, "recall": 1.0, "f1": 1.0, "tp": 3}))
+
+    def test_the_scan_catches_a_missing_policy_and_metrics_in_the_middle(self):
+        line = next(l for l in self.lines if l["step"] == 1)
+        self.assertTrue(self._scan_lines([{key: value for key, value in line.items() if key != "policy"}]))
+        self.assertTrue(self._scan_lines([dict(line, metrics={"precision": 0.0, "recall": 0.0, "f1": 0.0})]))
+
+    def test_the_oracle_is_a_baseline_name_and_stays_in_its_own_file(self):
+        self.assertEqual(trajectories.BASELINES, ("random_explorer", "reconcile", "flag_all", "oracle"))
+        names = {json.loads(line)["policy"] for line in self.oracle_lines}  # the policies/ oracle
+        self.assertEqual(names, {"oracle"})
+
     def test_cli(self):
         out = self.tmp / "cli" / "trajectories.jsonl"
         out.parent.mkdir()
@@ -122,10 +163,11 @@ class TrajectoriesTest(unittest.TestCase):
         from tests.env.helpers import TINY
         from unittest import mock
 
-        default = self.tmp / "shipped"
-        shutil.copytree(TINY, default)
+        default = self.tmp / "shipped" / "train"
+        shutil.copytree(TINY, default / "ep_01")
         out = self.tmp / "nodefault" / "trajectories.jsonl"
-        with mock.patch.object(trajectories, "DEFAULT_EPISODES", default), \
+        with mock.patch.object(trajectories, "DEFAULT_EPISODES", (default,)), \
+                mock.patch.object(trajectories, "DEFAULT_PICK", {"train": ("ep_01",)}), \
                 contextlib.redirect_stdout(io.StringIO()):
             code = trajectories.main(["--out", str(out), "--policies", "solver"])
         self.assertEqual(code, 0)
@@ -133,8 +175,12 @@ class TrajectoriesTest(unittest.TestCase):
         self.assertEqual({line["episode_id"] for line in lines}, {"ep_tiny0001"})
 
     def test_the_default_points_at_the_train_episodes_of_the_repository(self):
-        self.assertEqual(trajectories.DEFAULT_EPISODES, trajectories.ROOT / "episodes" / "train")
-        self.assertTrue((trajectories.DEFAULT_EPISODES / "ep_01" / "public").is_dir())
+        self.assertEqual(trajectories.DEFAULT_EPISODES, (trajectories.ROOT / "episodes" / "train",
+                                                         trajectories.ROOT / "episodes" / "dev"))
+        for root in trajectories.DEFAULT_EPISODES:
+            self.assertTrue((root / "ep_01" / "public").is_dir())
+            for name in trajectories.DEFAULT_PICK[root.name]:
+                self.assertTrue((root / name / "public").is_dir(), name)
         self.assertEqual(trajectories.DEFAULT_OUT, "trajectories.jsonl")
 
     def test_command_line_without_arguments_runs_in_another_directory(self):
@@ -150,7 +196,7 @@ class TrajectoriesTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         lines = (elsewhere / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()
         episodes = {json.loads(line)["episode_id"] for line in lines}
-        self.assertEqual(len(episodes), len(list(trajectories.DEFAULT_EPISODES.iterdir())))
+        self.assertEqual(len(episodes), sum(len(names) for names in trajectories.DEFAULT_PICK.values()))
 
 
 if __name__ == "__main__":
