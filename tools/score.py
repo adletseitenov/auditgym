@@ -33,6 +33,40 @@ def core_is_deterministic_by_lint() -> Optional[str]:
     return None if lint_determinism.main() == 0 else "determinism lint failed"
 
 
+def clean_books_are_well_formed() -> Optional[str]:
+    from auditgym.generate import generate
+    from auditgym.verify import verify
+
+    for seed in range(20):
+        problems = verify(generate(seed, {"errors": {}, "currencies": ["USD", "EUR"]}))
+        if problems:
+            return f"seed {seed}: {problems[0]}"
+    return None
+
+
+def same_seed_gives_same_files() -> Optional[str]:
+    from auditgym.generate import generate
+    from auditgym.storage import episode_files
+
+    config = {"errors": {}, "currencies": ["USD"]}
+    for seed in range(5):
+        if episode_files(generate(seed, config)) != episode_files(generate(seed, config)):
+            return f"seed {seed}: files differ between two runs"
+    return None
+
+
+def written_episode_loads_back() -> Optional[str]:
+    import tempfile
+
+    from auditgym.generate import generate
+    from auditgym.storage import load_episode, write_episode
+
+    episode = generate(3, {"errors": {}, "currencies": ["USD"]})
+    with tempfile.TemporaryDirectory() as directory:
+        write_episode(episode, directory)
+        return None if load_episode(directory) == episode else "loaded episode differs"
+
+
 # (criterion, points, [(check name, function)]). Names are the plan: one per sentence of the case.
 CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
     ("Контракт и изоляция", 25, [
@@ -53,7 +87,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("step after the end and step before reset give a fixed error, no state change", todo),
     ]),
     ("Данные и эталон", 25, [
-        ("books balance before injection (per book, per currency, per event group)", todo),
+        ("books balance before injection (per book, per currency, per event group)", clean_books_are_well_formed),
         ("after injection the deviation equals expected_amount_minor of each issue", todo),
         ("every evidence set exists, has at most 10 ids and is sufficient", todo),
         ("independent solver on open records equals the truth (1000 seeds)", todo),
@@ -81,12 +115,14 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
     ("Воспроизводимость и обобщение", 15, [
         ("rng: same seed gives the same stream", rng_is_reproducible),
         ("core package passes the determinism lint", core_is_deterministic_by_lint),
-        ("same seed, config and actions: byte-identical records, transitions, rewards", todo),
+        ("same seed and config: byte-identical episode files", same_seed_gives_same_files),
+        ("same seed, config and actions: identical transitions and rewards", todo),
         ("reset isolates episodes (A, B, A again equals A)", todo),
         ("independent of PYTHONHASHSEED, locale, system time zone, working directory", todo),
         ("surface_seed change: oracle answer maps by id table, reward is the same", todo),
         ("external reorder and id rename of episode files: same oracle reward", todo),
-        ("episode loads from files (Env.from_files) and equals the generated one", todo),
+        ("episode written to files loads back equal", written_episode_loads_back),
+        ("Env.from_files gives the same observations as the generated episode", todo),
     ]),
     ("Инженерия и объяснение", 10, [
         ("one command runs everything offline in the container", todo),
