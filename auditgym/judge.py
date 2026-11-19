@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from auditgym.findings import StructureError, parse_findings
 from auditgym.matcher import match
-from auditgym.reward import _to_float, metrics_exact, terminal_reward_exact
+from auditgym.reward import metrics, terminal_reward
 
 
 def judge(episode: dict, payload: object, inspection_steps: int) -> dict:
@@ -27,11 +27,10 @@ def judge(episode: dict, payload: object, inspection_steps: int) -> dict:
                     "tp": 0, "fp": 0, "fn": len(truth.get("issues", [])),
                     "structure_error": error.code}
     counts = match(truth, findings, public)
-    exact = metrics_exact(counts["tp"], counts["fp"], counts["fn"])
-    reward = terminal_reward_exact(exact["f1"], inspection_steps)
-    return {"reward": _to_float(reward),
-            "precision": _to_float(exact["precision"]),
-            "recall": _to_float(exact["recall"]),
-            "f1": _to_float(exact["f1"]),
+    scores = metrics(counts["tp"], counts["fp"], counts["fn"])
+    return {"reward": terminal_reward(scores["f1"], inspection_steps),
+            "precision": scores["precision"],
+            "recall": scores["recall"],
+            "f1": scores["f1"],
             "tp": counts["tp"], "fp": counts["fp"], "fn": counts["fn"],
             "structure_error": None}

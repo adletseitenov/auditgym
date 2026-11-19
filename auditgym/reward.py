@@ -4,11 +4,14 @@
     empty truth and empty findings give F1 = 1; empty truth with findings gives F1 = 0.
     reward = clip(2*F1 - 1 - 0.002*inspection_steps, -1, 1)
 
-Arithmetic is exact (`fractions.Fraction`; 0.002 is the rational 1/500). A value becomes a
-float only at the very end, by `_to_float`: the exact rational is rounded once to the nearest
-IEEE-754 double, ties to even (integer true division in CPython is correctly rounded). So the
-result is a pure function of the integers involved and is bit-identical on every platform with
-IEEE doubles; e.g. 2*1 - 1 - 0.002*100 is exactly 0.8, not 0.7999999999999998.
+The reward is computed literally, in IEEE-754 doubles, as the organizers' formula is written:
+
+    f1 = 2*tp / (2*tp + fp + fn)            (1.0 when tp = fp = fn = 0)
+    reward = max(-1.0, min(1.0, 2*f1 - 1 - 0.002*steps))
+
+so a checker that evaluates the formula in a float gets the same bits (audit R4: the exactly
+rounded value differed from it by 1 ulp for 16 % of the combinations). `metrics_exact` and
+`terminal_reward_exact` (`fractions.Fraction`) stay as the mathematical reference for tests.
 """
 from __future__ import annotations
 
@@ -42,8 +45,12 @@ def metrics_exact(tp: int, fp: int, fn: int) -> dict:
 
 
 def metrics(tp: int, fp: int, fn: int) -> dict:
-    """Precision, recall and F1 as floats (rounded once from the exact values)."""
-    return {name: _to_float(value) for name, value in metrics_exact(tp, fp, fn).items()}
+    """Precision, recall and F1 as floats, by the plain float formulas of CASE §05."""
+    tp, fp, fn = _count(tp, "tp"), _count(fp, "fp"), _count(fn, "fn")
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
+    return {"precision": precision, "recall": recall, "f1": f1}
 
 
 def _rational(value: object, name: str) -> Fraction:
@@ -61,5 +68,7 @@ def terminal_reward_exact(f1: object, inspection_steps: int) -> Fraction:
 
 
 def terminal_reward(f1: object, inspection_steps: int) -> float:
-    """clip(2*F1 - 1 - 0.002*inspection_steps, -1, 1) as a float rounded once."""
-    return _to_float(terminal_reward_exact(f1, inspection_steps))
+    """max(-1.0, min(1.0, 2*f1 - 1 - 0.002*steps)) in float arithmetic, written exactly so."""
+    f1 = float(_rational(f1, "f1"))
+    steps = _count(inspection_steps, "inspection_steps")
+    return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))

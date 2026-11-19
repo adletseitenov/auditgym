@@ -239,6 +239,15 @@ def expected_reward(expected, steps: int) -> Fraction:
     return min(max(2 * f1 - 1 - Fraction(steps, 500), Fraction(-1)), Fraction(1))
 
 
+def literal_reward(expected, steps: int) -> float:
+    """CASE §05 typed literally in floats: max(-1.0, min(1.0, 2*f1 - 1 - 0.002*steps))."""
+    if isinstance(expected, str):
+        return -1.0
+    tp, fp, fn = expected
+    f1 = 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
+    return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))
+
+
 def build_payload(episode: dict, build) -> object:
     if build is None:
         return None
@@ -263,7 +272,7 @@ def run_attack(attack: tuple) -> tuple[bool, dict, Fraction]:
     else:
         ok = (result["structure_error"] is None
               and (result["tp"], result["fp"], result["fn"]) == expected
-              and result["reward"] == want.numerator / want.denominator)
+              and result["reward"] == literal_reward(expected, steps))
     return ok, result, want
 
 
