@@ -27,7 +27,7 @@ import subprocess
 import sys
 import threading
 
-from .actions import DEFAULT_RESULTS_PATH
+from .actions import default_results_path
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
 _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal_error")
@@ -61,13 +61,13 @@ class Env:
     """Client of the evaluator process.
 
     `Env(mode="train" | "eval", results_path=None, timeout=120.0)`. In eval mode without a
-    `results_path` the journal is `out/results.jsonl` in the current directory (audit C5); it is
+    `results_path` the journal is $AUDITGYM_RESULTS or `runs/results.jsonl` in the current directory (audit C5); it is
     created with mode 0600. `timeout` bounds the wait for one reply (None: no bound); on expiry
     the server is stopped and `EnvError("timeout")` is raised.
 
     `reset(seed=None, config=None, options=None)`: `options` is a synonym of `config`; without a
-    seed the episode of Env.from_files is restarted, or, if there is none, the episode of the
-    default seed is generated. A refused reset raises `EnvError` and leaves the running episode.
+    seed the episode of Env.from_files is restarted, or, if there is none, a new one is generated
+    from the next default seed: 0 on the first such call, then the previous seed plus one. A refused reset raises `EnvError` and leaves the running episode.
     A `submit` that cannot be sent as JSON (NaN, a reference cycle, a 5 000-digit integer, nesting
     deeper than the recursion limit) is sent as a submit with an invalid structure: reward -1, the
     episode ends. Any other action that cannot be sent is an unknown action (a step is spent).
@@ -80,7 +80,7 @@ class Env:
         self.mode = mode
         self._timeout = timeout
         if mode == "eval" and results_path is None:
-            results_path = DEFAULT_RESULTS_PATH
+            results_path = default_results_path()
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
         if not _files:
             command.append("--no-load")

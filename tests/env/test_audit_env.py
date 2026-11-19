@@ -443,7 +443,7 @@ class JournalTest(unittest.TestCase):
         self.assertEqual((observation["type"], terminated), ("final", True))
 
     def test_default_journal_path_in_eval_mode(self):
-        self.assertEqual(actions.DEFAULT_RESULTS_PATH, "out/results.jsonl")
+        self.assertEqual(actions.DEFAULT_RESULTS_PATH, "runs/results.jsonl")
         with tempfile.TemporaryDirectory() as directory:
             before = os.getcwd()
             os.chdir(directory)
@@ -454,7 +454,7 @@ class JournalTest(unittest.TestCase):
                                                                "findings": "broken"}})
                 with Env(mode="train") as env:
                     env.reset(5, {"errors": {}})
-                journal = pathlib.Path(directory, "out", "results.jsonl")
+                journal = pathlib.Path(directory, "runs", "results.jsonl")
                 lines = [json.loads(line) for line in journal.read_text().splitlines()]
                 mode = stat.S_IMODE(journal.stat().st_mode)
             finally:
@@ -472,9 +472,34 @@ class JournalTest(unittest.TestCase):
             subprocess.run([sys.executable, "-m", "auditgym", "serve", "--mode", "eval"],
                            input=("\n".join(lines) + "\n").encode(), cwd=directory, env=env,
                            capture_output=True, timeout=60, check=True)
-            journal = pathlib.Path(directory, "out", "results.jsonl")
+            journal = pathlib.Path(directory, "runs", "results.jsonl")
             self.assertEqual(json.loads(journal.read_text())["reward"], -1.0)
             self.assertEqual(stat.S_IMODE(journal.stat().st_mode), 0o600)
+
+
+class DefaultJournalEnvVarTest(unittest.TestCase):
+    """C5: $AUDITGYM_RESULTS overrides the default journal path, for the client and for the server."""
+
+    def test_env_var_wins_over_the_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory, "elsewhere", "journal.jsonl")
+            before = os.environ.get(actions.RESULTS_ENV)
+            os.environ[actions.RESULTS_ENV] = str(target)
+            cwd = os.getcwd()
+            os.chdir(directory)
+            try:
+                self.assertEqual(actions.default_results_path(), str(target))
+                with Env(mode="eval") as env:
+                    first, _ = env.reset(5, {"errors": {}})
+                    env.step({"action": "submit", "args": 3})
+            finally:
+                os.chdir(cwd)
+                if before is None:
+                    del os.environ[actions.RESULTS_ENV]
+                else:
+                    os.environ[actions.RESULTS_ENV] = before
+            self.assertEqual(json.loads(target.read_text())["reward"], -1.0)
+            self.assertFalse(pathlib.Path(directory, "runs").exists())
 
 
 class ServerLineLimitTest(unittest.TestCase):
@@ -576,9 +601,9 @@ class ClientRobustnessTest(unittest.TestCase):
             self.assertEqual(strict_json(by_config), strict_json(by_gym_style))
             default_config = env.reset(5)[0]
             self.assertNotEqual(strict_json(default_config), strict_json(by_config))
-            # no seed: the default seed with the given options
+            # no seed: the next default seed (previous seed + 1 = 6) with the given options
             clean_default = env.reset(options={"errors": {}})[0]
-            self.assertEqual(strict_json(clean_default), strict_json(env.reset(DEFAULT_SEED, {"errors": {}})[0]))
+            self.assertEqual(strict_json(clean_default), strict_json(env.reset(6, {"errors": {}})[0]))
 
     def test_options_on_the_wire(self):
         lines = [json.dumps({"op": "reset", "seed": 5, "options": {"errors": {}}}),

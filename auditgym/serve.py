@@ -29,8 +29,8 @@ the server's argv (the process list); Env uses it on POSIX.
 
 A refused reset or load replies the same way with code `bad_config` (bad seed or config),
 `not_loaded` (reset without seed and nothing loaded) or `bad_episode` (directory unreadable).
-In eval mode without `--results` and `--results-fd` the journal goes to `out/results.jsonl`
-(directory created, file mode 0600). Python's limit on the digits of an int is lifted in this
+In eval mode without `--results` and `--results-fd` the journal goes to $AUDITGYM_RESULTS or
+`runs/results.jsonl` (directory created, file mode 0600). Python's limit on the digits of an int is lifted in this
 process, so a submit with a 5 000-digit amount is judged (a well-formed amount that never
 matches) instead of being refused as bad JSON.
 stdout carries only protocol lines; diagnostics go to stderr and contain no episode data.
@@ -43,7 +43,7 @@ import os
 import re
 import sys
 
-from .actions import DEFAULT_RESULTS_PATH
+from .actions import default_results_path
 from .evaluator import Evaluator, EvaluatorError
 
 MAX_LINE_BYTES = 1 << 20
@@ -178,7 +178,7 @@ def main(argv: list[str]) -> int:
     arguments = parser.parse_args(argv)
     stream = None
     if arguments.mode == "eval" and arguments.results is None and arguments.results_fd is None:
-        arguments.results = DEFAULT_RESULTS_PATH  # the journal of an eval run always exists (C5)
+        arguments.results = default_results_path()  # the journal of an eval run always exists (C5)
         try:
             os.makedirs(os.path.dirname(arguments.results) or ".", exist_ok=True)
         except OSError:

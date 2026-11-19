@@ -5,6 +5,7 @@ Nothing here touches episode data; the evaluator owns the episode.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from .findings import MAX_MESSAGE_BYTES
@@ -16,9 +17,16 @@ MAX_EVIDENCE_IDS = 10
 MAX_EXPLANATION_CHARS = 1000
 MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 256 KiB: one constant for the limit (audit R2)
 MAX_EXPRESSION_CHARS = 200
-# Where the evaluator writes its journal in eval mode when no path is given (audit C5), relative to
-# the working directory of whoever starts it; `out/` is the output directory of the whole repository.
-DEFAULT_RESULTS_PATH = "out/results.jsonl"
+# Where the evaluator writes its journal in eval mode when no path is given (audit C5): the path in
+# $AUDITGYM_RESULTS, else DEFAULT_RESULTS_PATH relative to the working directory of whoever starts it.
+RESULTS_ENV = "AUDITGYM_RESULTS"
+DEFAULT_RESULTS_PATH = "runs/results.jsonl"
+
+
+def default_results_path() -> str:
+    """The journal path of an eval run without an explicit one (one rule for client and server)."""
+    return os.environ.get(RESULTS_ENV) or DEFAULT_RESULTS_PATH
+
 
 ACTIONS = ("list_records", "get_record", "get_document", "calculator", "submit")
 TABLES = ("ledger", "invoices", "payments", "fx")
