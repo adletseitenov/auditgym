@@ -96,6 +96,11 @@ CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
 
 
 if __name__ == "__main__":
+    import sys
+
+    failed = 0
     for name, function in CHECKS:
         message = function()
+        failed += message is not None
         print(f"[{'OK' if message is None else 'FAIL'}] {name}" + ("" if message is None else f" -- {message}"))
+    sys.exit(1 if failed else 0)

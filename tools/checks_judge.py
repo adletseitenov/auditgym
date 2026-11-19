@@ -99,29 +99,65 @@ def duplicates_give_no_gain() -> Optional[str]:
     return _rows(("two identical findings for one issue", "same finding 30 times"))
 
 
-def flag_everything_below_silence() -> Optional[str]:
-    # Blind flagging (every document, every type, capped at 30) never beats silence, and is
-    # strictly below it on clean books. Even an attacker whose flags contain every issue
-    # perfectly (TP = T) stays negative under the density limit T <= N/5 (threshold 501/1499).
+BAD = -0.5  # "a bad result" (CASE 05): no episode with errors better than an answer with F1 = 0.25
+
+
+def flag_everything_is_bad() -> Optional[str]:
+    """Flagging everything gives a bad result (CASE 05), checked three ways.
+
+    1. Blind flags on synthetic books (every document x every type, all and capped at 30) never
+       beat silence, and are strictly below it on clean books.
+    2. The real flag-all policies through reset/step on generated episodes: strictly below
+       silence on every clean book, at most BAD on every book with errors, and below silence on
+       average over a set with clean books. On books with errors silence sits at the floor -1, so
+       "below silence" there is impossible for anything that hits one issue; the case asks for a
+       bad result, and BAD makes that a number.
+    3. An attacker who already knows every issue and pads to 30 findings stays negative while
+       T <= N/5 and N <= 25. Beyond that the cap of 30 limits the padding, so it is not claimed.
+    """
     for n_docs in range(5, 61, 5):
         for n_issues in (0, n_docs // 5):
             episode = _synthetic(n_issues, n_docs)
             docs = [d["doc_id"] for d in episode["public"]["invoices"]]
             blind = [_flag(d, t) for d in docs for t in TYPES]
-            capped = blind[:30]
             for s in STEPS:
                 silence = _judge(episode, [], s)["reward"]
-                for answer in (blind, capped):
+                for answer in (blind, blind[:30]):
                     got = _judge(episode, answer, s)["reward"]
                     if got > silence or (n_issues == 0 and got >= silence):
-                        return f"N={n_docs} T={n_issues}: flag-all {got} vs silence {silence}"
-                truth = episode["private"]["truth"]["issues"]
-                lucky = [{"type": i["type"], "affected_ids": i["affected_ids"],
-                          "claimed_amount_minor": i["expected_amount_minor"], "currency": "KZT",
-                          "evidence_ids": i["evidence_sets"][0], "explanation": ""} for i in truth]
-                lucky += [_flag(d, "period_cutoff") for d in docs[n_issues:]][: 30 - len(lucky)]
-                if n_issues and len(lucky) < 30 and _judge(episode, lucky, s)["reward"] >= 0:
-                    return f"N={n_docs} T={n_issues}: optimistic flag-all is not negative"
+                        return f"N={n_docs} T={n_issues}: blind flags {got} vs silence {silence}"
+    for n_docs in range(5, 26, 5):
+        episode = _synthetic(n_docs // 5, n_docs)
+        docs = [d["doc_id"] for d in episode["public"]["invoices"]]
+        truth = episode["private"]["truth"]["issues"]
+        lucky = [{"type": i["type"], "affected_ids": i["affected_ids"],
+                  "claimed_amount_minor": i["expected_amount_minor"], "currency": "KZT",
+                  "evidence_ids": i["evidence_sets"][0], "explanation": ""} for i in truth]
+        lucky += [_flag(d, "period_cutoff") for d in docs[len(truth):]][: 30 - len(lucky)]
+        for s in STEPS:
+            if _judge(episode, lucky, s)["reward"] >= 0:
+                return f"N={n_docs}: an attacker knowing every issue is not negative at {s} steps"
+    return _real_flag_all_is_bad()
+
+
+def _real_flag_all_is_bad(n_cases: int = 24) -> Optional[str]:
+    import statistics
+
+    from tools.report import generated_cases, run_generated
+
+    names = ("flag_all", "flag_all_cutoff", "flag_all_duplicates")
+    rows = run_generated(("silence",) + names, generated_cases(n_cases))
+    silence = rows["silence"]
+    if not any(r["clean"] for r in silence) or all(r["clean"] for r in silence):
+        return "the generated set needs both clean books and books with errors"
+    for name in names:
+        for quiet, loud in zip(silence, rows[name]):
+            if quiet["clean"] and not loud["reward"] < quiet["reward"]:
+                return f"{name} not below silence on a clean book ({loud['reward']})"
+            if not quiet["clean"] and loud["reward"] > BAD:
+                return f"{name} scored {loud['reward']} > {BAD} on a book with errors"
+        if statistics.fmean(r["reward"] for r in rows[name]) >= statistics.fmean(r["reward"] for r in silence):
+            return f"{name} not below silence on average"
     return None
 
 
@@ -131,8 +167,11 @@ def saving_steps_is_slight() -> Optional[str]:
         rewards = [_judge(episode, answer, s)["reward"] for s in STEPS]
         if any(a < b for a, b in zip(rewards, rewards[1:])):
             return "more steps gave a higher reward"
-        if rewards[0] - rewards[-1] > 0.198 + 1e-12:
-            return f"step spread {rewards[0] - rewards[-1]} above 0.198"
+        spread = rewards[0] - rewards[-1]
+        if answer and not 0 < spread:
+            return "steps cost nothing: equal answers are not separated at all"
+        if spread > 0.198 + 1e-12:
+            return f"step spread {spread} above 0.198"
     return None
 
 
@@ -188,12 +227,15 @@ def guessed_ids_give_no_gain() -> Optional[str]:
                   "payment_id cited with full evidence", "invoice_ids instead of doc_ids as affected"))
 
 
+FLAG_ALL_CHECK = ("flag-everything is bad: below silence on clean books and on average, "
+                  "at most -0.5 on books with errors")
+
 CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
     ("F1 and reward formulas match the case, including the empty cases", formulas_match_the_case),
     ("full correct answer beats silence on books with errors, for every step count", correct_beats_silence),
     ("silence beats false accusations on clean books", silence_beats_false_accusations),
     ("duplicate findings give no gain", duplicates_give_no_gain),
-    ("flag-everything scores below silence on every valid config", flag_everything_below_silence),
+    (FLAG_ALL_CHECK, flag_everything_is_bad),
     ("saving steps separates equal answers only slightly", saving_steps_is_slight),
     ("one-to-one matching is deterministic", matching_is_deterministic),
     ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP", wrong_fields_are_not_tp),

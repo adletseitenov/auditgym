@@ -134,7 +134,8 @@ class OrderingTest(unittest.TestCase):
         self.assertGreater(m["solver_policy"], m["reconcile"])
         for name in ("flag_all", "flag_all_cutoff", "flag_all_duplicates"):
             self.assertGreater(m["reconcile"], m[name], name)
-            self.assertLessEqual(m[name], m["silence"] + 0.15, name)
+            # "A bad result" (CASE 05): on average no better than an answer with F1 = 0.1.
+            self.assertLessEqual(m[name], -0.8, name)
 
     def test_clean_books_reward_silence_and_the_solver_and_punish_accusations(self):
         m = {name: self.mean(self.clean, name) for name in self.clean}
@@ -180,7 +181,7 @@ class SolverPolicyTest(unittest.TestCase):
 
 
 class IsolationTest(unittest.TestCase):
-    FORBIDDEN = ("auditgym.generate", "auditgym.inject", "auditgym.verify", "auditgym.storage",
+    FORBIDDEN = ("pathlib", "os", "io", "shutil", "subprocess", "auditgym.generate", "auditgym.inject", "auditgym.verify", "auditgym.storage",
                  "auditgym.evaluator", "auditgym.judge", "auditgym.matcher", "random", "uuid", "secrets")
 
     def test_policies_import_nothing_from_the_evaluator_side(self):
@@ -195,9 +196,27 @@ class IsolationTest(unittest.TestCase):
                 for name in names:
                     self.assertFalse(any(name == bad or name.startswith(bad + ".") for bad in self.FORBIDDEN),
                                      f"{path.name} imports {name}")
-            text = path.read_text(encoding="utf-8")
-            self.assertNotIn('["private"]', text, path.name)
-            self.assertNotIn("private/", text, path.name)
+            prose = set()  # real docstrings only: the first string statement of a module, class or function
+            for owner in ast.walk(tree):
+                if isinstance(owner, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    body = owner.body
+                    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                            and isinstance(body[0].value.value, str):
+                        prose.add(id(body[0].value))
+            for node in ast.walk(tree):
+                if id(node) in prose:
+                    continue
+                # Any spelling of the private part ("private", 'private/', Path(..) / "private").
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    self.assertNotIn("private", node.value.lower(), f"{path.name}: {node.value!r}")
+                # No file access: a policy sees the episode only through observations. runner.py is
+                # the harness that drives policies and writes trajectories, not a policy.
+                if path.name == "runner.py":
+                    continue
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    self.assertNotIn(node.func.id, ("open", "exec", "eval", "__import__"), path.name)
+                if isinstance(node, ast.Attribute):
+                    self.assertNotIn(node.attr, ("read_text", "read_bytes", "open"), path.name)
 
 
 if __name__ == "__main__":

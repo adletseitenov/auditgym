@@ -6,12 +6,13 @@ A finding is a TP for an issue iff every predicate below holds:
   fx key "date|source|target"), evidence_covers (contains a full allowed evidence set; extra
   ids only if policy["evidence_superset_allowed"]), and issue_available (not matched yet).
 
-Choice under ambiguity: findings are taken in submission order and issues in issue_id order;
-a finding takes the first available issue that satisfies all predicates. With canonical
-affected_ids two issues never share (type, set of affected ids) (`truth_key`), so a finding has
-at most one candidate; the greedy pass is then a maximum matching and TP/FP/FN do not depend
-on the order of findings, issues, records or ids. Only `pairs` (which of two identical findings
-scored) follows submission order: the first one wins, the repeat is an FP.
+Choice under ambiguity: the result is a maximum one-to-one matching (augmenting paths,
+Kuhn's algorithm). Findings are tried in submission order and each finding's candidate issues
+in issue_id order, so the result is deterministic. TP/FP/FN never depend on the order of
+findings, issues, records or ids, even if a truth ever had two issues with the same
+(type, set of affected ids) (`truth_key`; verify should forbid it). Only `pairs` (which of two
+identical findings scored) follows submission order: the first one keeps the issue, the
+repeat is an FP.
 
 The predicates are module-level functions called through the module namespace so that the
 mutation tests (tests/judge/test_mutations.py) can switch each one off.
@@ -78,13 +79,18 @@ def issue_available(issue_id: str, used: set) -> bool:
     return issue_id not in used
 
 
+def superset_allowed(policy: dict) -> bool:
+    """Same default as the task text the agent receives (auditgym/actions.py): allowed unless false."""
+    return policy.get("evidence_superset_allowed", True) is not False
+
+
 def is_match(finding: dict, issue: dict, policy: dict, known: frozenset) -> bool:
     return (same_type(finding, issue)
             and same_affected_ids(finding, issue)
             and same_currency(finding, issue)
             and amount_within_tolerance(finding, issue, tolerance(policy, issue["type"]))
             and evidence_exists(finding, known)
-            and evidence_covers(finding, issue, policy.get("evidence_superset_allowed") is True))
+            and evidence_covers(finding, issue, superset_allowed(policy)))
 
 
 # --- matching ---------------------------------------------------------------------------
@@ -94,13 +100,22 @@ def match(truth: dict, findings: list, public: dict) -> dict:
     policy = public.get("policy", {})
     known = known_ids(public)
     issues = sorted(truth.get("issues", []), key=lambda issue: issue["issue_id"])
+    candidates = [[issue["issue_id"] for issue in issues if is_match(finding, issue, policy, known)]
+                  for finding in findings]
+    owner: dict = {}  # issue_id -> finding index
     used: set = set()
-    pairs = []
-    for index, finding in enumerate(findings):
-        for issue in issues:
-            if issue_available(issue["issue_id"], used) and is_match(finding, issue, policy, known):
-                used.add(issue["issue_id"])
-                pairs.append([index, issue["issue_id"]])
-                break
-    tp = len(pairs)
+
+    def augment(index: int, visited: set) -> bool:
+        for issue_id in candidates[index]:
+            if issue_id in visited:
+                continue
+            visited.add(issue_id)
+            if issue_available(issue_id, used) or augment(owner[issue_id], visited):
+                owner[issue_id] = index
+                used.add(issue_id)
+                return True
+        return False
+
+    tp = sum(1 for index in range(len(findings)) if augment(index, set()))
+    pairs = sorted([[index, issue_id] for issue_id, index in owner.items()])
     return {"tp": tp, "fp": len(findings) - tp, "fn": len(issues) - tp, "pairs": pairs}

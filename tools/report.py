@@ -131,12 +131,16 @@ def type_recall(rows: list[dict]) -> dict[str, tuple[int, int]]:
     return out
 
 
-MARGIN = 0.15  # on books with errors silence sits at the floor -1, so any lucky hit beats it a little
+# "Flagging everything gives a bad result" (CASE 05). On books with errors silence sits at the
+# floor -1, so a flag-all that hits one issue is always a little above it; "below silence" is
+# required on clean books and over the whole set, and a bad absolute result on books with errors:
+# on average no better than an answer with F1 = 0.1 (2 * 0.1 - 1 = -0.8). Measured: -0.93 to -0.98.
+BAD = -0.8
 
 
-def ordering_problems(rows: dict[str, list[dict]], margin: float = MARGIN) -> list[str]:
-    """The expected order on books with errors, plus flag-all below silence over the whole set
-    when it has clean books; empty list when it holds."""
+def ordering_problems(rows: dict[str, list[dict]], bad: float = BAD) -> list[str]:
+    """The expected order on books with errors (flag-all at most `bad` there), plus flag-all below
+    silence over the whole set when it has clean books; empty list when it holds."""
     errors = {name: [row for row in policy_rows if not row["clean"]] for name, policy_rows in rows.items()}
     mean = {name: statistics.fmean(row["reward"] for row in policy_rows)
             for name, policy_rows in errors.items() if policy_rows}
@@ -153,8 +157,7 @@ def ordering_problems(rows: dict[str, list[dict]], margin: float = MARGIN) -> li
     for name in [n for n in mean if n.startswith("flag_all")]:
         if "reconcile" in mean:
             need(mean["reconcile"] > mean[name], f"reconcile <= {name}")
-        if "silence" in mean:
-            need(mean[name] <= mean["silence"] + margin, f"{name} > silence + {margin}")
+        need(mean[name] <= bad, f"{name} > {bad} on books with errors")
     overall = {name: statistics.fmean(row["reward"] for row in policy_rows) for name, policy_rows in rows.items()}
     if "silence" in overall and any(row["clean"] for row in rows["silence"]):
         for name in [n for n in overall if n.startswith("flag_all")]:
@@ -274,7 +277,7 @@ def build_report(n: int, episodes_dir=None) -> str:
         problems = ordering_problems(rows)
         verdict = "выполняется" if not problems else "НАРУШЕН: " + "; ".join(problems)
         out.append(f"- {titles[name]}: oracle ≥ solver_policy > reconcile > flag_all*, "
-                   f"flag_all* ≤ silence + {MARGIN} на книгах с ошибками и < silence на всём наборе — {verdict}.")
+                   f"flag_all* ≤ {BAD} на книгах с ошибками и < silence на всём наборе — {verdict}.")
     gaps = []
     for name, rows in sets.items():
         silence = summary(rows["silence"])["reward_errors"]
