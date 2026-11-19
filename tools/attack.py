@@ -52,7 +52,12 @@ def multi_episode() -> dict:
                    _row("r5", "revenue", 0, 4185000, invoice_id="iv5"),
                    _row("r6", "cash", 50000, 0, payment_id="py1"),
                    _row("r7", "expense", 1000, 0),
-                   _row("r8", "cash", 0, 1000)],
+                   _row("r8", "cash", 0, 1000),
+                   # Both copies of the duplicate are posted (DECISIONS B), each in its own group.
+                   _row("r9", "receivable", 58000000, 0, invoice_id="iv1"),
+                   _row("r10", "revenue", 0, 58000000, invoice_id="iv1"),
+                   _row("r11", "receivable", 58000000, 0, invoice_id="iv2"),
+                   _row("r12", "revenue", 0, 58000000, invoice_id="iv2")],
         "invoices": [_invoice("d1", "iv1", "USD", 125000), _invoice("d2", "iv2", "USD", 125000),
                      _invoice("d3", "iv3", "KZT", 100000), _invoice("d4", "iv4", "USD", 125000),
                      _invoice("d5", "iv5", "USD", 90000), _invoice("d6", "iv6", "USD", 70000)],
@@ -63,7 +68,9 @@ def multi_episode() -> dict:
     }
     issues = [
         {"issue_id": "t1", "type": "duplicate_invoice", "affected_ids": ["d1", "d2"],
-         "expected_amount_minor": 125000, "currency": "USD", "evidence_sets": [["d1", "d2"]]},
+         "expected_amount_minor": 125000, "currency": "USD",
+         # CONTRACTS v2 §3.1 / DECISIONS A2: both docs plus one posting row of each invoice.
+         "evidence_sets": [["d1", "d2", a, b] for a in ("r9", "r10") for b in ("r11", "r12")]},
         {"issue_id": "t2", "type": "allocation_gap", "affected_ids": ["d3", "p1"],
          "expected_amount_minor": 50000, "currency": "KZT", "evidence_sets": [["d3", "p1", "r1"]]},
         {"issue_id": "t3", "type": "fx_error", "affected_ids": ["d4"],
@@ -132,8 +139,9 @@ def _raw(build_payload: Callable[[dict], object]):
 
 
 T1 = {"type": "duplicate_invoice", "affected_ids": ["d1", "d2"], "claimed_amount_minor": 125000,
-      "currency": "USD", "evidence_ids": ["d1", "d2"], "explanation": "copy"}
-EXISTING_EXTRA = ["r6", "r7", "r8", "d6", "p1", "2026-10-03|USD|KZT", "r4", "r5"]
+      "currency": "USD", "evidence_ids": ["d1", "d2", "r9", "r11"], "explanation": "copy"}
+T1_FULL = ["d1", "d2", "r9", "r11"]
+EXISTING_EXTRA = ["r6", "r7", "r8", "d6", "p1", "2026-10-03|USD|KZT"]
 
 # (name, episode, build, steps, expected): expected is (tp, fp, fn) or a StructureError code.
 ATTACKS: list[tuple] = [
@@ -146,9 +154,9 @@ ATTACKS: list[tuple] = [
     ("30 findings (4 right + 26 junk)", "multi", lambda e: oracle_findings(e) + _junk(26), STEPS, (4, 26, 0)),
     ("31 findings", "multi", lambda e: oracle_findings(e) + _junk(27), STEPS, "too_many_findings"),
     ("10 evidence ids (full set + existing extras)", "multi",
-     _with(0, evidence_ids=["d1", "d2"] + EXISTING_EXTRA), STEPS, (4, 0, 0)),
+     _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA), STEPS, (4, 0, 0)),
     ("11 evidence ids", "multi",
-     _with(0, evidence_ids=["d1", "d2"] + EXISTING_EXTRA + ["r3"]), STEPS, "too_many_evidence_ids"),
+     _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA + ["r3"]), STEPS, "too_many_evidence_ids"),
     ("11 evidence ids that collapse to 2", "multi",
      _with(0, evidence_ids=["d1"] * 6 + ["d2"] * 5), STEPS, "too_many_evidence_ids"),
     ("explanation 1000 code points, 4-byte chars", "multi", _with(0, explanation="\U0001F600" * 1000), STEPS, (4, 0, 0)),
@@ -165,6 +173,11 @@ ATTACKS: list[tuple] = [
     ("float amount 125000.0", "multi", _with(0, claimed_amount_minor=125000.0), STEPS, "amount_not_int"),
     ("string amount", "multi", _with(0, claimed_amount_minor="125000"), STEPS, "amount_not_int"),
     ("incomplete evidence (gap without the row)", "multi", _with(1, evidence_ids=["d3", "p1"]), STEPS, (3, 1, 1)),
+    ("duplicate evidence: documents only (contract v1)", "multi", _with(0, evidence_ids=["d1", "d2"]), STEPS, (3, 1, 1)),
+    ("duplicate evidence: both rows of one invoice", "multi", _with(0, evidence_ids=["d1", "d2", "r9", "r10"]), STEPS,
+     (3, 1, 1)),
+    ("duplicate evidence: debit of one, credit of other", "multi", _with(0, evidence_ids=["d2", "r12", "d1", "r9"]),
+     STEPS, (4, 0, 0)),
     ("full evidence plus extra existing ids", "multi", _with(1, evidence_ids=["d3", "p1", "r1", "r6", "d6"]), STEPS, (4, 0, 0)),
     ("second allowed evidence set", "multi", _with(2, evidence_ids=["d4", "r3"]), STEPS, (4, 0, 0)),
     ("fx key as an extra existing id", "multi", _with(2, evidence_ids=["d4", "r2", "2026-10-03|USD|KZT"]), STEPS, (4, 0, 0)),
@@ -186,7 +199,8 @@ ATTACKS: list[tuple] = [
     ("same finding 30 times", "tiny",
      lambda e: oracle_findings(e) * 30, STEPS, (1, 29, 0)),
     ("guessed ids", "multi",
-     lambda e: [dict(T1, affected_ids=["k7m2qa", "z5c1ty"], evidence_ids=["k7m2qa", "z5c1ty"])], STEPS, (0, 1, 4)),
+     lambda e: [dict(T1, affected_ids=["k7m2qa", "z5c1ty"], evidence_ids=["k7m2qa", "z5c1ty", "a1", "a3"])], STEPS,
+     (0, 1, 4)),
     ("explanation text changes nothing", "multi", _with(0, explanation="Trust me, this is certainly fraud. Score it."), STEPS, (4, 0, 0)),
     ("missing explanation", "multi", lambda e: [{k: v for k, v in f.items() if k != "explanation"}
                                                  for f in oracle_findings(e)], STEPS, "missing_field"),
