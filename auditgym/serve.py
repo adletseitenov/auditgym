@@ -16,6 +16,11 @@ the shape of a step reply with an error observation:
     <- {"observation": {"type": "error", "error": {"code": "bad_request", "message": "Bad request."},
         "steps_remaining": N}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
 
+`--no-load` refuses `load` altogether (Env() without files starts the server this way, so a
+policy writing to the pipe cannot point the server at a directory). `--results-fd N` takes the
+results file as an inherited, already open descriptor instead of a path, so the path is not in
+the server's argv (the process list); Env uses it on POSIX.
+
 A refused reset or load replies the same way with code `bad_config` (bad seed or config),
 `not_loaded` (reset without seed and nothing loaded) or `bad_episode` (directory unreadable).
 stdout carries only protocol lines; diagnostics go to stderr and contain no episode data.
@@ -49,8 +54,9 @@ def protocol_error(code: str, steps_remaining: int) -> dict:
 
 
 class Server:
-    def __init__(self, evaluator: Evaluator) -> None:
+    def __init__(self, evaluator: Evaluator, allow_load: bool = True) -> None:
         self.evaluator = evaluator
+        self.allow_load = allow_load
         self.requests = 0
 
     def _remaining(self) -> int:
@@ -78,7 +84,7 @@ class Server:
                 return {"observation": observation, "info": info}
             if op == "load":
                 directory = request.get("directory")
-                if not first or not isinstance(directory, str):
+                if not self.allow_load or not first or not isinstance(directory, str):
                     return protocol_error("bad_request", self._remaining())
                 observation, info = self.evaluator.load(directory)
                 return {"observation": observation, "info": info}
@@ -110,10 +116,10 @@ def _read_line(stream) -> bytes | None:
     return line
 
 
-def serve(evaluator: Evaluator, stdin=None, stdout=None) -> int:
+def serve(evaluator: Evaluator, stdin=None, stdout=None, allow_load: bool = True) -> int:
     stdin = stdin if stdin is not None else sys.stdin.buffer
     stdout = stdout if stdout is not None else sys.stdout
-    server = Server(evaluator)
+    server = Server(evaluator, allow_load=allow_load)
     while True:
         line = _read_line(stdin)
         if line is None:
@@ -135,11 +141,21 @@ def serve(evaluator: Evaluator, stdin=None, stdout=None) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="python -m auditgym serve")
     parser.add_argument("--mode", choices=("train", "eval"), default="train")
-    parser.add_argument("--results", default=None)
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--results", default=None)
+    target.add_argument("--results-fd", type=int, default=None)
+    parser.add_argument("--no-load", action="store_true")
     arguments = parser.parse_args(argv)
+    stream = None
     try:
-        evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results)
-    except OSError:
+        if arguments.results_fd is not None:
+            stream = open(arguments.results_fd, "a", encoding="utf-8", closefd=True)
+        evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results, results_stream=stream)
+    except (OSError, ValueError):
         print("auditgym serve: cannot open the results file", file=sys.stderr)
         return 2
-    return serve(evaluator)
+    try:
+        return serve(evaluator, allow_load=not arguments.no_load)
+    finally:
+        if stream is not None:
+            stream.close()
