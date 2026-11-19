@@ -17,7 +17,8 @@ from .actions import MAX_STEPS, ActionError, error
 from .calc import CalcError, calculate
 
 DEFAULT_TIME_LIMIT = 60
-DEFAULT_SEED = 0  # reset() without a seed and without a loaded episode (audit C7)
+DEFAULT_SEED = 0  # first reset() without a seed and without a loaded episode (audit C7)
+MAX_SEED_BITS = 256  # a longer seed is refused as bad_config; the running episode is untouched
 MODES = ("train", "eval")
 
 # Fields a policy may see (CONTRACTS section 2). Anything else in a record or the manifest is
@@ -112,6 +113,7 @@ class Evaluator:
         self._clock = clock if clock is not None else MonotonicClock()
         self._time_limit = time_limit
         self._loaded = None   # episode from load(); reset() without seed restarts it
+        self._next_seed = DEFAULT_SEED  # seed of the next reset() without a seed and without files
         self._episode = None  # the running episode, public and private
         self._clear()
 
@@ -133,18 +135,21 @@ class Evaluator:
     # --- episode setup ---------------------------------------------------------------------
     def reset(self, seed=None, config=None) -> tuple[dict, dict]:
         """With a seed: generate a new episode. Without: restart the episode from load(), or, when
-        none was loaded, generate the one of DEFAULT_SEED with the default configuration. A refused
-        reset (bad seed or config) leaves the running episode as it is."""
+        none was loaded, generate one from the next default seed with the default configuration:
+        DEFAULT_SEED (0) the first time, then the seed of the previous successful reset plus one.
+        A refused reset (bad seed, a seed of more than MAX_SEED_BITS bits, bad config) leaves the
+        running episode and the default-seed counter as they are."""
         if seed is None:
             if self._loaded is not None:
-                episode = copy.deepcopy(self._loaded)
-            else:
-                episode = self._generate(DEFAULT_SEED, config)
-        else:
-            if not isinstance(seed, int) or isinstance(seed, bool):
-                raise EvaluatorError("bad_config")
-            episode = self._generate(seed, config)
-        return self._swap_in(episode)
+                return self._swap_in(copy.deepcopy(self._loaded))
+            seed = self._next_seed
+        elif not isinstance(seed, int) or isinstance(seed, bool):
+            raise EvaluatorError("bad_config")
+        if seed.bit_length() > MAX_SEED_BITS:
+            raise EvaluatorError("bad_config")
+        observation = self._swap_in(self._generate(seed, config))
+        self._next_seed = seed + 1
+        return observation
 
     @staticmethod
     def _generate(seed: int, config) -> dict:
@@ -219,8 +224,9 @@ class Evaluator:
         return MAX_STEPS - self._steps
 
     def steps_remaining(self) -> int:
-        """Steps left in the running episode; 0 when nothing has been reset."""
-        return 0 if self._episode is None else self._remaining()
+        """Steps left in the running episode; 0 when nothing has been reset or after a truncation
+        (the same 0 as in the final observation, whichever limit ended the episode)."""
+        return 0 if self._episode is None or self._truncated else self._remaining()
 
     @property
     def running(self) -> bool:

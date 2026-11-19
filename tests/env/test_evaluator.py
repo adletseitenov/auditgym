@@ -123,6 +123,36 @@ class ResetTest(unittest.TestCase):
         self.assertEqual(strict_json(observation), strict_json(reference))
         self.assertEqual(info, {})
 
+    def test_reset_without_seed_counts_up_from_the_default_seed(self):
+        """reset() without a seed: 0, 1, 2... on the same Evaluator; after a reset(7) it goes on with 8."""
+        def episode_id(evaluator, *args):
+            return evaluator.reset(*args)[0]["manifest"]["episode_id"]
+
+        evaluator = Evaluator(clock=FakeClock())
+        reference = [episode_id(Evaluator(clock=FakeClock()), seed, None) for seed in (0, 1, 2, 8)]
+        self.assertEqual([episode_id(evaluator) for _ in range(3)], reference[:3])
+        self.assertEqual(len(set(reference[:3])), 3)
+        episode_id(evaluator, 7, None)
+        self.assertEqual(episode_id(evaluator), reference[3])
+        with self.assertRaises(EvaluatorError):  # a refused reset does not advance the counter
+            evaluator.reset(None, {"nope": 1})
+        self.assertEqual(episode_id(evaluator), episode_id(Evaluator(clock=FakeClock()), 9, None))
+
+    def test_seed_longer_than_256_bits_is_bad_config_and_keeps_the_episode(self):
+        from auditgym.evaluator import MAX_SEED_BITS
+
+        self.assertEqual(MAX_SEED_BITS, 256)
+        evaluator = tiny()
+        evaluator.step({"action": "list_records", "table": "fx"})
+        for seed in ((1 << 256), -(1 << 256), 1 << 4000):
+            with self.assertRaises(EvaluatorError) as caught:
+                evaluator.reset(seed, CLEAN)
+            self.assertEqual(caught.exception.code, "bad_config")
+        self.assertEqual(evaluator.steps_remaining(), 99)  # the running episode goes on
+        self.assertEqual(evaluator.step({"action": "list_records", "table": "fx"})[0]["steps_remaining"], 98)
+        fresh = Evaluator(clock=FakeClock())
+        fresh.reset((1 << 256) - 1, CLEAN)  # the largest seed is fine
+
     def test_bad_directory_is_one_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(EvaluatorError) as caught:
@@ -443,6 +473,7 @@ class TerminationTest(unittest.TestCase):
         self.assertEqual(observation, {"type": "final", "steps_remaining": 0})  # C10: nothing left
         self.assertEqual(info["inspection_steps"], 100)
         self.assertEqual(reward, -1.0)
+        self.assertEqual(evaluator.steps_remaining(), 0)  # consistent with the final observation
 
     def test_reset_restarts_the_clock(self):
         clock = FakeClock()
