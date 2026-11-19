@@ -119,7 +119,7 @@ episode = {
             "before": [...records...], "after": [...records...]}],
  "id_map": {"<внутренний ID>": "<открытый ID>"}}
 ```
-`retries` — причины отброшенных попыток до удавшейся (`{"attempt": 0, "reason": "no target: I1"}`); пусто, если удалась первая. Записи `before` и `after` — в открытых (финальных) ID.
+`retries` — причины отброшенных попыток до удавшейся (`{"attempt": 0, "reason": "no target: I1"}`); пусто, если удалась первая. Попыток не больше 32 (`generate.MAX_ATTEMPTS`); если все отброшены (нет цели для оператора, `verify` отклонил эпизод, внутренний сбой), `generate` бросает `ConfigError("no_episode")` с текстом «no valid episode within 32 attempts»: без seed, причин и эталона, тихого результата нет (`tests/test_limits.py`). Записи `before` и `after` — в открытых (финальных) ID.
 
 ## 4. Конфигурация
 

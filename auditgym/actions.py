@@ -8,13 +8,9 @@ import json
 import os
 import re
 
-from .findings import MAX_MESSAGE_BYTES
+from .limits import (MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
+                     MAX_STEPS, PAGE_SIZE)
 
-MAX_STEPS = 100
-PAGE_SIZE = 50
-MAX_FINDINGS = 30
-MAX_EVIDENCE_IDS = 10
-MAX_EXPLANATION_CHARS = 1000
 MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 256 KiB: one constant for the limit (audit R2)
 MAX_EXPRESSION_CHARS = 200
 # Where the evaluator writes its journal in eval mode when no path is given (audit C5): the path in
