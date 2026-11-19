@@ -15,10 +15,10 @@ import sys
 from . import actions
 from .actions import MAX_STEPS, ActionError, error
 from .calc import CalcError, calculate
+from .limits import MAX_SEED_BITS  # a longer seed is refused as bad_config; the running episode is untouched
 
 DEFAULT_TIME_LIMIT = 60
 DEFAULT_SEED = 0  # first reset() without a seed and without a loaded episode (audit C7)
-MAX_SEED_BITS = 256  # a longer seed is refused as bad_config; the running episode is untouched
 MODES = ("train", "eval")
 
 # Fields a policy may see (CONTRACTS section 2). Anything else in a record or the manifest is

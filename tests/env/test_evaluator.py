@@ -139,7 +139,7 @@ class ResetTest(unittest.TestCase):
         self.assertEqual(episode_id(evaluator), episode_id(Evaluator(clock=FakeClock()), 9, None))
 
     def test_seed_longer_than_256_bits_is_bad_config_and_keeps_the_episode(self):
-        from auditgym.evaluator import MAX_SEED_BITS
+        from auditgym.limits import MAX_SEED_BITS
 
         self.assertEqual(MAX_SEED_BITS, 256)
         evaluator = tiny()

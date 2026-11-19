@@ -69,6 +69,17 @@ class ConfigTest(unittest.TestCase):
                     normalize_config(config)
                 self.assertEqual(caught.exception.code, code)
 
+    def test_surface_seed_has_the_same_bit_limit_as_the_seed(self):
+        from auditgym.limits import MAX_SEED_BITS
+
+        self.assertEqual(normalize_config({"surface_seed": (1 << MAX_SEED_BITS) - 1})["surface_seed"],
+                         (1 << MAX_SEED_BITS) - 1)
+        for value in (1 << MAX_SEED_BITS, -(1 << MAX_SEED_BITS), 1 << 300):
+            with self.assertRaises(ConfigError) as caught:
+                normalize_config({"surface_seed": value})
+            self.assertEqual(caught.exception.code, "bad_surface_seed")
+            self.assertIn("256 bits", str(caught.exception))
+
     def test_hardening(self):
         """Typed checks before hashing, full matches with ASCII digits, sane years."""
         cases = [

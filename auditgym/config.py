@@ -11,7 +11,7 @@ import json
 import re
 
 from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FINDINGS, MAX_FOREIGN_CURRENCIES,
-                     MAX_INVOICES, MAX_LEDGER_ROWS, MAX_PAGES, MAX_PERIOD_MONTHS, MAX_YEAR, MIN_BACKGROUND_PAIRS,
+                     MAX_INVOICES, MAX_LEDGER_ROWS, MAX_PAGES, MAX_PERIOD_MONTHS, MAX_SEED_BITS, MAX_YEAR, MIN_BACKGROUND_PAIRS,
                      MIN_INVOICES, MIN_YEAR, ROWS_PER_INVOICE, ROWS_PER_ISSUE, pages)
 
 CONFIG_VERSION = "1"
@@ -164,6 +164,8 @@ def normalize_config(config: object) -> dict:
     surface_seed = given("surface_seed")
     if surface_seed is not None and not _is_int(surface_seed):
         raise ConfigError("bad_surface_seed", "surface_seed must be an integer or null")
+    if surface_seed is not None and surface_seed.bit_length() > MAX_SEED_BITS:
+        raise ConfigError("bad_surface_seed", f"surface_seed must fit into {MAX_SEED_BITS} bits")
     out["surface_seed"] = surface_seed
 
     foreign_needed = out["errors"]["fx_error"] > 0 or interaction == "I1"

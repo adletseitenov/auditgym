@@ -13,6 +13,9 @@ MAX_MESSAGE_BYTES = 256 * 1024    # docs/AUDIT.md R2: 30 x 10 x 1 000 Cyrillic c
 MAX_JSON_DEPTH = 64               # nesting of one message; explicit so the result does not depend on
                                   # the Python version's json recursion behaviour
 
+# Seeds: the evaluator seed and config.surface_seed are integers of at most this many bits
+MAX_SEED_BITS = 256
+
 # Episode
 MAX_STEPS = 100
 PAGE_SIZE = 50
