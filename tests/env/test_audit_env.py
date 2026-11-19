@@ -653,7 +653,7 @@ class ClientRobustnessTest(unittest.TestCase):
         cycle = []
         cycle.append(cycle)
         deep = []
-        for _ in range(5000):
+        for _ in range(100000):  # too deep to encode on every Python (3.12+ encodes 5 000 levels)
             deep = [deep]
         good = CORRECT_TINY["findings"][0]
         for label, extra in (("nan", float("nan")), ("inf", float("-inf")), ("huge int", 10 ** 5000),
