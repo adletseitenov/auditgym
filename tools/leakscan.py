@@ -30,21 +30,33 @@ the honest walk after 1.1 s must be byte-identical). Reply shapes are checked to
 texts, observation keys per type, info == {} before the end, the five metrics at the end in
 train, reward 0.0 and info {} everywhere in eval.
 
-Surface statistics on what the agent can read. For each error type, affected documents are
-compared with documents no issue touches, pooled over the episodes, feature by feature: id rank,
-table position, second / minute / hour of the document time, posting time equals document time,
-paid / unpaid (invoices), line-item count, payment terms in days, reference count and refund
-(payments). The separation measure is the AUC (Mann-Whitney, ties averaged; a boolean is 0/1).
-A feature separates when |AUC - 0.5| > 0.25 (a single threshold then classifies at least 75 %
-of pairs correctly) with at least 20 affected documents; fewer is reported as "few". Known
-generator defects awaiting a fix may be listed as `pending:` (none now: C1 and C2 are fixed);
-a feature that is the error's own definition (period_cutoff: table order is by document date)
-is reported as `explained`.
+Surface statistics on what the agent can read, in three views. For each error type:
+  documents  affected documents against documents no issue touches: id rank, table position,
+             second / minute / hour of the document time, posting time equals document time,
+             paid / unpaid (invoices), line-item count, payment terms in days, reference count
+             and refund (payments);
+  ledger     the ledger rows an issue cites as evidence against the other rows of the SAME account
+             and side (so a definition such as "the gap is on `unallocated`" is not a finding): id
+             rank, position, second / minute / hour, round amounts (multiple of 100, of 1 000),
+             number of digits, size of the posting group, posting time equals document time;
+  pairs      the two invoices of a duplicate_invoice against other pairs of invoices of one entity
+             with one total (the legitimate repeats): gap in days, order by position and by id,
+             id distance, same time of day, same items, same service period, which one is paid and
+             posted.
+The separation measure is the AUC (Mann-Whitney, ties averaged; a boolean is 0/1). A row FAILs only
+when it is both large and significant: |AUC - 0.5| >= MIN_EFFECT (0.10) and the two-sided p-value of
+the Mann-Whitney z statistic (normal approximation, tie-corrected variance) is below
+ALPHA / m, with ALPHA = 0.01 and m the number of rows tested (Bonferroni); at least MIN_AFFECTED (8)
+positives are needed, fewer is reported as "few". So 200 samples of AUC 0.55 do not fail (the effect is
+small), and 10 samples of AUC 1.0 do (the count is small but the separation cannot be chance).
+Known generator defects awaiting a fix are listed in PENDING with their docs/AUDIT.md number: they are
+printed as `pending:` and do not fail the run, but they do not pass either; a feature that is the
+error's own definition (period_cutoff: table order is by document date) is reported as `explained`.
 
 Side channels: `get_record` on affected vs unaffected documents, reply size and round-trip time,
 medians reported. Fail only on a clear separation: |AUC - 0.5| > 0.35 for size, > 0.40 for time.
 
-Exit 1 on any FAIL; `pending:` items do not fail the run.
+Exit 1 on any FAIL; `pending:` items do not fail the run, but `--strict` fails it while any is left.
 """
 from __future__ import annotations
 
@@ -52,6 +64,7 @@ import argparse
 import datetime as dt
 import gc
 import json
+import math
 import os
 import pathlib
 import re
@@ -64,10 +77,11 @@ import types
 from tools.metamorph import (CANDIDATES, TABLES, oracle_answer, page_all, solver_answer, supported_configs)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SURFACE_THRESHOLD = 0.25
+MIN_EFFECT = 0.10   # |AUC - 0.5| below this is never a finding, however many samples
+ALPHA = 0.01        # family-wise error rate over all the rows tested (Bonferroni)
 SIZE_THRESHOLD = 0.35
 TIME_THRESHOLD = 0.40
-MIN_AFFECTED = 20
+MIN_AFFECTED = 8
 INFO_KEYS = {"reward", "precision", "recall", "f1", "inspection_steps"}
 OBS_KEYS = {
     "reset": {"type", "task", "manifest", "policy", "steps_remaining"},
@@ -89,14 +103,20 @@ FORBIDDEN_WORDS = ("truth", "provenance", "pre_ledger", "pre_invoices", "pre_pay
                    "evidence_sets", "expected_amount", "issue_id", "generator_version", "surface_seed",
                    "background_pairs", "traceback", "exception", "error:", ".jsonl", ".json", ".csv",
                    "/users/", "/home/", "/tmp", "/var/folders", "c:\\\\", "auditgym/")
-# Known generator defects awaiting a fix are listed here as `pending:` (they do not fail the run).
-# Empty since contract v2: the C1 items (period_cutoff targets chosen independently of payment; the
-# copy of a duplicate sometimes paid) and C2 (legitimate posting lag) are fixed in the generator and
-# measured at AUC ~0.5, so `paid` and `posting_equals_document_time` are real checks again: a
-# separation there now FAILs.
-PENDING: dict = {}
+# Known generator defects awaiting a fix are listed here as `pending:` with their docs/AUDIT.md number.
+# They do not fail the run and they do not pass it either: `--strict` exits 1 while any is left, and the
+# summary line names them. The ledger view found this one: the amount of an allocation gap and the
+# amount of an overpayment (both on `unallocated`) have different distributions.
+PENDING: dict = {
+    ("allocation_gap", "digits"): "pending: AUDIT L6, a gap and an overpayment have different amounts",
+    ("allocation_gap", "round_100"): "pending: AUDIT L6, a gap and an overpayment have different amounts",
+    ("allocation_gap", "round_1000"): "pending: AUDIT L6, a gap and an overpayment have different amounts",
+}
 EXPLAINED = {
     ("period_cutoff", "position"): "table order is by document date; a date outside the period is the definition",
+    ("allocation_gap", "paid"): "a gap needs a payment, so the affected invoice is paid: the definition",
+    ("duplicate_invoice", "same_service_period"): "a duplicate repeats the same service: the definition "
+                                                  "(a legitimate repeat bills another period)",
 }
 
 
@@ -410,6 +430,28 @@ def auc(positive: list, negative: list) -> float | None:
     return (rank_sum - n1 * (n1 + 1) / 2) / (n1 * n0)
 
 
+def separation(positive: list, negative: list) -> dict | None:
+    """AUC, z and the two-sided p-value of the Mann-Whitney test (normal approximation with the
+    tie-corrected variance). None when one side is empty."""
+    score = auc(positive, negative)
+    if score is None:
+        return None
+    n1, n0 = len(positive), len(negative)
+    total = n1 + n0
+    ties = {}
+    for value in positive + negative:
+        ties[value] = ties.get(value, 0) + 1
+    correction = sum(t ** 3 - t for t in ties.values()) / (total * (total - 1)) if total > 1 else 0.0
+    variance = n1 * n0 / 12 * ((total + 1) - correction)
+    z = 0.0 if variance <= 0 else (score - 0.5) * n1 * n0 / math.sqrt(variance)
+    return {"auc": score, "z": z, "p": math.erfc(abs(z) / math.sqrt(2)), "n1": n1, "n0": n0}
+
+
+def verdict(stat: dict, tests: int) -> bool:
+    """True when the separation is both large and significant after correcting for `tests` rows."""
+    return abs(stat["auc"] - 0.5) >= MIN_EFFECT and stat["p"] < ALPHA / max(tests, 1)
+
+
 def _moment(text: str) -> dt.datetime:
     return dt.datetime.fromisoformat(text)
 
@@ -445,8 +487,95 @@ def document_features(public: dict) -> dict[str, tuple[str, dict]]:
     return out
 
 
+def ledger_features(public: dict) -> dict[str, tuple[str, dict]]:
+    """row_id -> (stratum "account/side", features) for every ledger row, from the open tables only."""
+    invoice_time = {i["invoice_id"]: i["issued_at"] for i in public["invoices"]}
+    payment_time = {p["payment_id"]: p["timestamp"] for p in public["payments"]}
+    base = public["manifest"]["base_currency"]
+    currency = {("inv", i["invoice_id"]): i["currency"] for i in public["invoices"]}
+    currency.update({("pay", p["payment_id"]): p["currency"] for p in public["payments"]})
+    sizes: dict[tuple, int] = {}
+
+    def group(row: dict) -> tuple:
+        if row["payment_id"]:
+            return ("pay", row["payment_id"])
+        if row["invoice_id"]:
+            return ("inv", row["invoice_id"])
+        return ("bg", row["timestamp"], row["entity_id"])
+
+    for row in public["ledger"]:
+        sizes[group(row)] = sizes.get(group(row), 0) + 1
+    ranks = {row_id: rank for rank, row_id in enumerate(sorted(r["row_id"] for r in public["ledger"]))}
+    span = max(len(public["ledger"]) - 1, 1)
+    out = {}
+    for position, row in enumerate(public["ledger"]):
+        amount = row["debit_minor"] or row["credit_minor"]
+        moment = _moment(row["timestamp"])
+        document = payment_time.get(row["payment_id"]) if row["payment_id"] else invoice_time.get(row["invoice_id"])
+        # The stratum is account, side and whether the document is in a foreign currency: a converted
+        # amount is not round, so mixing the two would "find" the definition of fx_error.
+        foreign = currency.get(group(row), base) != base
+        out[row["row_id"]] = (f"{row['account']}/{'Dr' if row['debit_minor'] else 'Cr'}/{'fx' if foreign else 'base'}", {
+            "id_rank": ranks[row["row_id"]] / span, "position": position / span,
+            "second": moment.second, "minute": moment.minute, "hour": moment.hour,
+            "round_100": int(amount % 100 == 0), "round_1000": int(amount % 1000 == 0),
+            "digits": len(str(amount)), "group_size": sizes[group(row)],
+            "posting_equals_document_time": int(document == row["timestamp"]),
+        })
+    return out
+
+
+def pair_features(public: dict) -> dict[frozenset, dict]:
+    """For every two invoices of one entity with one total (a possible duplicate): its features."""
+    paid = {ref for payment in public["payments"] for ref in payment["invoice_refs"] or []}
+    posted = {row["invoice_id"] for row in public["ledger"] if row["invoice_id"]}
+    ranks = {doc_id: rank for rank, doc_id in enumerate(sorted(i["doc_id"] for i in public["invoices"]))}
+    span = max(len(public["invoices"]) - 1, 1)
+    groups: dict[tuple, list] = {}
+    for position, invoice in enumerate(public["invoices"]):
+        groups.setdefault((invoice["entity_id"], invoice["total_minor"], invoice["currency"]), []).append(
+            (position, invoice))
+    out = {}
+    for members in groups.values():
+        for a in range(len(members)):
+            for b in range(a + 1, len(members)):
+                (pos_a, one), (pos_b, two) = members[a], members[b]
+                (pos_e, early), (pos_l, late) = sorted(((pos_a, one), (pos_b, two)),
+                                                       key=lambda item: (item[1]["issued_at"], item[1]["doc_id"]))
+                first, second = _moment(early["issued_at"]), _moment(late["issued_at"])
+                items = lambda inv: [(x["description"], x["quantity"], x["amount_minor"]) for x in inv["line_items"]]  # noqa: E731
+                periods = lambda inv: [(x.get("service_start"), x.get("service_end")) for x in inv["line_items"]]  # noqa: E731
+                out[frozenset((one["doc_id"], two["doc_id"]))] = {
+                    "gap_days": (second - first).total_seconds() / 86400,
+                    "position_order": int(pos_e < pos_l), "id_order": int(ranks[early["doc_id"]] < ranks[late["doc_id"]]),
+                    "id_distance": abs(ranks[one["doc_id"]] - ranks[two["doc_id"]]) / span,
+                    "position_distance": abs(pos_a - pos_b) / span,
+                    "same_time_of_day": int(first.time() == second.time()),
+                    "same_items": int(items(early) == items(late)),
+                    "same_service_period": int(periods(early) == periods(late)),
+                    "earlier_paid": int(early["invoice_id"] in paid), "later_paid": int(late["invoice_id"] in paid),
+                    "earlier_posted": int(early["invoice_id"] in posted), "later_posted": int(late["invoice_id"] in posted),
+                }
+    return out
+
+
+def _evidence_rows(episode: dict) -> tuple[dict[str, set], set]:
+    """Ledger row ids cited as evidence: per error type, and by any issue."""
+    rows = {row["row_id"] for row in episode["public"]["ledger"]}
+    by_type: dict[str, set] = {}
+    for issue in episode["private"]["truth"]["issues"]:
+        cited = {i for group in issue["evidence_sets"] for i in group} & rows
+        by_type.setdefault(issue["type"], set()).update(cited)
+    return by_type, set().union(*by_type.values()) if by_type else set()
+
+
 def surface_statistics(episodes: list[dict]) -> list[dict]:
+    """Rows {type, table, feature, affected, other, auc, z, p, status} over the three views."""
     pools: dict[tuple, tuple[list, list]] = {}
+
+    def add(key: tuple, value, positive: bool) -> None:
+        pools.setdefault(key, ([], []))[0 if positive else 1].append(value)
+
     for episode in episodes:
         features = document_features(episode["public"])
         touched = {i for issue in episode["private"]["truth"]["issues"] for i in issue["affected_ids"]}
@@ -458,21 +587,46 @@ def surface_statistics(episodes: list[dict]) -> list[dict]:
                 if doc_id in touched and doc_id not in affected:
                     continue
                 for name, value in values.items():
-                    pool = pools.setdefault((kind, table, name), ([], []))
-                    pool[0 if doc_id in affected else 1].append(value)
+                    add((kind, table, name), value, doc_id in affected)
+        # ledger view: evidence rows against rows of the same account and side
+        cited, any_cited = _evidence_rows(episode)
+        rows = ledger_features(episode["public"])
+        for kind, evidence in cited.items():
+            strata = {rows[row_id][0] for row_id in evidence if row_id in rows}
+            for row_id, (stratum, values) in rows.items():
+                if stratum not in strata or (row_id in any_cited and row_id not in evidence):
+                    continue
+                for name, value in values.items():
+                    add((kind, f"ledger:{stratum}", name), value, row_id in evidence)
+        # pair view: duplicate pairs against the other pairs of one entity and one total
+        pairs = pair_features(episode["public"])
+        duplicates = {frozenset(issue["affected_ids"]) for issue in episode["private"]["truth"]["issues"]
+                      if issue["type"] == "duplicate_invoice"}
+        for pair, values in pairs.items():
+            if pair not in duplicates and pair & touched:
+                continue
+            for name, value in values.items():
+                add(("duplicate_invoice", "pairs", name), value, pair in duplicates)
+    stats = {}
+    for key, (positive, negative) in pools.items():
+        if len(positive) >= MIN_AFFECTED and negative:
+            stats[key] = separation(positive, negative)
+    tests = len(stats)
     rows = []
     for (kind, table, name), (positive, negative) in sorted(pools.items()):
         if not positive:
             continue
-        score = auc(positive, negative)
+        stat = stats.get((kind, table, name)) or separation(positive, negative)
         status = "ok"
-        if len(positive) < MIN_AFFECTED:
+        if len(positive) < MIN_AFFECTED or stat is None:
             status = "few"
-        elif abs(score - 0.5) > SURFACE_THRESHOLD:
+        elif verdict(stat, tests):
             status = (EXPLAINED.get((kind, name)) and "explained") or PENDING.get((kind, name)) \
                      or PENDING.get(("*", name)) or "FAIL"
         rows.append({"type": kind, "table": table, "feature": name, "affected": len(positive),
-                     "other": len(negative), "auc": score, "status": status})
+                     "other": len(negative), "auc": stat["auc"] if stat else None,
+                     "z": stat["z"] if stat else None, "p": stat["p"] if stat else None, "status": status,
+                     "tests": tests})
     return rows
 
 
@@ -628,18 +782,29 @@ def run(episodes: int, seed_base: int = 7_000_001, out=sys.stdout) -> dict:
         failures += [f"{name}: {p}" for p in problems[:20]]
     failures += [f"shape: {p}" for p in shape_problems[:20]] + [f"repeat: {p}" for p in repeat_problems]
 
-    print(f"\nsurface separation (fail when |AUC-0.5| > {SURFACE_THRESHOLD}, at least {MIN_AFFECTED} affected)",
-          file=out)
-    print(f"{'type':<18}{'table':<10}{'feature':<30}{'aff':>5}{'other':>7}{'AUC':>7}  status", file=out)
+    print(f"\nsurface separation: FAIL when |AUC-0.5| >= {MIN_EFFECT} and p < {ALPHA}/m (Bonferroni, m = rows "
+          f"tested), at least {MIN_AFFECTED} affected", file=out)
+    print(f"{'type':<18}{'table':<30}{'feature':<30}{'aff':>5}{'other':>7}{'AUC':>7}{'p':>10}  status", file=out)
     pending = []
+    shown = 0
     for row in surface:
-        print(f"{row['type']:<18}{row['table']:<10}{row['feature']:<30}{row['affected']:>5}{row['other']:>7}"
-              f"{row['auc']:>7.2f}  {row['status'] if not row['status'].startswith('pending') else 'pending'}",
+        interesting = row["status"] not in ("ok", "few") or (row["auc"] is not None and abs(row["auc"] - 0.5) >= MIN_EFFECT)
+        if not interesting and row["table"].startswith("ledger:"):
+            continue  # the ledger view has hundreds of quiet rows; they are counted below
+        shown += 1
+        auc_text = f"{row['auc']:>7.2f}" if row["auc"] is not None else f"{'-':>7}"
+        p_text = f"{row['p']:>10.1e}" if row["p"] is not None else f"{'-':>10}"
+        print(f"{row['type']:<18}{row['table']:<30}{row['feature']:<30}{row['affected']:>5}{row['other']:>7}"
+              f"{auc_text}{p_text}  {row['status'] if not row['status'].startswith('pending') else 'pending'}",
               file=out)
         if row["status"] == "FAIL":
-            failures.append(f"surface: {row['type']} {row['table']}.{row['feature']} AUC {row['auc']:.2f}")
+            failures.append(f"surface: {row['type']} {row['table']}.{row['feature']} AUC {row['auc']:.2f} "
+                            f"(p {row['p']:.1e})")
         elif row["status"].startswith("pending"):
             pending.append(f"{row['status']} [{row['type']} {row['table']}.{row['feature']} AUC {row['auc']:.2f}]")
+    tested = sum(1 for row in surface if row["status"] != "few")
+    print(f"{len(surface)} rows, {tested} tested, {len(surface) - tested} too few samples "
+          f"({shown} shown: the document tables and every row with a visible effect)", file=out)
 
     size_auc = auc(side["affected"][0], side["other"][0])
     time_auc = auc(side["affected"][1], side["other"][1])
@@ -671,8 +836,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tools.leakscan")
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--seed-base", type=int, default=7_000_001)
+    parser.add_argument("--strict", action="store_true", help="exit 1 while a `pending:` defect is left")
     arguments = parser.parse_args(argv)
-    return 1 if run(arguments.episodes, arguments.seed_base)["failures"] else 0
+    summary = run(arguments.episodes, arguments.seed_base)
+    return 1 if summary["failures"] or (arguments.strict and summary["pending"]) else 0
 
 
 if __name__ == "__main__":

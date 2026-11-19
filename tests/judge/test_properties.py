@@ -41,7 +41,7 @@ class FivePropertiesTest(unittest.TestCase):
         ep = helpers.episode(0)
         for s in STEPS:
             silence = reward(ep, [], s)
-            self.assertEqual(silence, (500 - s) / 500)
+            self.assertEqual(silence, max(-1.0, min(1.0, 2 * 1.0 - 1 - 0.002 * s)))
             for k in (1, 2, 5, 30):
                 accused = reward(ep, [helpers.false_accusation(i) for i in range(k)], s)
                 self.assertEqual(accused, -1.0)

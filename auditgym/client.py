@@ -25,36 +25,80 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
+
+from .actions import DEFAULT_RESULTS_PATH
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
 _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal_error")
+_NAME_KEYS = ("action", "tool", "name", "type")
+DEFAULT_TIMEOUT = 120.0  # seconds to wait for one reply (generating the largest episode takes a few)
+_UNSERIALISABLE = "<not serialisable>"
 
 
 class EnvError(RuntimeError):
-    """The evaluator refused a request or stopped. `code` is a fixed short identifier."""
+    """The evaluator refused a request or stopped; the only exception Env raises for bad input
+    or a broken process. `code` is a fixed short identifier (`bad_config`, `bad_episode`,
+    `bad_request`, `server_exited`, `closed`, `timeout`, `bad_reply`, ...)."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
 
 
+def _is_submit(action: object) -> bool:
+    try:
+        action = json.loads(action) if isinstance(action, str) else action
+        if not isinstance(action, dict):
+            return False
+        return any(isinstance(action.get(key), str) and action[key].strip().lower() == "submit"
+                   for key in _NAME_KEYS)
+    except Exception:  # noqa: BLE001 - a hostile object may raise anything; it is not a submit then
+        return False
+
+
 class Env:
-    def __init__(self, mode: str = "train", results_path=None, *, _files: bool = False) -> None:
+    """Client of the evaluator process.
+
+    `Env(mode="train" | "eval", results_path=None, timeout=120.0)`. In eval mode without a
+    `results_path` the journal is `out/results.jsonl` in the current directory (audit C5); it is
+    created with mode 0600. `timeout` bounds the wait for one reply (None: no bound); on expiry
+    the server is stopped and `EnvError("timeout")` is raised.
+
+    `reset(seed=None, config=None, options=None)`: `options` is a synonym of `config`; without a
+    seed the episode of Env.from_files is restarted, or, if there is none, the episode of the
+    default seed is generated. A refused reset raises `EnvError` and leaves the running episode.
+    A `submit` that cannot be sent as JSON (NaN, a reference cycle, a 5 000-digit integer, nesting
+    deeper than the recursion limit) is sent as a submit with an invalid structure: reward -1, the
+    episode ends. Any other action that cannot be sent is an unknown action (a step is spent).
+    """
+
+    def __init__(self, mode: str = "train", results_path=None, *, timeout: float | None = DEFAULT_TIMEOUT,
+                 _files: bool = False) -> None:
         if mode not in ("train", "eval"):
-            raise ValueError("mode must be 'train' or 'eval'")
+            raise EnvError("bad_mode")
         self.mode = mode
+        self._timeout = timeout
+        if mode == "eval" and results_path is None:
+            results_path = DEFAULT_RESULTS_PATH
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
         if not _files:
             command.append("--no-load")
         pass_fds = ()
         if results_path is not None:
-            path = os.fspath(pathlib.Path(results_path).resolve())
-            if os.name == "posix":
-                descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-                pass_fds = (descriptor,)
-                command += ["--results-fd", str(descriptor)]
-            else:
-                command += ["--results", path]
+            try:
+                path = pathlib.Path(results_path).resolve()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path = os.fspath(path)
+                if os.name == "posix":
+                    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                    os.fchmod(descriptor, 0o600)  # the results are not for the policy's user group
+                    pass_fds = (descriptor,)
+                    command += ["--results-fd", str(descriptor)]
+                else:
+                    command += ["--results", path]
+            except (TypeError, ValueError, OSError):
+                raise EnvError("bad_results_path") from None
             del path
         environment = dict(os.environ)
         environment["PYTHONPATH"] = os.pathsep.join(
@@ -63,6 +107,8 @@ class Env:
             self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                              stderr=subprocess.DEVNULL, env=environment, cwd=_PACKAGE_PARENT,
                                              pass_fds=pass_fds)
+        except OSError:
+            raise EnvError("server_exited") from None
         finally:
             for descriptor in pass_fds:
                 os.close(descriptor)  # the server holds its own copy
@@ -71,53 +117,102 @@ class Env:
         del command, environment, results_path
 
     @classmethod
-    def from_files(cls, directory, mode: str = "train", results_path=None) -> "Env":
-        env = cls(mode=mode, results_path=results_path, _files=True)
+    def from_files(cls, directory, mode: str = "train", results_path=None, *,
+                   timeout: float | None = DEFAULT_TIMEOUT) -> "Env":
+        env = cls(mode=mode, results_path=results_path, timeout=timeout, _files=True)
         try:
-            env._request({"op": "load", "directory": os.fspath(pathlib.Path(directory).resolve())})
+            try:
+                path = os.fspath(pathlib.Path(directory).resolve())
+            except (TypeError, ValueError, OSError):
+                raise EnvError("bad_episode") from None
+            env._request({"op": "load", "directory": path})
         except BaseException:
             env.close()
             raise
         return env
 
     # --- protocol ----------------------------------------------------------------------------
+    @staticmethod
+    def _encode(message: dict) -> str | None:
+        try:
+            return json.dumps(message, ensure_ascii=True, allow_nan=False)
+        except (TypeError, ValueError, RecursionError, OverflowError, MemoryError):
+            return None
+
     def _request(self, message: dict) -> dict:
         process = self._process
         if process is None or process.poll() is not None:
             raise EnvError("closed")
-        try:
-            line = json.dumps(message, ensure_ascii=True, allow_nan=False)
-        except (TypeError, ValueError):
+        line = self._encode(message)
+        if line is None:
             if message.get("op") != "step":
-                raise
-            line = json.dumps({"op": "step", "action": None})  # not JSON: an unknown action
+                raise EnvError("bad_config")  # a seed or config that is not JSON
+            if _is_submit(message.get("action")):
+                action = {"action": "submit", "findings": _UNSERIALISABLE}  # invalid structure, ends it
+            else:
+                action = None  # not JSON: an unknown action, a step is spent
+            line = json.dumps({"op": "step", "action": action})
+        expired = threading.Event()
+        timer = None
+        if self._timeout is not None:
+            def expire() -> None:
+                expired.set()
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+
+            timer = threading.Timer(self._timeout, expire)
+            timer.daemon = True
+            timer.start()
         try:
-            process.stdin.write(line.encode("ascii") + b"\n")
-            process.stdin.flush()
-            reply = process.stdout.readline()
-        except (BrokenPipeError, OSError):
-            raise EnvError("server_exited") from None
+            try:
+                process.stdin.write(line.encode("ascii") + b"\n")
+                process.stdin.flush()
+                reply = process.stdout.readline()
+            except (BrokenPipeError, OSError, ValueError):
+                reply = b""
+        finally:
+            if timer is not None:
+                timer.cancel()
+        if expired.is_set():
+            self.close()
+            raise EnvError("timeout")
         if not reply:
             raise EnvError("server_exited")
-        reply = json.loads(reply)
-        observation = reply.get("observation")
-        if (message.get("op") in ("reset", "load") and isinstance(observation, dict)
-                and observation.get("type") == "error"):
-            raise EnvError(observation["error"]["code"])
+        try:
+            reply = json.loads(reply)
+        except (ValueError, RecursionError):
+            raise EnvError("bad_reply") from None
+        observation = reply.get("observation") if isinstance(reply, dict) else None
+        if not isinstance(observation, dict):
+            raise EnvError("bad_reply")
+        if (message.get("op") in ("reset", "load") and observation.get("type") == "error"
+                and isinstance(observation.get("error"), dict)):
+            raise EnvError(str(observation["error"].get("code")))
         return reply
 
-    def reset(self, seed=None, config=None):
+    def reset(self, seed=None, config=None, options=None):
         message = {"op": "reset"}
+        if config is None:
+            config = options
         if seed is not None:
             message["seed"] = seed
+        if config is not None or seed is not None:
             message["config"] = config
         reply = self._request(message)
-        return reply["observation"], reply["info"]
+        try:
+            return reply["observation"], reply["info"]
+        except KeyError:
+            raise EnvError("bad_reply") from None
 
     def step(self, action):
         reply = self._request({"op": "step", "action": action})
-        return (reply["observation"], reply["reward"], reply["terminated"], reply["truncated"],
-                reply["info"])
+        try:
+            return (reply["observation"], reply["reward"], reply["terminated"], reply["truncated"],
+                    reply["info"])
+        except KeyError:
+            raise EnvError("bad_reply") from None
 
     # --- lifetime ----------------------------------------------------------------------------
     def close(self) -> None:

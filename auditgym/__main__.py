@@ -1,6 +1,10 @@
-"""Single entry point: `python -m auditgym check` runs every offline check."""
+"""Single entry point: `python -m auditgym check` runs every offline check.
+
+`AUDITGYM_STRICT=1 python -m auditgym check` also fails on any planned score check that is still a
+TODO, on a `pending:` check and on a missing check module (the default only lists them)."""
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 
@@ -11,7 +15,10 @@ def check() -> int:
     suite = unittest.defaultTestLoader.discover("tests")
     tests_ok = unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful()
     lint_ok = lint_determinism.main() == 0
-    score_ok = score.main([]) == 0
+    # Development: a planned check that is not written yet is listed but does not fail the run.
+    # The submission gate is AUDITGYM_STRICT=1: any TODO, `pending:` or missing module fails it.
+    strict = os.environ.get("AUDITGYM_STRICT") == "1"
+    score_ok = score.main([] if strict else ["--allow-todo"]) == 0
     ok = tests_ok and lint_ok and score_ok
     print("\nCHECK:", "PASSED" if ok else "FAILED")
     return 0 if ok else 1

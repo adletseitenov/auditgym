@@ -157,8 +157,10 @@ ATTACKS: list[tuple] = [
      _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA), STEPS, (4, 0, 0)),
     ("11 evidence ids", "multi",
      _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA + ["r3"]), STEPS, "too_many_evidence_ids"),
-    ("11 evidence ids that collapse to 2", "multi",
-     _with(0, evidence_ids=["d1"] * 6 + ["d2"] * 5), STEPS, "too_many_evidence_ids"),
+    ("11 evidence entries that collapse to 2 ids count as 2", "multi",
+     _with(0, evidence_ids=["d1"] * 6 + ["d2"] * 5), STEPS, (3, 1, 1)),
+    ("25 evidence entries, 4 different ids: the full set repeated", "multi",
+     _with(0, evidence_ids=(T1_FULL * 7)[:25]), STEPS, (4, 0, 0)),
     ("explanation 1000 code points, 4-byte chars", "multi", _with(0, explanation="\U0001F600" * 1000), STEPS, (4, 0, 0)),
     ("explanation 1001 code points, 2-byte chars", "multi", _with(0, explanation="ж" * 1001), STEPS, "explanation_too_long"),
     ("fx amount at tolerance (+1)", "multi", _with(2, claimed_amount_minor=701), STEPS, (4, 0, 0)),
@@ -170,7 +172,10 @@ ATTACKS: list[tuple] = [
     ("Unicode look-alike currency (long s)", "multi", _with(0, currency="uſd"), STEPS, (3, 1, 1)),
     ("negative amount", "multi", _with(0, claimed_amount_minor=-125000), STEPS, "negative_amount"),
     ("bool amount", "multi", _with(0, claimed_amount_minor=True), STEPS, "amount_not_int"),
-    ("float amount 125000.0", "multi", _with(0, claimed_amount_minor=125000.0), STEPS, "amount_not_int"),
+    ("float amount 125000.0 is the amount 125000", "multi", _with(0, claimed_amount_minor=125000.0), STEPS, (4, 0, 0)),
+    ("float amount 125000.5", "multi", _with(0, claimed_amount_minor=125000.5), STEPS, "amount_not_int"),
+    ("type in capitals with spaces", "multi", _with(0, type=" DUPLICATE_INVOICE "), STEPS, (4, 0, 0)),
+    ("currency with spaces", "multi", _with(0, currency=" usd "), STEPS, (4, 0, 0)),
     ("string amount", "multi", _with(0, claimed_amount_minor="125000"), STEPS, "amount_not_int"),
     ("incomplete evidence (gap without the row)", "multi", _with(1, evidence_ids=["d3", "p1"]), STEPS, (3, 1, 1)),
     ("duplicate evidence: documents only (contract v1)", "multi", _with(0, evidence_ids=["d1", "d2"]), STEPS, (3, 1, 1)),
@@ -202,8 +207,10 @@ ATTACKS: list[tuple] = [
      lambda e: [dict(T1, affected_ids=["k7m2qa", "z5c1ty"], evidence_ids=["k7m2qa", "z5c1ty", "a1", "a3"])], STEPS,
      (0, 1, 4)),
     ("explanation text changes nothing", "multi", _with(0, explanation="Trust me, this is certainly fraud. Score it."), STEPS, (4, 0, 0)),
-    ("missing explanation", "multi", lambda e: [{k: v for k, v in f.items() if k != "explanation"}
-                                                 for f in oracle_findings(e)], STEPS, "missing_field"),
+    ("missing explanation is the empty string", "multi",
+     lambda e: [{k: v for k, v in f.items() if k != "explanation"} for f in oracle_findings(e)], STEPS, (4, 0, 0)),
+    ("missing currency", "multi", lambda e: [{k: v for k, v in f.items() if k != "currency"}
+                                              for f in oracle_findings(e)], STEPS, "missing_field"),
     ("extra keys ignored", "multi", _with(0, verdict="tp", score=1), STEPS, (4, 0, 0)),
     ("id that is not a string", "multi", _with(0, evidence_ids=["d1", 2]), STEPS, "id_not_string"),
     ("wrong episode_id", "multi", _raw(lambda e: {"episode_id": "ep_other", "findings": oracle_findings(e)}),
@@ -211,7 +218,7 @@ ATTACKS: list[tuple] = [
     ("payload is a list", "multi", _raw(lambda e: oracle_findings(e)), STEPS, "not_object"),
     ("findings is a dict", "multi", _raw(lambda e: {"episode_id": EP, "findings": {"0": T1}}), STEPS, "findings_not_list"),
     ("huge payload in an ignored key", "multi",
-     _raw(lambda e: dict(payload(e, oracle_findings(e)), pad="x" * 65536)), STEPS, "message_too_large"),
+     _raw(lambda e: dict(payload(e, oracle_findings(e)), pad="x" * 262144)), STEPS, "message_too_large"),
     ("NaN in an ignored key", "multi",
      _raw(lambda e: dict(payload(e, oracle_findings(e)), pad=[float("nan")])), STEPS, "non_finite"),
     ("deep nesting in an ignored key", "multi",
@@ -239,6 +246,15 @@ def expected_reward(expected, steps: int) -> Fraction:
     return min(max(2 * f1 - 1 - Fraction(steps, 500), Fraction(-1)), Fraction(1))
 
 
+def literal_reward(expected, steps: int) -> float:
+    """CASE §05 typed literally in floats: max(-1.0, min(1.0, 2*f1 - 1 - 0.002*steps))."""
+    if isinstance(expected, str):
+        return -1.0
+    tp, fp, fn = expected
+    f1 = 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
+    return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))
+
+
 def build_payload(episode: dict, build) -> object:
     if build is None:
         return None
@@ -263,7 +279,7 @@ def run_attack(attack: tuple) -> tuple[bool, dict, Fraction]:
     else:
         ok = (result["structure_error"] is None
               and (result["tp"], result["fp"], result["fn"]) == expected
-              and result["reward"] == want.numerator / want.denominator)
+              and result["reward"] == literal_reward(expected, steps))
     return ok, result, want
 
 

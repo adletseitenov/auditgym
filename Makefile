@@ -11,8 +11,10 @@ check:
 test:
 	$(PY) -m unittest discover -s tests -q
 
+# Strict: exit 1 on any TODO, pending: check or missing check module. `make score ARGS=--allow-todo`
+# is the development mode; `AUDITGYM_STRICT=1 make check` is the strict submission gate.
 score:
-	$(PY) -m tools.score
+	$(PY) -m tools.score $(ARGS)
 
 # Targets below get their tools as the plan is implemented (see docs/TASKS.md).
 fuzz:
@@ -22,7 +24,7 @@ episodes:
 	$(PY) -m tools.episodes --out episodes
 
 trajectories:
-	$(PY) -m tools.trajectories --out trajectories.jsonl
+	$(PY) -m tools.trajectories --episodes episodes/train --out trajectories.jsonl
 
 report:
 	$(PY) -m tools.report --out docs/RESULTS.md

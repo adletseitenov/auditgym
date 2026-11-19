@@ -77,12 +77,16 @@ class EndToEndTest(unittest.TestCase):
                 self.assertEqual(reward, expected)
 
     def test_submit_without_findings_is_an_invalid_structure_not_silence(self):
-        for findings in (None, "x", [], 7):
+        # A bare list is a valid form since C1 (audit): [] on clean books is silence, scored 1.0.
+        for findings in (None, "x", 7, [5], "[", True):
             with self.subTest(findings=findings), Env() as env:
                 env.reset(5, {"errors": {}})  # clean books: silence would score 1.0
                 _, reward, terminated, _, _ = env.step({"action": "submit", "findings": findings})
                 self.assertTrue(terminated)
                 self.assertEqual(reward, -1.0)
+        with Env() as env:
+            env.reset(5, {"errors": {}})
+            self.assertEqual(env.step({"action": "submit", "findings": []})[1], 1.0)
         with Env() as env:
             env.reset(5, {"errors": {}})
             _, reward, _, _, _ = env.step({"action": "submit"})

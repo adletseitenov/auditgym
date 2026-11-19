@@ -38,6 +38,9 @@ class MetricsTest(unittest.TestCase):
                                  (Fraction(p), Fraction(r), Fraction(f1)))
                 floats = metrics(*counts)
                 self.assertEqual(floats["f1"], Fraction(f1).numerator / Fraction(f1).denominator)
+                self.assertEqual((floats["precision"], floats["recall"]),
+                                 (Fraction(p).numerator / Fraction(p).denominator,
+                                  Fraction(r).numerator / Fraction(r).denominator))
 
     def test_rejects_bad_counts(self):
         for bad in ((-1, 0, 0), (True, 0, 0), (1.0, 0, 0), ("1", 0, 0)):
@@ -50,17 +53,41 @@ class RewardTest(unittest.TestCase):
         for f1, steps, reward in REWARDS:
             with self.subTest(f1=f1, steps=steps):
                 self.assertEqual(terminal_reward_exact(f1, steps), reward)
-                self.assertEqual(terminal_reward(f1, steps), reward.numerator / reward.denominator)
+                self.assertAlmostEqual(terminal_reward(f1, steps), reward.numerator / reward.denominator,
+                                       places=12)
 
-    def test_float_is_exact_nearest(self):
-        # Float arithmetic would give 0.7999999999999998 here.
-        self.assertEqual(terminal_reward(1, 100), 0.8)
-        self.assertEqual(terminal_reward(1, 1), 0.998)
-        self.assertEqual(terminal_reward(Fraction(2, 3), 0).hex(), (1 / 3).hex())
+    def test_reward_is_the_literal_float_formula(self):
+        """R4: the organizers' formula typed into Python is the reward, bit for bit."""
+        differs_from_exact = 0
+        for tp in range(0, 8):
+            for fp in range(0, 8):
+                for fn in range(0, 8):
+                    f1 = 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
+                    for steps in (0, 1, 3, 7, 10, 33, 50, 99, 100):
+                        want = max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))
+                        self.assertEqual(terminal_reward(metrics(tp, fp, fn)["f1"], steps).hex(), want.hex(),
+                                         (tp, fp, fn, steps))
+                        exact = terminal_reward_exact(Fraction(2 * tp, 2 * tp + fp + fn) if tp + fp + fn else 1,
+                                                      steps)
+                        differs_from_exact += want != exact.numerator / exact.denominator
+        self.assertGreater(differs_from_exact, 0, "the grid must contain a case where float and exact differ")
+
+    def test_judge_reward_is_the_literal_float_formula(self):
+        from auditgym.judge import judge
+        from tests.judge.helpers import episode, oracle, submit
+
+        ep = episode(3)
+        for k in range(0, 4):
+            findings = oracle(ep)[:2] + [dict(oracle(ep)[0], affected_ids=[f"f{j:02d}"]) for j in range(k)]
+            for steps in (0, 1, 7, 33, 100):
+                result = judge(ep, submit(ep, findings), steps)
+                f1 = 2 * result["tp"] / (2 * result["tp"] + result["fp"] + result["fn"])
+                self.assertEqual(result["reward"].hex(), max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps)).hex())
 
     def test_bit_identical_repeat(self):
         first = [terminal_reward(Fraction(a, 30), s).hex() for a in range(31) for s in range(101)]
         second = [terminal_reward(Fraction(a, 30), s).hex() for a in range(31) for s in range(101)]
+        self.assertEqual(terminal_reward(1, 100), 0.8)
         self.assertEqual(first, second)
 
     def test_always_in_range(self):

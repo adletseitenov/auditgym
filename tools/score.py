@@ -2,13 +2,21 @@
 
 Each criterion has a list of named checks. A check is a function returning None on success
 or a failure message. Checks that are planned but not written yet are listed with `todo` and
-count as NOT passed, so the printed score is never better than what is proven.
+count as NOT passed, so the printed score is never better than what is proven. A check whose
+name states a sample ("[tiny fixture, 1 walk]") proves exactly that sample and no more; the
+names come from `SAMPLES` so an over-claiming title cannot hide a small test.
 
-Run: python -m tools.score            (exit 1 only when an implemented check fails)
-     python -m tools.score --strict   (exit 1 when anything, including a todo, is not passed)
+Run: python -m tools.score               (strict: exit 1 on a failed check, on any TODO or `pending:`,
+                                          and when a zone's check module is missing)
+     python -m tools.score --allow-todo  (development: exit 1 only when an implemented check fails;
+                                          TODO, `pending:` and a missing module are listed, not fatal)
+
+`python -m auditgym check` runs the development mode and the strict one only when the environment
+variable AUDITGYM_STRICT=1 is set (the submission gate): `AUDITGYM_STRICT=1 python -m auditgym check`.
 """
 from __future__ import annotations
 
+import importlib
 import sys
 from typing import Callable, Optional
 
@@ -106,16 +114,17 @@ ZONE_CHECKS = {
     "Надёжность награды": ("tools.checks_judge",),
     "Контракт и изоляция": ("tools.checks_env",),
 }
+# Module check name -> planned name (the sample suffix is added by _apply_samples).
 RENAMES = {
     "any seed and any valid config gives a valid episode":
         "any seed and any valid config gives a valid episode; invalid config is rejected",
-    "clean companies: solver finds nothing (50 seeds)": "clean companies: solver finds nothing",
 }
 
 
-def _load_zone_checks() -> None:
-    import importlib
+MISSING_MODULES: list[str] = []
 
+
+def _load_zone_checks() -> None:
     planned = {name: checks for _, _, checks in CRITERIA for name, _ in checks}
     for criterion, modules in ZONE_CHECKS.items():
         own = next(c for name, _, c in CRITERIA if name == criterion)
@@ -125,6 +134,8 @@ def _load_zone_checks() -> None:
             except ModuleNotFoundError as error:
                 if error.name != module_name:  # a broken import inside the module is not "not written yet"
                     raise
+                if module_name not in MISSING_MODULES:
+                    MISSING_MODULES.append(module_name)
                 continue
             for name, function in module.CHECKS:
                 name = RENAMES.get(name, name)
@@ -161,7 +172,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("after injection the deviation equals expected_amount_minor of each issue", todo),
         ("every evidence set exists, has at most 10 ids and is sufficient", todo),
         ("independent solver on open records equals the truth (200 episodes; make fuzz runs more)", solver_equals_truth),
-        ("clean companies: solver finds nothing", todo),
+        ("clean companies: solver finds nothing (50 seeds)", todo),
         ("distractors do not satisfy any error definition", todo),
         ("each of the four error types can be configured on its own", todo),
         ("both interaction scenarios give an unambiguous truth", todo),
@@ -205,6 +216,75 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
 ]
 
 
+def _sample_sizes() -> dict:
+    """Planned name -> what the check runs on. Numbers that live in a zone module are read from it,
+    so the name cannot drift from the check."""
+    def attr(module: str, name: str, default):
+        try:
+            return getattr(importlib.import_module(module), name)
+        except (ImportError, AttributeError):
+            return default
+
+    gen_runs = len(attr("tools.checks_gen", "CONFIGS", ())) * len(attr("tools.checks_gen", "SEEDS", ()))
+    interactions = (len(attr("tools.checks_gen", "INTERACTION_CONFIGS", ()))
+                    * len(attr("tools.checks_gen", "SEEDS", ())))
+    configs = len(attr("tools.metamorph", "supported_configs", lambda: [])())
+    return {
+        "reset returns (observation, info) with task, manifest, policy, budget": "1 generated episode",
+        "step returns (observation, reward, terminated, truncated, info), JSON-compatible": "tiny fixture, 1 walk",
+        "list_records: page of at most 50 rows, stable cursors, every row exactly once":
+            "1 seed, 4 tables walked interleaved",
+        "get_record and get_document return only the requested record": "tiny fixture, 5 lookups",
+        "calculator: arithmetic and decimals only; code, names and files rejected": "2 results, 11 hostile inputs",
+        "unknown id or action: bounded error, step is spent": "tiny fixture, 7 cases",
+        "100 steps including submit; submit gives terminated=true": "tiny fixture, one run",
+        "step or time limit gives truncated=true and an empty final answer": "tiny fixture, 1 run per limit",
+        "reward is zero before the terminal step": "tiny fixture, 1 walk",
+        "eval mode: reward and diagnostics stay with the evaluator": "tiny fixture, 1 episode",
+        "evaluator runs outside the agent process; truth is not on the agent side": "tiny fixture, 1 client",
+        "no truth, seed, provenance or paths in observations, info, errors":
+            "tiny + 2 generated episodes with errors, 3 paths each; statistics: tools.leakscan",
+        "ids, ordering and counts do not separate affected records from the rest":
+            "1 episode, shapes and counts only; statistics: tools.leakscan",
+        "episode files follow the schemas: ISO-8601 offsets, integer money, null links": "1 episode",
+        "step after the end and step before reset give a fixed error, no state change": "tiny fixture",
+        "books balance before injection (per book, per currency, per event group)": "20 seeds",
+        "after injection the deviation equals expected_amount_minor of each issue": f"{gen_runs} generated episodes",
+        "every evidence set exists, has at most 10 ids and is sufficient": f"{gen_runs} generated episodes",
+        "distractors do not satisfy any error definition": "30 clean seeds",
+        "each of the four error types can be configured on its own": "4 types x 2 counts, 1 seed",
+        "both interaction scenarios give an unambiguous truth": f"{interactions} generated episodes",
+        "any seed and any valid config gives a valid episode; invalid config is rejected":
+            "13+ configs x 8 seeds, 7 invalid configs",
+        "same seed and config: byte-identical episode files": "5 seeds, 1 config",
+        "same seed, config and actions: identical transitions and rewards": "1 seed, 2 processes",
+        "reset isolates episodes (A, B, A again equals A)": "2 seeds",
+        "independent of PYTHONHASHSEED, locale, system time zone, working directory": "1 seed, 3 environments",
+        "surface_seed change: oracle answer maps by id table, reward is the same": f"{configs} configs, 1 seed each",
+        "external reorder and id rename of episode files: same oracle reward": f"{configs} configs, 1 seed each",
+        "episode written to files loads back equal": "1 seed",
+        "Env.from_files gives the same observations as the generated episode": "1 seed",
+        "trajectory logs are written and contain no truth": "1 seed, 3 policies",
+        "rng: same seed gives the same stream": "1 seed, 3 draws",
+    }
+
+
+def _label(name: str) -> str:
+    sizes = _SAMPLES
+    return f"{name} [{sizes[name]}]" if name in sizes else name
+
+
+def _apply_samples() -> None:
+    """Rename the planned checks to state their sample, and make the module names find them."""
+    global CRITERIA
+    CRITERIA = [(criterion, points, [(_label(name), function) for name, function in checks])
+                for criterion, points, checks in CRITERIA]
+    for module_name, planned in list(RENAMES.items()):
+        RENAMES[module_name] = _label(planned)
+    for planned in _SAMPLES:
+        RENAMES.setdefault(planned, _label(planned))
+
+
 def _pending(message: str) -> bool:
     return message == "TODO" or message.startswith(("not implemented", "pending:"))
 
@@ -220,7 +300,8 @@ def run_check(function: Check) -> Optional[str]:
 
 
 def main(argv: list[str]) -> int:
-    strict = "--strict" in argv
+    allow_todo = "--allow-todo" in argv  # "--strict" is accepted and means the default
+    MISSING_MODULES.clear()
     _load_zone_checks()
     total = 0.0
     failed_real = 0
@@ -244,10 +325,18 @@ def main(argv: list[str]) -> int:
         total += earned
         print(f"{name:<34}{passed:>6}/{len(checks):<3}{earned:>8.1f}/{points:g}")
     print(f"{'ИТОГО':<34}{'':>10}{total:>8.1f}/100")
+    for module_name in MISSING_MODULES:
+        details.append(f"  [MISSING] check module {module_name} does not exist")
     if details:
         print("\nНе пройдено:")
         print("\n".join(details))
-    return 1 if (failed_real or (strict and not_passed)) else 0
+    if failed_real:
+        return 1
+    return 0 if allow_todo else int(bool(not_passed or MISSING_MODULES))
+
+
+_SAMPLES = _sample_sizes()
+_apply_samples()
 
 
 if __name__ == "__main__":

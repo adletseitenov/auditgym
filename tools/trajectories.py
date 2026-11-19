@@ -1,9 +1,13 @@
 """Trajectory logs (CASE §09: trajectories.jsonl with episode_id, step, action, observation, reward,
 terminated, truncated; «В наблюдениях обучающих траекторий нет закрытого эталона»).
 
-    python -m tools.trajectories --out trajectories.jsonl (--episodes DIR | --seeds 1 2 3)
+    python -m tools.trajectories [--out trajectories.jsonl] [--episodes DIR | --seeds 1 2 3]
                                  [--config JSON] [--policies random,solver,oracle]
                                  [--policy module:Class ...] [--oracle-out PATH] [--mode train|eval]
+
+With no arguments it records the `random` and `solver` policies on the shipped train episodes
+(`episodes/train`) into `trajectories.jsonl` (`make trajectories`). The output directory is
+created when it does not exist.
 
 Each line has exactly the seven fields, in that order. Step 0 is the reset: action null, reward
 0.0, both flags false. `info` is never written, nor anything else.
@@ -41,6 +45,8 @@ from auditgym.rng import Rng
 FIELDS = ("episode_id", "step", "action", "observation", "reward", "terminated", "truncated")
 TABLES = ("ledger", "invoices", "payments", "fx")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+DEFAULT_EPISODES = ROOT / "episodes" / "train"
+DEFAULT_OUT = "trajectories.jsonl"
 
 
 class TrajectoryError(Exception):
@@ -54,6 +60,7 @@ def is_privileged(policy) -> bool:
 class TrajectoryWriter:
     def __init__(self, path, privileged: bool = False, mode: str = "w") -> None:
         name = pathlib.Path(path).name.lower()
+        pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
         if privileged and ".oracle." not in name:
             raise TrajectoryError("oracle trajectories go to a file named *.oracle.jsonl")
         if not privileged and "oracle" in name:
@@ -366,9 +373,9 @@ def record(out, *, seeds=(), episodes_dir=None, config=None, policies=("random",
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tools.trajectories")
-    parser.add_argument("--out", required=True)
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--episodes")
+    parser.add_argument("--out", default=DEFAULT_OUT)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--episodes", help="episode directories (default: episodes/train of the repository)")
     source.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--config", default=None, help="JSON config for --seeds")
     parser.add_argument("--policies", default="random,solver")
@@ -376,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oracle-out", default=None)
     parser.add_argument("--mode", choices=("train", "eval"), default="train")
     arguments = parser.parse_args(argv)
+    if arguments.episodes is None and not arguments.seeds:
+        arguments.episodes = str(DEFAULT_EPISODES)
     policies = tuple(p for p in arguments.policies.split(",") if p)
     config = json.loads(arguments.config) if arguments.config else None
     try:

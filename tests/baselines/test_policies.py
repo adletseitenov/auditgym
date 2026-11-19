@@ -144,6 +144,17 @@ class OrderingTest(unittest.TestCase):
         self.assertLess(m["flag_all"], -0.9)
         self.assertLess(m["flag_all_cutoff"], -0.9)
 
+    def test_flag_all_is_worse_than_silence_and_than_the_solver_on_a_mixed_set(self):
+        """The honest property behind "flag-everything is a bad result": over books with errors AND
+        clean books, flagging everything has a lower mean return than answering nothing, and a far
+        lower one than the honest solver. No margin: the means are compared as they are."""
+        mixed = {name: self.errors[name] + self.clean[name] for name in ("silence", "solver_policy", "flag_all")}
+        self.assertGreater(len(self.clean[("silence")]), 1)
+        means = {name: statistics.fmean(row["reward"] for row in rows) for name, rows in mixed.items()}
+        self.assertLess(means["flag_all"], means["silence"], means)
+        self.assertLess(means["flag_all"], means["solver_policy"], means)
+        self.assertGreater(means["solver_policy"], means["silence"], means)
+
     def test_random_guesses_score_low_on_clean_and_error_books(self):
         cases = self.clean_cases + self.error_cases[:8]
         with Env() as env:

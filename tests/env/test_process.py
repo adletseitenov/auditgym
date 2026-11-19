@@ -15,7 +15,7 @@ from auditgym import Env, EnvError
 from auditgym.evaluator import Evaluator
 from auditgym.generate import generate
 from auditgym.storage import write_episode
-from tests.env.helpers import (CLEAN, ROOT, TINY, FakeClock, assert_no_leak, full_walk, strict_json)
+from tests.env.helpers import (CLEAN, ROOT, TINY, WITH_ERRORS, FakeClock, assert_no_leak, full_walk, strict_json)
 
 # DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
 # invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
@@ -98,9 +98,8 @@ class ProcessTest(unittest.TestCase):
                 with self.assertRaises(EnvError) as caught:
                     env.reset(seed, config)
                 self.assertEqual(caught.exception.code, "bad_config")
-            with self.assertRaises(EnvError) as caught:
-                env.reset()
-            self.assertEqual(caught.exception.code, "not_loaded")
+            observation, info = env.reset()  # C7: no seed is the default seed, not an error
+            self.assertEqual((observation["type"], info), ("reset", {}))
 
     def test_bad_directory_is_a_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -168,7 +167,10 @@ class ProtocolTest(unittest.TestCase):
         output = serve_transcript(lines, 0).decode("ascii").splitlines()
         replies = [json.loads(line) for line in output]
         self.assertEqual(len(replies), 14)  # one per request up to close
-        for reply in replies[:11]:
+        for number, reply in enumerate(replies[:11]):
+            if number == 8:  # a 5 000-digit integer is valid JSON for the server (R1): a step before reset
+                self.assertEqual(reply["observation"]["error"]["code"], "not_reset")
+                continue
             self.assertEqual(reply["observation"], {"type": "error", "steps_remaining": 0,
                                                     "error": {"code": "bad_request", "message": "Bad request."}})
             self.assertEqual((reply["reward"], reply["terminated"], reply["info"]), (0.0, False, {}))
@@ -210,14 +212,14 @@ class NoLeakTest(unittest.TestCase):
 
     def test_full_walk_on_generated_episodes_leaks_nothing(self):
         for seed in (48151623, 90210377, 3141592653):
-            episode = generate(seed, CLEAN)
+            episode = generate(seed, WITH_ERRORS)
             with Env() as env:
-                first = env.reset(seed, CLEAN)
+                first = env.reset(seed, WITH_ERRORS)
                 values = [first] + env_walk(env, first[0])
             assert_no_leak(self, values, episode)
 
     def test_files_episode_leaks_no_path(self):
-        episode = generate(48151623, CLEAN)
+        episode = generate(48151623, WITH_ERRORS)
         with tempfile.TemporaryDirectory(prefix="secretdir_") as directory:
             write_episode(episode, directory)
             with Env.from_files(directory) as env:
@@ -226,18 +228,36 @@ class NoLeakTest(unittest.TestCase):
         assert_no_leak(self, values, episode, extra_words=(directory, pathlib.Path(directory).name, "secretdir"))
 
     def test_eval_mode_leaks_nothing_either(self):
-        episode = generate(48151623, CLEAN)
+        episode = generate(48151623, WITH_ERRORS)
         with tempfile.TemporaryDirectory() as directory:
             with Env(mode="eval", results_path=pathlib.Path(directory) / "r.jsonl") as env:
-                first = env.reset(48151623, CLEAN)
+                first = env.reset(48151623, WITH_ERRORS)
                 values = [first] + env_walk(env, first[0])
         assert_no_leak(self, values, episode, extra_words=(directory, "r.jsonl"))
         for _, reward, _, _, info in values[1:]:
             self.assertEqual((reward, info), (0.0, {}))
 
+    def test_the_shape_of_what_the_agent_sees_does_not_depend_on_the_errors(self):
+        """Q2: no key, and no count, differs between a clean company and one with six errors."""
+        def skeleton(value):
+            if isinstance(value, dict):
+                return {key: skeleton(item) for key, item in sorted(value.items())}
+            if isinstance(value, list):
+                return [skeleton(value[0])] if value else []
+            return type(value).__name__
+
+        shapes = []
+        for config in (dict(CLEAN, currencies=WITH_ERRORS["currencies"]), WITH_ERRORS):
+            with Env() as env:
+                first = env.reset(31, config)[0]
+                shapes.append((skeleton(first["task"]), skeleton(first["policy"]), skeleton(first["manifest"]),
+                               sorted(first)))
+        self.assertEqual(shapes[0][1], shapes[1][1])
+        self.assertEqual(shapes[0], shapes[1])
+
     def test_client_object_holds_no_private_data(self):
         seed = 77777331
-        episode = generate(seed, CLEAN)
+        episode = generate(seed, WITH_ERRORS)
         with tempfile.TemporaryDirectory(prefix="hiddenresults_") as directory:
             results = pathlib.Path(directory) / "results.jsonl"
             with tempfile.TemporaryDirectory(prefix="hiddenepisode_") as episode_dir:
@@ -245,11 +265,11 @@ class NoLeakTest(unittest.TestCase):
                 for env in (Env(mode="eval", results_path=results), Env.from_files(episode_dir, results_path=results)):
                     with env:
                         if env.mode == "eval":
-                            env.reset(seed, CLEAN)
+                            env.reset(seed, WITH_ERRORS)
                         else:
                             env.reset()
                         env.step({"action": "list_records", "table": "ledger"})
-                        self.assertEqual(set(vars(env)), {"mode", "_process"})
+                        self.assertEqual(set(vars(env)), {"mode", "_process", "_timeout"})
                         objects = reachable(env)
                         strings = [o for o in objects if isinstance(o, (str, bytes))]
                         joined = "\n".join(s if isinstance(s, str) else s.decode("latin-1") for s in strings)

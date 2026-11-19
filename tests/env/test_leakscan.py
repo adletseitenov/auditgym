@@ -76,14 +76,145 @@ class ScannerSensitivityTest(unittest.TestCase):
         self.assertEqual(rows[("duplicate_invoice", "id_rank")]["status"], "ok")
 
 
+class SignificanceTest(unittest.TestCase):
+    """Q6: a row fails when it is large AND significant, whatever the sample size."""
+
+    def test_perfect_separation_of_a_few_samples_is_significant(self):
+        stat = leakscan.separation(list(range(1000, 1010)), list(range(0, 200)))
+        self.assertEqual(stat["auc"], 1.0)
+        self.assertLess(stat["p"], 1e-6)
+        self.assertTrue(leakscan.verdict(stat, tests=300))
+
+    def test_a_small_effect_is_not_a_finding_however_many_samples(self):
+        from auditgym.rng import Rng
+
+        rng = Rng(5, "small-effect")
+        negative = [rng.below(1000) for _ in range(4000)]
+        positive = [rng.below(1000) + 100 for _ in range(4000)]  # AUC about 0.55: visible, tiny
+        stat = leakscan.separation(positive, negative)
+        self.assertGreater(abs(stat["auc"] - 0.5), 0.03)
+        self.assertLess(stat["p"], 1e-6)  # significant ...
+        self.assertFalse(leakscan.verdict(stat, tests=100))  # ... but below MIN_EFFECT
+
+    def test_noise_of_a_large_effect_size_is_not_significant(self):
+        stat = leakscan.separation([1, 5, 2, 9, 4, 8, 3, 7], [2, 6, 1, 9, 5, 3, 8, 4, 6, 2, 7, 1, 9, 3])
+        self.assertFalse(leakscan.verdict(stat, tests=1))
+
+    def test_bonferroni_correction(self):
+        stat = {"auc": 0.8, "p": 1e-4}
+        self.assertTrue(leakscan.verdict(stat, tests=10))     # 1e-4 < 0.01 / 10
+        self.assertFalse(leakscan.verdict(stat, tests=1000))  # 1e-4 > 0.01 / 1000
+
+    def test_ties_and_empty_sides(self):
+        stat = leakscan.separation([3] * 10, [3] * 30)
+        self.assertEqual((stat["auc"], stat["z"], stat["p"]), (0.5, 0.0, 1.0))
+        self.assertIsNone(leakscan.separation([], [1]))
+        self.assertIsNone(leakscan.separation([1], []))
+
+    def test_z_matches_the_exact_distribution_for_a_small_case(self):
+        # n1 = 5, n0 = 5, perfect separation: exact two-sided p = 2 / C(10, 5) = 0.0079; the normal
+        # approximation says 0.0090, the same order and on the right side of 0.05.
+        stat = leakscan.separation([6, 7, 8, 9, 10], [1, 2, 3, 4, 5])
+        self.assertAlmostEqual(stat["p"], 0.0090, places=3)
+        self.assertGreater(stat["p"], 2 / 252)
+
+    def test_doc_id_that_starts_with_z_is_found_with_ten_affected_documents(self):
+        """The old rule needed 20 affected documents; ten affected ids all sorting last are no chance."""
+        episodes = []
+        for seed in range(5):
+            episode = generate(seed, {"errors": {"duplicate_invoice": 1}})
+            truth = episode["private"]["truth"]["issues"][0]
+            rename = {old: "z" + old[1:] for old in truth["affected_ids"]}
+            for table in ("invoices", "payments"):
+                for record in episode["public"][table]:
+                    record["doc_id"] = rename.get(record["doc_id"], record["doc_id"])
+            truth["affected_ids"] = [rename[i] for i in truth["affected_ids"]]
+            truth["evidence_sets"] = [[rename.get(i, i) for i in group] for group in truth["evidence_sets"]]
+            episodes.append(episode)
+        rows = {(r["type"], r["table"], r["feature"]): r for r in leakscan.surface_statistics(episodes)}
+        row = rows[("duplicate_invoice", "invoices", "id_rank")]
+        self.assertEqual((row["affected"], row["status"]), (10, "FAIL"))
+
+
+class ViewsTest(unittest.TestCase):
+    """Q6: the ledger and the duplicate pairs are scanned as well as the documents."""
+
+    DENSE = {"errors": {"duplicate_invoice": 3, "allocation_gap": 2, "fx_error": 2, "period_cutoff": 2},
+             "size": {"invoices": [80, 100]}, "currencies": ["USD", "EUR"]}
+
+    def episodes(self, count=12):
+        return [generate(900 + k, self.DENSE) for k in range(count)]
+
+    def test_the_three_views_produce_rows(self):
+        rows = leakscan.surface_statistics(self.episodes())
+        tables = {row["table"] for row in rows}
+        self.assertTrue({"invoices", "payments", "pairs"} <= tables, tables)
+        self.assertTrue(any(table.startswith("ledger:") for table in tables), tables)
+        pair_features = {row["feature"] for row in rows if row["table"] == "pairs"}
+        self.assertTrue({"gap_days", "id_order", "same_items", "later_paid"} <= pair_features, pair_features)
+        self.assertTrue(all(row["status"] in ("ok", "few", "explained") or row["status"].startswith("pending")
+                            for row in rows), [r for r in rows if r["status"] == "FAIL"])
+
+    def test_a_planted_ledger_separator_is_found(self):
+        episodes = self.episodes()
+        for episode in episodes:
+            cited = {i for issue in episode["private"]["truth"]["issues"] if issue["type"] == "duplicate_invoice"
+                     for group in issue["evidence_sets"] for i in group}
+            for row in episode["public"]["ledger"]:
+                if row["row_id"] in cited:
+                    row["timestamp"] = row["timestamp"][:17] + "59" + row["timestamp"][19:]  # :59 seconds
+        rows = [r for r in leakscan.surface_statistics(episodes)
+                if r["type"] == "duplicate_invoice" and r["table"].startswith("ledger:") and r["feature"] == "second"]
+        self.assertTrue(any(r["status"] == "FAIL" for r in rows), rows)
+
+    def test_a_planted_pair_separator_is_found(self):
+        episodes = self.episodes()
+        for episode in episodes:
+            late = {sorted(issue["affected_ids"])[-1] for issue in episode["private"]["truth"]["issues"]
+                    if issue["type"] == "duplicate_invoice"}
+            for invoice in episode["public"]["invoices"]:
+                if invoice["doc_id"] in late:
+                    invoice["line_items"] = [dict(item, description="copy") for item in invoice["line_items"]]
+        rows = {r["feature"]: r for r in leakscan.surface_statistics(episodes) if r["table"] == "pairs"}
+        self.assertEqual(rows["same_items"]["status"], "FAIL", rows["same_items"])
+
+    def test_the_ledger_view_compares_like_with_like(self):
+        """Amounts of converted documents are not round: the stratum includes the currency kind, so a
+        foreign-currency evidence row is not compared with a base-currency posting."""
+        episode = generate(900, self.DENSE)
+        strata = {stratum for stratum, _ in leakscan.ledger_features(episode["public"]).values()}
+        self.assertTrue(any(stratum.endswith("/fx") for stratum in strata), strata)
+        self.assertTrue(any(stratum.endswith("/base") for stratum in strata), strata)
+
+    def test_pair_features_describe_the_pair_without_the_truth(self):
+        episode = generate(900, self.DENSE)
+        pairs = leakscan.pair_features(episode["public"])
+        duplicates = {frozenset(i["affected_ids"]) for i in episode["private"]["truth"]["issues"]
+                      if i["type"] == "duplicate_invoice"}
+        self.assertTrue(duplicates <= set(pairs))
+        for values in pairs.values():
+            self.assertGreaterEqual(values["gap_days"], 0)
+
+
 class LeakscanRunTest(unittest.TestCase):
     def test_two_episodes_pass(self):
         out = io.StringIO()
         summary = leakscan.run(2, out=out)
         self.assertEqual(summary["failures"], [], out.getvalue())
-        # C1 and C2 are fixed in the generator (DECISIONS C1, C2): nothing is waved through as pending.
-        self.assertEqual(leakscan.PENDING, {})
-        self.assertEqual(summary["pending"], [])
+        # A pending defect is allowed only with its docs/AUDIT.md number, and it is not a pass.
+        for key, reason in leakscan.PENDING.items():
+            self.assertRegex(reason, r"^pending: AUDIT [A-Z]\d+", key)
+        self.assertTrue(all(item.startswith("pending: AUDIT") for item in summary["pending"]), summary["pending"])
+
+    def test_strict_fails_while_something_is_pending(self):
+        from unittest import mock
+
+        quiet = {"failures": [], "pending": ["pending: AUDIT L6 [x]"]}
+        with mock.patch.object(leakscan, "run", return_value=quiet):
+            self.assertEqual(leakscan.main(["--episodes", "1"]), 0)
+            self.assertEqual(leakscan.main(["--episodes", "1", "--strict"]), 1)
+        with mock.patch.object(leakscan, "run", return_value={"failures": [], "pending": []}):
+            self.assertEqual(leakscan.main(["--episodes", "1", "--strict"]), 0)
 
 
 if __name__ == "__main__":
