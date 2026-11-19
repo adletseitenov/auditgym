@@ -1,5 +1,5 @@
 """Checks of the criterion «Контракт и изоляция» (CASE.md §03-§04) plus the reproducibility
-checks the env zone can prove. Wired into tools/score.py by the orchestrator.
+checks the env zone can prove and the trajectory-log check of «Инженерия и объяснение». Wired into tools/score.py by the orchestrator.
 
 CHECKS = [(name, function)]; a function returns None on success or a failure message.
 Names match the planned entries in tools/score.py. A message starting with "pending:" means
@@ -505,6 +505,55 @@ def from_files_equals_generated() -> Optional[str]:
     return None if generated == loaded else "Env.from_files differs from the generated episode"
 
 
+def surface_seed_renaming() -> Optional[str]:
+    from tools import metamorph
+
+    configs = metamorph.supported_configs()
+    for number, (label, config) in enumerate(configs):
+        message = metamorph.check_surface(2_000_003 + 101 * number, config, 977 + number)
+        if message is not None:
+            return f"{label}: {message}"
+    return None
+
+
+def external_transform() -> Optional[str]:
+    from tools import metamorph
+
+    configs = metamorph.supported_configs()
+    for number, (label, config) in enumerate(configs):
+        with tempfile.TemporaryDirectory(prefix="transform_check_") as directory:
+            message = metamorph.check_transform(3_000_017 + 103 * number, config, number, pathlib.Path(directory))
+        if message is not None:
+            return f"{label}: {message}"
+    return None
+
+
+def trajectory_logs() -> Optional[str]:
+    from tools import metamorph
+    from tools.trajectories import FIELDS, scan_file, record
+
+    configs = [config for _, config in metamorph.supported_configs()]
+    with tempfile.TemporaryDirectory(prefix="trajectory_check_") as directory:
+        out = pathlib.Path(directory) / "trajectories.jsonl"
+        written = record(out, seeds=(4_000_037,), config=configs[-1], policies=("random", "solver", "oracle"))
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+        if not lines or any(tuple(line) != FIELDS for line in lines):
+            return "trajectory lines do not have exactly the seven case fields"
+        if sum(1 for line in lines if line["terminated"] or line["truncated"]) != 2:
+            return "every recorded episode must end"
+        problems = scan_file(out, written["episodes"], (directory,))
+        if problems:
+            return problems[0]
+        oracle = written["oracle"]
+        if oracle is None or oracle == out or scan_file(oracle, written["episodes"], (directory,), training=False):
+            return "oracle trajectories are not in their own clean file"
+        mixed = pathlib.Path(directory) / "mixed.jsonl"
+        mixed.write_text(out.read_text(encoding="utf-8") + oracle.read_text(encoding="utf-8"), encoding="utf-8")
+        if not scan_file(mixed, written["episodes"]):
+            return "the scan does not catch oracle lines in a training file"
+    return None
+
+
 CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [(name, _guard(function)) for name, function in [
     # «Контракт и изоляция» — names match tools/score.py
     ("reset returns (observation, info) with task, manifest, policy, budget", reset_contract),
@@ -527,6 +576,10 @@ CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [(name, _guard(function)
     ("reset isolates episodes (A, B, A again equals A)", reset_isolation),
     ("independent of PYTHONHASHSEED, locale, system time zone, working directory", environment_independent),
     ("Env.from_files gives the same observations as the generated episode", from_files_equals_generated),
+    ("surface_seed change: oracle answer maps by id table, reward is the same", surface_seed_renaming),
+    ("external reorder and id rename of episode files: same oracle reward", external_transform),
+    # «Инженерия и объяснение»
+    ("trajectory logs are written and contain no truth", trajectory_logs),
 ]]
 
 
