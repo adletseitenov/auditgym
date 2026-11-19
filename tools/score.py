@@ -91,7 +91,7 @@ def solver_equals_truth() -> Optional[str]:
 # Checks written by each zone. A name equal to a planned check replaces its todo;
 # any other name is appended to the zone's criterion.
 ZONE_CHECKS = {
-    "Данные и эталон": ("tools.checks_gen", "tools.checks_solver"),
+    "Данные и эталон": ("tools.checks_gen", "tools.checks_solver", "tools.checks_qa"),
     "Надёжность награды": ("tools.checks_judge",),
     "Контракт и изоляция": ("tools.checks_env",),
 }
