@@ -59,8 +59,12 @@ episode = {
  "document_date": {"invoice": "issued_at", "payment": "timestamp"},
  "refund": "payment with negative amount_minor and one invoice ref",
  "amount_tolerance_minor": {"duplicate_invoice": 0, "allocation_gap": 0, "fx_error": 1, "period_cutoff": 0},
- "evidence_superset_allowed": true, "period_basis": "document_date"}
+ "evidence_superset_allowed": true, "period_basis": "document_date",
+ "period_interval": "[start, end)",
+ "payment_rule": "a payment with one reference moves the invoice's receivable by round_half_even(booked * paid_after / total) - ...",
+ "duplicate_signature": "entity, currency, total, line items incl. service period"}
 ```
+`policy.json` собирается по белому списку ключей (`auditgym.generate.POLICY_KEYS`); ничего из эталона и из конфигурации ошибок в него не попадает. Записи всех таблиц упорядочены по открытому ID (`ledger` — по `row_id`, документы — по `doc_id`, `fx` — по дате и валюте).
 
 ### 2.3 ledger.csv
 Колонки строго в этом порядке: `row_id,timestamp,account,debit_minor,credit_minor,currency,entity_id,invoice_id,payment_id`.
@@ -101,8 +105,8 @@ episode = {
 | Тип | `affected_ids` | Сумма и валюта | `evidence_sets` |
 |---|---|---|---|
 | `duplicate_invoice` | оба счёта | `total_minor`, валюта счёта | четыре набора `[docA, docB, строка A, строка B]`: по одной строке (дебет или кредит) из собственной группы проводок каждого счёта |
-| `allocation_gap` | платёж и счёт | `credit_minor` строки на `unallocated`, базовая валюта | `[[doc_платежа, doc_счёта, row_нераспределённых]]` |
-| `fx_error` | документ | модуль разницы, базовая валюта | счёт: `[[doc, row_Дт], [doc, row_Кт]]`; платёж: `[[doc, row_денег]]` |
+| `allocation_gap` | платёж и счёт | `credit_minor` строки на `unallocated`, базовая валюта | `[[doc_платежа, doc_счёта, row_нераспределённых, row_Дт_дебиторки_счёта, row_Кт_дебиторки_платежа]]` |
+| `fx_error` | документ | модуль разницы, базовая валюта | счёт: `[[doc, row_Дт, ключ_курса], [doc, row_Кт, ключ_курса]]`; платёж: `[[doc, row_денег, ключ_курса]]`; ключ курса — `"дата|ИСТ|ЦЕЛЬ"` по дате документа в поясе компании |
 | `period_cutoff` | документ | сумма документа, валюта документа | `[[doc, row_Дт], [doc, row_Кт]]` |
 
 Точные предикаты — в `docs/SPEC.md`, раздел «Определения ошибок».
