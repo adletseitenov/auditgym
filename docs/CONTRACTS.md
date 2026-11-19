@@ -30,7 +30,7 @@ episode = {
 
 На диске: `<dir>/public/{manifest.json, policy.json, ledger.csv, invoices.jsonl, payments.jsonl, fx.csv}` и `<dir>/private/{truth.json, provenance.json, pre_ledger.csv, pre_invoices.jsonl, pre_payments.jsonl}`. Три файла `pre_*` вместе — полное состояние «до ошибки». Открытые и закрытые файлы всегда в разных каталогах. В CSV отсутствующая ссылка — пустое поле; через инструменты среды она отдаётся как JSON `null`.
 
-**Правила значений:** деньги — `int` в минимальных единицах; курсы — десятичные строки, в коде `Decimal`; время — ISO-8601 со смещением (`2026-10-03T14:05:00+05:00`); даты — `YYYY-MM-DD`. `float` запрещён. Все списки записей отсортированы в порядке, который назначила поверхность (`surface`), и этот порядок — часть эпизода.
+**Правила значений:** деньги — `int` в минимальных единицах; курсы — десятичные строки, в коде `Decimal`; время — ISO-8601 со смещением (`2026-10-03T14:05:00+05:00`); даты — `YYYY-MM-DD`. `float` запрещён. Все списки записей отсортированы в порядке, который назначила поверхность (`surface`), и этот порядок — часть эпизода (файлов). Инструменты среды отдают страницы в другом порядке, выведенном только из ID записи (`evaluator.order_key`: книга, счета и платежи — по хэшу своего ID, курсы — по ключу): порядок страниц ничего не говорит о датах, проводках и ошибках и не меняется от перестановки строк в файлах (`docs/AUDIT.md` R6, задача E8).
 
 **ID непрозрачны:** строки из `Rng.token`, без префиксов по типу и без порядка. Тип записи определяется таблицей, а не видом ID. Пространства ID: `row_id` (книга), `doc_id` (счета и платежи, уникален в обеих таблицах), `invoice_id`, `payment_id`, `entity_id`; ID курса — составной ключ `"YYYY-MM-DD|SRC|TGT"`.
 
@@ -142,8 +142,10 @@ episode = {
 env = Env(mode="train")                      # клиент; сам запускает процесс-оценщик
 observation, info = env.reset(seed, config)
 observation, reward, terminated, truncated, info = env.step(action)
-env = Env.from_files("<dir>")                # эпизод из каталога, reset() без seed
+env = Env.from_files("<dir>")                # эпизод из каталога, reset() без seed; то же Env("<dir>")
+observation, info = env.reset(seed=7, options={})   # options — синоним config (имя Gymnasium)
 ```
+`reset()` без seed: у `Env.from_files` — тот же эпизод заново; без файлов — seed по умолчанию: первый раз 0, дальше предыдущий seed + 1 (как у Gymnasium-среды, чей генератор идёт дальше). Отказ в `reset` или `load` не трогает идущий эпизод. Клиент наружу бросает только `EnvError` с коротким кодом (`bad_config`, `bad_episode`, `bad_mode`, `bad_timeout`, `bad_results`, `timeout`, `server_exited`, `bad_reply`, `closed`); ответа сервера ждёт не дольше `timeout` секунд (по умолчанию 120), затем останавливает его.
 Процесс-оценщик: `python -m auditgym serve [--mode train|eval] [--results PATH]`, по одной JSON-строке на запрос и ответ:
 ```json
 → {"op": "reset", "seed": 7, "config": {}}
@@ -151,7 +153,7 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 → {"op": "step", "action": {...}}
 ← {"observation": {...}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
 ```
-В stdout идёт только протокол; журналы — в stderr или в файл `--results`.
+В stdout идёт только протокол; диагностика — в stderr. Журнал оценщика (строка JSON на каждый законченный эпизод, с кодом ошибки структуры) — в `--results PATH`, в унаследованный дескриптор `--results-fd N` (так делает `Env` на POSIX) или по умолчанию в `$AUDITGYM_RESULTS`, иначе `runs/results.jsonl` в рабочем каталоге; файл создаётся с правами 0600, недоступное место по умолчанию пропускается, `--no-results` — без журнала. Целые числа в запросе любой длины (длиннее 4 000 цифр — число той же длины). Строка длиннее 1 МиБ во время эпизода — шаг с ошибкой `bad_arguments`, а если в ней есть «submit» — `submit` с неверной структурой (награда −1); вне эпизода — `bad_request`. `--secret-file PATH` или `$AUDITGYM_SECRET`: секрет оценщика, из него и seed выводится seed генератора (без секрета seed используется как есть).
 
 ### 5.2 Действия
 ```json
@@ -162,6 +164,13 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 {"action": "submit", "findings": {"episode_id": "…", "findings": [...]}}
 ```
 Таблицы: `ledger`, `invoices`, `payments`, `fx`. Парсер также принимает имя действия в ключах `tool`, `name`, `type` и аргументы во вложенном `args`, `arguments` или `params`. `limit` больше 50 обрезается до 50, по умолчанию 50. `get_record` для `fx` принимает составной ключ.
+
+Форма запроса нестрогая, смысл строгий (`docs/AUDIT.md` C1–C3, C9, R7):
+- действие — словарь или строка с JSON-объектом; имя действия и таблицы — без учёта регистра (только ASCII) и пробелов по краям; у таблицы допускаются расширение файла и единственное число (`Ledger`, `ledger.csv`, `invoice`);
+- синонимы аргументов: `get_record` — `id`, `record_id`, `key` или имя поля (`row_id`, `doc_id`, `document_id`, `invoice_id`, `payment_id`; для `fx` также `date` + `source_currency` + `target_currency`); общий `id` ищется сначала по `doc_id`, затем по `invoice_id`/`payment_id`, имя поля — только по этому полю; `get_document` — `doc_id`, `id`, `document_id`; `calculator` — `expression`, `expr`; разные значения синонимов — `bad_arguments`;
+- курсор `null`, `""`, `0`, `"0"` — первая страница; `limit` — целое, строка из цифр или целое число с плавающей точкой (`"50"`, `50.0`);
+- `submit` принимает findings.json объектом, строкой JSON, голым списком выводов (подставляется `episode_id` идущего эпизода), плоско в действии (`episode_id` и `findings` рядом) или под ключом `"findings.json"`. Все правила структуры §6 применяются к результату. `submit`, чьи аргументы нельзя прочитать (`"args": 5`, строка не JSON), — неверная структура.
+Неизвестные действие, таблица и ID остаются ошибками.
 
 ### 5.3 Наблюдения
 Всегда словарь с `type` и `steps_remaining`:
@@ -174,17 +183,17 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 {"type": "error", "error": {"code": "unknown_id", "message": "Unknown id."}, "steps_remaining": 95}
 {"type": "final", "steps_remaining": 94}
 ```
-`next_cursor` равен `null` на последней странице. `task` содержит: текст задачи, перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски. Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
+`next_cursor` равен `null` на последней странице. Порядок записей на страницах — `evaluator.order_key` (§1). `task` содержит: текст задачи, перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски. Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
 
 Коды ошибок (тексты фиксированные): `unknown_action`, `unknown_table`, `unknown_id`, `bad_cursor`, `bad_arguments`, `bad_expression`, `episode_over`, `not_reset`. Любая ошибка, кроме двух последних, расходует шаг.
 
 ### 5.4 Завершение и награда
 - До терминального шага `reward = 0.0`, `info = {}`.
-- `submit` → `terminated = true`. Сотый шаг без `submit` или лимит времени → `truncated = true`, ответ считается пустым, `inspection_steps = 100`.
+- `submit` → `terminated = true`. Сотый шаг без `submit` или лимит времени → `truncated = true`, ответ считается пустым, `inspection_steps = 100`, `steps_remaining = 0`.
 - `train`: терминальный `reward` — формула кейса; `info = {"reward", "precision", "recall", "f1", "inspection_steps"}`. Никаких вердиктов по отдельным выводам.
 - `eval`: политике возвращается `reward = 0.0`, `info = {}`; настоящая награда и разбор пишутся в файл `--results` (одна JSON-строка на эпизод).
 - Неверная структура выводов → `terminated = true`, награда `-1.0`.
-- `step` после конца → ошибка `episode_over`, `reward 0.0`, `terminated = true`, состояние не меняется. `step` до `reset` → `not_reset`.
+- `step` после конца → ошибка `episode_over`, `reward 0.0`, флаги и `steps_remaining` — как в финальном ответе (после `submit` `terminated = true`, после усечения `truncated = true`), состояние не меняется. `step` до `reset` → `not_reset`.
 
 ## 6. Выводы агента
 
