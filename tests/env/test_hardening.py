@@ -39,14 +39,22 @@ def _open_descriptors_to(path: pathlib.Path) -> int:
     return count
 
 
+def _command_line(pid: int) -> str:
+    """The process's argv as the OS shows it; slim containers have /proc but no `ps`."""
+    proc = pathlib.Path(f"/proc/{pid}/cmdline")
+    if proc.exists():
+        return proc.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+    return subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)],
+                          capture_output=True, text=True, check=True).stdout
+
+
 @unittest.skipUnless(os.name == "posix", "descriptor passing is POSIX only")
 class ResultsPathTest(unittest.TestCase):
     def test_results_path_is_not_in_the_process_list_and_results_are_written(self):
         with tempfile.TemporaryDirectory(prefix="secret_results_dir_") as directory:
             results = pathlib.Path(directory) / "results.jsonl"
             with Env.from_files(TINY, mode="eval", results_path=results) as env:
-                listing = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(env._process.pid)],
-                                         capture_output=True, text=True).stdout
+                listing = _command_line(env._process.pid)
                 self.assertIn("auditgym", listing)
                 self.assertNotIn("secret_results_dir_", listing)
                 self.assertNotIn(str(results), listing)
