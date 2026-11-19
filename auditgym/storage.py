@@ -69,28 +69,36 @@ def write_episode(episode: dict, directory: str | pathlib.Path) -> None:
 
 
 def load_episode(directory: str | pathlib.Path) -> dict:
+    """Read an episode directory. A UTF-8 byte order mark is tolerated (files re-saved by a
+    spreadsheet or an editor). The evaluator never reads `provenance.json` and `pre_*`, so a
+    directory without them loads: `provenance` is then {} and the `pre_*` lists are empty."""
     root = pathlib.Path(directory)
 
     def text(relative: str) -> str:
-        return (root / relative).read_text(encoding="utf-8")
+        return (root / relative).read_text(encoding="utf-8-sig")
 
-    def lines(relative: str) -> list[dict]:
-        return [json.loads(line) for line in text(relative).splitlines() if line.strip()]
+    def optional(relative: str) -> str | None:
+        return text(relative) if (root / relative).is_file() else None
 
+    def lines(content: str | None) -> list[dict]:
+        return [json.loads(line) for line in (content or "").splitlines() if line.strip()]
+
+    pre_ledger = optional("private/pre_ledger.csv")
+    provenance = optional("private/provenance.json")
     return {
         "public": {
             "manifest": json.loads(text("public/manifest.json")),
             "policy": json.loads(text("public/policy.json")),
             "ledger": _read_ledger(text("public/ledger.csv")),
-            "invoices": lines("public/invoices.jsonl"),
-            "payments": lines("public/payments.jsonl"),
+            "invoices": lines(text("public/invoices.jsonl")),
+            "payments": lines(text("public/payments.jsonl")),
             "fx": [dict(row) for row in csv.DictReader(io.StringIO(text("public/fx.csv")))],
         },
         "private": {
             "truth": json.loads(text("private/truth.json")),
-            "provenance": json.loads(text("private/provenance.json")),
-            "pre_ledger": _read_ledger(text("private/pre_ledger.csv")),
-            "pre_invoices": lines("private/pre_invoices.jsonl"),
-            "pre_payments": lines("private/pre_payments.jsonl"),
+            "provenance": json.loads(provenance) if provenance is not None else {},
+            "pre_ledger": _read_ledger(pre_ledger) if pre_ledger is not None else [],
+            "pre_invoices": lines(optional("private/pre_invoices.jsonl")),
+            "pre_payments": lines(optional("private/pre_payments.jsonl")),
         },
     }
