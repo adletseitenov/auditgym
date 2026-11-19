@@ -22,7 +22,11 @@ Readings chosen where the definitions leave a case open:
 - period_cutoff reports the absolute document amount, so a refund never yields a negative claim.
 
 Robustness: a record that lacks a piece a predicate needs (a rate for its date, a parseable
-timestamp, a numeric amount) is skipped by that predicate only; solve() never raises on it.
+timestamp with an offset, a numeric amount) is skipped by that predicate only; solve() never
+raises on it. A timestamp without an offset is malformed (its instant would depend on the
+machine's time zone). An id or an FX key that two records share with different content is
+ambiguous and treated as missing, so the answer never depends on the order of records. An
+unusable policy (missing, or without base currency, offset or period) gives no findings.
 """
 from __future__ import annotations
 
@@ -30,7 +34,7 @@ import json
 from collections import defaultdict
 from decimal import Decimal
 
-from .money import convert, fx_key, in_period, local_date
+from .money import convert, fx_key, in_period, local_date, parse_time
 
 MAX_EVIDENCE = 10
 ROWS_PER_DUPLICATE_INVOICE = 4  # 2 docs + 2 x 4 rows = 10 at most
@@ -74,6 +78,35 @@ def _valid_row(row) -> bool:
         return False
 
 
+def _aware(timestamp: object):
+    """Parsed ISO timestamp; ValueError unless it carries an offset."""
+    if not isinstance(timestamp, str):
+        raise ValueError("timestamp is not a string")
+    moment = parse_time(timestamp)
+    if moment.tzinfo is None:
+        raise ValueError("timestamp without an offset")
+    return moment
+
+
+def _dict(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _unique_by(records: list[dict], field: str) -> dict:
+    """Records by a string id; an id carried by two different records is ambiguous and left out
+    (an exact repeat of one record is not a conflict)."""
+    found: dict = {}
+    ambiguous: set = set()
+    for record in records:
+        key = record.get(field)
+        if not isinstance(key, str):
+            continue
+        if key in found and found[key] != record:
+            ambiguous.add(key)
+        found.setdefault(key, record)
+    return {key: record for key, record in found.items() if key not in ambiguous}
+
+
 class _Books:
     def __init__(self, public: dict) -> None:
         self.policy = public["policy"]
@@ -81,19 +114,31 @@ class _Books:
         self.offset = self.policy["timezone"]
         self.start = self.policy["period_start"]
         self.end = self.policy["period_end"]
-        self.accounts = {**DEFAULT_ACCOUNTS, **(self.policy.get("accounts") or {})}
-        self.exponents = self.policy.get("currency_exponents") or {}
-        self.tolerance = self.policy.get("amount_tolerance_minor") or {}
+        if not all(isinstance(value, str) for value in (self.base, self.offset)):
+            raise ValueError("policy needs a base currency and an offset")
+        _aware(self.start), _aware(self.end)
+        self.accounts = {**DEFAULT_ACCOUNTS, **_dict(self.policy.get("accounts"))}
+        self.exponents = _dict(self.policy.get("currency_exponents"))
+        self.tolerance = _dict(self.policy.get("amount_tolerance_minor"))
         self.invoices = [inv for inv in public.get("invoices") or [] if isinstance(inv, dict)]
         self.payments = [pay for pay in public.get("payments") or [] if isinstance(pay, dict)]
-        self.invoice_by_id = {inv.get("invoice_id"): inv for inv in self.invoices}
-        self.payment_by_id = {pay.get("payment_id"): pay for pay in self.payments}
+        self.invoice_by_id = _unique_by(self.invoices, "invoice_id")
+        self.payment_by_id = _unique_by(self.payments, "payment_id")
         self.rates: dict[str, Decimal] = {}
+        conflicting: set = set()
         for rate in public.get("fx") or []:
             try:
-                self.rates[fx_key(rate["date"], rate["source_currency"], rate["target_currency"])] = Decimal(rate["rate"])
+                key = fx_key(rate["date"], rate["source_currency"], rate["target_currency"])
+                value = Decimal(rate["rate"])
             except _MALFORMED:
                 continue  # an unreadable rate is the same as a missing one
+            if not value.is_finite() or value <= 0:
+                continue
+            if key in self.rates and self.rates[key] != value:
+                conflicting.add(key)  # two different rates for one day: neither can be trusted
+            self.rates[key] = value
+        for key in conflicting:
+            del self.rates[key]
 
         # Event groups (CONTRACTS 2.3) and receivable balances per invoice, in one pass.
         self.invoice_group: dict[str, list[dict]] = defaultdict(list)
@@ -115,12 +160,14 @@ class _Books:
         return value if _is_int(value) else 0
 
     def inside(self, timestamp: str) -> bool:
+        _aware(timestamp)
         return in_period(timestamp, self.start, self.end)
 
     def policy_amount(self, amount_minor: int, currency: str, timestamp: str) -> int | None:
         """Document amount at the rate of its own company-local date, or None when there is no rate."""
         if not _is_int(amount_minor):
             return None
+        _aware(timestamp)
         rate = self.rates.get(fx_key(local_date(timestamp, self.offset), currency, self.base))
         if rate is None or currency not in self.exponents or self.base not in self.exponents:
             return None
@@ -274,7 +321,10 @@ def _sort_key(finding: dict) -> tuple:
 
 
 def solve(public: dict) -> list[dict]:
-    books = _Books(public)
+    try:
+        books = _Books(public)
+    except _MALFORMED:
+        return []  # no usable policy: nothing can be decided from these records
     findings = _duplicates(books) + _allocation_gaps(books) + _fx_errors(books) + _cutoffs(books)
     # A finding must be well-formed: string ids, a non-negative int amount, at most 10 evidence ids.
     findings = [f for f in findings if all(isinstance(i, str) for i in f["affected_ids"] + f["evidence_ids"])
