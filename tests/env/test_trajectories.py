@@ -105,6 +105,53 @@ class TrajectoriesTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue((out.parent / "trajectories.oracle.jsonl").is_file())
 
+    def test_output_directory_is_created(self):
+        out = self.tmp / "does" / "not" / "exist" / "trajectories.jsonl"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = trajectories.main(["--out", str(out), "--seeds", "6004", "--config", json.dumps(CONFIG),
+                                      "--policies", "solver,oracle"])
+        self.assertEqual(code, 0)
+        self.assertTrue(out.is_file())
+        self.assertTrue(out.with_name("trajectories.oracle.jsonl").is_file())
+        with TrajectoryWriter(self.tmp / "deep" / "er" / "w.jsonl"):
+            pass
+        self.assertTrue((self.tmp / "deep" / "er" / "w.jsonl").is_file())
+
+    def test_no_arguments_record_the_shipped_train_episodes(self):
+        """`make trajectories` used to die on the missing --episodes/--seeds."""
+        from tests.env.helpers import TINY
+        from unittest import mock
+
+        default = self.tmp / "shipped"
+        shutil.copytree(TINY, default)
+        out = self.tmp / "nodefault" / "trajectories.jsonl"
+        with mock.patch.object(trajectories, "DEFAULT_EPISODES", default), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = trajectories.main(["--out", str(out), "--policies", "solver"])
+        self.assertEqual(code, 0)
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual({line["episode_id"] for line in lines}, {"ep_tiny0001"})
+
+    def test_the_default_points_at_the_train_episodes_of_the_repository(self):
+        self.assertEqual(trajectories.DEFAULT_EPISODES, trajectories.ROOT / "episodes" / "train")
+        self.assertTrue((trajectories.DEFAULT_EPISODES / "ep_01" / "public").is_dir())
+        self.assertEqual(trajectories.DEFAULT_OUT, "trajectories.jsonl")
+
+    def test_command_line_without_arguments_runs_in_another_directory(self):
+        import os
+        import subprocess
+        import sys
+
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        environment = dict(os.environ, PYTHONPATH=str(trajectories.ROOT))
+        result = subprocess.run([sys.executable, "-m", "tools.trajectories", "--policies", "solver"],
+                                cwd=elsewhere, env=environment, capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = (elsewhere / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()
+        episodes = {json.loads(line)["episode_id"] for line in lines}
+        self.assertEqual(len(episodes), len(list(trajectories.DEFAULT_EPISODES.iterdir())))
+
 
 if __name__ == "__main__":
     unittest.main()
