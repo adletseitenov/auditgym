@@ -156,6 +156,29 @@ class OrderingTest(unittest.TestCase):
                 self.assertTrue(all(row["steps"] <= MAX_STEPS and not row["truncated"] for row in policy_rows), name)
 
 
+class SolverPolicyTest(unittest.TestCase):
+    def test_findings_have_distinct_lists_and_full_duplicate_evidence(self):
+        """No workaround is left in the policy: the solver's findings go out as they are, with separate
+        affected_ids and evidence_ids lists, and a duplicate cites one own posting row of each invoice
+        (DECISIONS A2), so the policy's answer equals the truth through the judge."""
+        from auditgym.judge import judge
+
+        config = {"interaction": "I2", "errors": {"duplicate_invoice": 1, "fx_error": 1}, "currencies": ["USD"]}
+        for seed in range(4):
+            episode = generate(seed, config)
+            public = episode["public"]
+            findings = make_policy("solver_policy").decide(public)
+            ledger = {row["row_id"] for row in public["ledger"]}
+            duplicates = [f for f in findings if f["type"] == "duplicate_invoice"]
+            self.assertEqual(len(duplicates), 2, seed)
+            for finding in findings:
+                self.assertIsNot(finding["affected_ids"], finding["evidence_ids"])
+            for finding in duplicates:
+                self.assertGreaterEqual(len(set(finding["evidence_ids"]) & ledger), 2, finding)
+            payload = {"episode_id": public["manifest"]["episode_id"], "findings": findings}
+            self.assertEqual(judge(episode, payload, 1)["f1"], 1.0, seed)
+
+
 class IsolationTest(unittest.TestCase):
     FORBIDDEN = ("auditgym.generate", "auditgym.inject", "auditgym.verify", "auditgym.storage",
                  "auditgym.evaluator", "auditgym.judge", "auditgym.matcher", "random", "uuid", "secrets")

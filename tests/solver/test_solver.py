@@ -221,6 +221,19 @@ class ReadingTest(unittest.TestCase):
                 self.assertLessEqual({invoice["doc_id"], copy_["doc_id"], a["row_id"], b["row_id"]},
                                      set(finding["evidence_ids"]))
 
+    def test_affected_and_evidence_are_distinct_list_objects(self):
+        """A caller that extends evidence_ids (or edits affected_ids) of one finding must not change the
+        other list: every finding carries two separate list objects, on every type and interaction."""
+        configs = ({}, {"currencies": ["USD", "EUR"], "interaction": "I1", "errors": {"duplicate_invoice": 1}},
+                   {"interaction": "I2", "errors": {"fx_error": 1, "allocation_gap": 1}})
+        seen = set()
+        for seed in range(6):
+            for config in configs:
+                for finding in solve(generate(seed, config)["public"]):
+                    seen.add(finding["type"])
+                    self.assertIsNot(finding["affected_ids"], finding["evidence_ids"], finding)
+        self.assertEqual(seen, {"duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff"})
+
     def test_fx_evidence_is_doc_and_both_conversion_rows(self):
         c, invoice = self._company_with_invoice(foreign=True)
         rows = c.invoice_rows(invoice)
