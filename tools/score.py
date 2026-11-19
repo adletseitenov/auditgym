@@ -68,23 +68,34 @@ def written_episode_loads_back() -> Optional[str]:
 
 
 def solver_equals_truth() -> Optional[str]:
-    """The independent solver, on open records only, must return exactly the generated truth."""
+    """The independent solver, on open records only, must return exactly the generated truth: the
+    default config (four types, distractors), both interactions, two currencies and a far offset;
+    every finding also cites one full evidence set of its issue."""
     from auditgym.generate import generate
     from auditgym.solver import solve
 
     def key(item: dict, amount: str) -> tuple:
         return (item["type"], frozenset(item["affected_ids"]), item[amount], item["currency"])
 
-    configs = [{"errors": {"duplicate_invoice": 1, "period_cutoff": 1}, "currencies": ["USD"]},
-               {"errors": {"duplicate_invoice": 2, "period_cutoff": 2}, "currencies": ["USD", "EUR"],
-                "timezone": "-11:00"}]
-    for config in configs:
-        for seed in range(100):
+    wider = {"invoices": [48, 100], "background_pairs": [150, 300]}
+    configs = [None,
+               {"interaction": "I1", "size": wider, "currencies": ["USD", "EUR"]},
+               {"interaction": "I2", "size": wider, "timezone": "+14:00"},
+               {"errors": {"duplicate_invoice": 2, "allocation_gap": 1, "fx_error": 2, "period_cutoff": 2},
+                "currencies": ["USD", "EUR"], "timezone": "-11:00", "size": {"invoices": [56, 100],
+                                                                            "background_pairs": [150, 300]}}]
+    for index, config in enumerate(configs):
+        for seed in range(50):
             episode = generate(seed, config)
-            truth = {key(issue, "expected_amount_minor") for issue in episode["private"]["truth"]["issues"]}
-            found = [key(finding, "claimed_amount_minor") for finding in solve(episode["public"])]
-            if set(found) != truth or len(found) != len(truth):
-                return f"seed {seed}: solver and truth differ"
+            issues = episode["private"]["truth"]["issues"]
+            truth = {key(issue, "expected_amount_minor"): issue for issue in issues}
+            findings = solve(episode["public"])
+            found = [key(finding, "claimed_amount_minor") for finding in findings]
+            if set(found) != set(truth) or len(found) != len(truth):
+                return f"config {index} seed {seed}: solver and truth differ"
+            for finding, item in zip(findings, found):
+                if not any(set(s) <= set(finding["evidence_ids"]) for s in truth[item]["evidence_sets"]):
+                    return f"config {index} seed {seed}: {finding['type']} cites no full evidence set"
     return None
 
 
@@ -111,7 +122,9 @@ def _load_zone_checks() -> None:
         for module_name in modules:
             try:
                 module = importlib.import_module(module_name)
-            except ModuleNotFoundError:
+            except ModuleNotFoundError as error:
+                if error.name != module_name:  # a broken import inside the module is not "not written yet"
+                    raise
                 continue
             for name, function in module.CHECKS:
                 name = RENAMES.get(name, name)
@@ -195,6 +208,16 @@ def _pending(message: str) -> bool:
     return message == "TODO" or message.startswith(("not implemented", "pending:"))
 
 
+def run_check(function: Check) -> Optional[str]:
+    """One check's result; a crash inside it is that check's FAIL (with the exception class), not
+    the end of the table."""
+    try:
+        return function()
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - any crash is reported, never raised
+        text = str(error).splitlines()[0][:200] if str(error) else ""
+        return f"crashed: {type(error).__name__}" + (f": {text}" if text else "")
+
+
 def main(argv: list[str]) -> int:
     strict = "--strict" in argv
     _load_zone_checks()
@@ -206,7 +229,7 @@ def main(argv: list[str]) -> int:
     for name, points, checks in CRITERIA:
         passed = 0
         for check_name, function in checks:
-            message = function()
+            message = run_check(function)
             if message is None:
                 passed += 1
                 continue
