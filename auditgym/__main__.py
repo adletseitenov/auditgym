@@ -20,7 +20,11 @@ def check() -> int:
 def main(argv: list[str]) -> int:
     if argv[:1] == ["check"]:
         return check()
-    print("usage: python -m auditgym check", file=sys.stderr)
+    if argv[:1] == ["serve"]:
+        from .serve import main as serve_main
+
+        return serve_main(argv[1:])
+    print("usage: python -m auditgym check | serve [--mode train|eval] [--results PATH]", file=sys.stderr)
     return 2
 
 
