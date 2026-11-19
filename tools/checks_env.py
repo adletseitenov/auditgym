@@ -20,6 +20,9 @@ from typing import Callable, Optional
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TINY = ROOT / "tests" / "fixtures" / "tiny"
 CLEAN = {"errors": {}}
+# Leak checks run on companies WITH errors: with an empty truth nothing can leak (audit Q7).
+WITH_ERRORS = {"errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1},
+               "interaction": "I1", "currencies": ["USD", "EUR"]}
 TABLES = ("ledger", "invoices", "payments", "fx")
 # DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
 # invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
@@ -343,9 +346,11 @@ def no_leak() -> Optional[str]:
     with Env.from_files(TINY) as env:
         runs.append((episode, _env_transcript(env), (str(TINY), "fixtures")))
     for seed in (48151623, 90210377):
-        episode = generate(seed, CLEAN)
+        episode = generate(seed, WITH_ERRORS)
+        if not episode["private"]["truth"]["issues"]:
+            return "the leak check needs episodes with errors"
         with Env() as env:
-            runs.append((episode, _env_transcript(env, seed, CLEAN), ()))
+            runs.append((episode, _env_transcript(env, seed, WITH_ERRORS), ()))
         with tempfile.TemporaryDirectory(prefix="episodedir_") as directory:
             write_episode(episode, directory)
             with Env.from_files(directory) as env:

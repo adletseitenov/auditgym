@@ -10,6 +10,10 @@ from auditgym.evaluator import Evaluator
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TINY = ROOT / "tests" / "fixtures" / "tiny"
 CLEAN = {"errors": {}}
+# A company WITH errors: all four types and the I1 scenario (six issues). Leak and eval tests run on
+# this, not on CLEAN: with an empty truth "nothing leaks" is trivially true (audit Q7).
+WITH_ERRORS = {"errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1},
+               "interaction": "I1", "currencies": ["USD", "EUR"]}
 TABLES = ("ledger", "invoices", "payments", "fx")
 
 # Words that only the evaluator side may know. Never in an observation, info or error.
@@ -32,9 +36,9 @@ def tiny(mode: str = "train", results_path=None, clock=None) -> Evaluator:
     return evaluator
 
 
-def generated(seed: int = 3, mode: str = "train", results_path=None, clock=None) -> Evaluator:
+def generated(seed: int = 3, mode: str = "train", results_path=None, clock=None, config=None) -> Evaluator:
     evaluator = Evaluator(mode=mode, results_path=results_path, clock=clock or FakeClock())
-    evaluator.reset(seed, CLEAN)
+    evaluator.reset(seed, CLEAN if config is None else config)
     return evaluator
 
 
@@ -123,6 +127,9 @@ def forbidden_values(episode: dict, extra: tuple = ()) -> set:
 
 def assert_no_leak(test, values: list, episode: dict, extra_values: tuple = (), extra_words: tuple = ()):
     forbidden = forbidden_values(episode, extra_values)
+    test.assertTrue(episode["private"]["truth"]["issues"],
+                    "a leak test needs an episode with errors: with an empty truth nothing can leak")
+    test.assertTrue(forbidden, "no private value to look for")
     for value in values:
         text = strict_json(value)
         for leaf in leaves(json.loads(text)):

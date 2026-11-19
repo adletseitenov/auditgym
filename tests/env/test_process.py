@@ -15,7 +15,7 @@ from auditgym import Env, EnvError
 from auditgym.evaluator import Evaluator
 from auditgym.generate import generate
 from auditgym.storage import write_episode
-from tests.env.helpers import (CLEAN, ROOT, TINY, FakeClock, assert_no_leak, full_walk, strict_json)
+from tests.env.helpers import (CLEAN, ROOT, TINY, WITH_ERRORS, FakeClock, assert_no_leak, full_walk, strict_json)
 
 # DECISIONS A2 / CONTRACTS v2 §3.1: duplicate evidence = both docs + one posting row of each
 # invoice (a1 = debit of k7m2qa, a3 = debit of z5c1ty); the two docs alone are a FP.
@@ -212,14 +212,14 @@ class NoLeakTest(unittest.TestCase):
 
     def test_full_walk_on_generated_episodes_leaks_nothing(self):
         for seed in (48151623, 90210377, 3141592653):
-            episode = generate(seed, CLEAN)
+            episode = generate(seed, WITH_ERRORS)
             with Env() as env:
-                first = env.reset(seed, CLEAN)
+                first = env.reset(seed, WITH_ERRORS)
                 values = [first] + env_walk(env, first[0])
             assert_no_leak(self, values, episode)
 
     def test_files_episode_leaks_no_path(self):
-        episode = generate(48151623, CLEAN)
+        episode = generate(48151623, WITH_ERRORS)
         with tempfile.TemporaryDirectory(prefix="secretdir_") as directory:
             write_episode(episode, directory)
             with Env.from_files(directory) as env:
@@ -228,18 +228,36 @@ class NoLeakTest(unittest.TestCase):
         assert_no_leak(self, values, episode, extra_words=(directory, pathlib.Path(directory).name, "secretdir"))
 
     def test_eval_mode_leaks_nothing_either(self):
-        episode = generate(48151623, CLEAN)
+        episode = generate(48151623, WITH_ERRORS)
         with tempfile.TemporaryDirectory() as directory:
             with Env(mode="eval", results_path=pathlib.Path(directory) / "r.jsonl") as env:
-                first = env.reset(48151623, CLEAN)
+                first = env.reset(48151623, WITH_ERRORS)
                 values = [first] + env_walk(env, first[0])
         assert_no_leak(self, values, episode, extra_words=(directory, "r.jsonl"))
         for _, reward, _, _, info in values[1:]:
             self.assertEqual((reward, info), (0.0, {}))
 
+    def test_the_shape_of_what_the_agent_sees_does_not_depend_on_the_errors(self):
+        """Q2: no key, and no count, differs between a clean company and one with six errors."""
+        def skeleton(value):
+            if isinstance(value, dict):
+                return {key: skeleton(item) for key, item in sorted(value.items())}
+            if isinstance(value, list):
+                return [skeleton(value[0])] if value else []
+            return type(value).__name__
+
+        shapes = []
+        for config in (dict(CLEAN, currencies=WITH_ERRORS["currencies"]), WITH_ERRORS):
+            with Env() as env:
+                first = env.reset(31, config)[0]
+                shapes.append((skeleton(first["task"]), skeleton(first["policy"]), skeleton(first["manifest"]),
+                               sorted(first)))
+        self.assertEqual(shapes[0][1], shapes[1][1])
+        self.assertEqual(shapes[0], shapes[1])
+
     def test_client_object_holds_no_private_data(self):
         seed = 77777331
-        episode = generate(seed, CLEAN)
+        episode = generate(seed, WITH_ERRORS)
         with tempfile.TemporaryDirectory(prefix="hiddenresults_") as directory:
             results = pathlib.Path(directory) / "results.jsonl"
             with tempfile.TemporaryDirectory(prefix="hiddenepisode_") as episode_dir:
@@ -247,7 +265,7 @@ class NoLeakTest(unittest.TestCase):
                 for env in (Env(mode="eval", results_path=results), Env.from_files(episode_dir, results_path=results)):
                     with env:
                         if env.mode == "eval":
-                            env.reset(seed, CLEAN)
+                            env.reset(seed, WITH_ERRORS)
                         else:
                             env.reset()
                         env.step({"action": "list_records", "table": "ledger"})
