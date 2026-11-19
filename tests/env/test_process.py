@@ -90,7 +90,7 @@ class ProcessTest(unittest.TestCase):
         with Env() as env:
             observation, reward, terminated, truncated, info = env.step({"action": "list_records", "table": "fx"})
             self.assertEqual(observation["error"]["code"], "not_reset")
-            self.assertEqual((reward, terminated, info), (0.0, True, {}))
+            self.assertEqual((reward, terminated, truncated, info), (0.0, False, False, {}))
 
     def test_refused_reset_raises_a_fixed_code(self):
         with Env() as env:

@@ -198,7 +198,7 @@ observation, info = env.reset(seed=7, options={})   # options — синоним
 - `train`: терминальный `reward` — формула кейса; `info = {"reward", "precision", "recall", "f1", "inspection_steps"}`. Никаких вердиктов по отдельным выводам.
 - `eval`: политике возвращается `reward = 0.0`, `info = {}`; настоящая награда и разбор пишутся в журнал оценщика (§5.1; одна JSON-строка на эпизод).
 - Неверная структура выводов → `terminated = true`, награда `-1.0`.
-- `step` после конца → ошибка `episode_over`, `reward 0.0`, состояние не меняется и шаг не тратится; флаги и `steps_remaining` — как в финальном ответе: после `submit` `terminated = true`, `truncated = false`, после усечения (по шагам или по времени) всякий следующий шаг отвечает `terminated = false`, `truncated = true`, `steps_remaining = 0`. `step` до `reset` → `not_reset`.
+- `step` после конца → ошибка `episode_over`, `reward 0.0`, состояние не меняется и шаг не тратится; флаги и `steps_remaining` — как в финальном ответе: после `submit` `terminated = true`, `truncated = false`, после усечения (по шагам или по времени) всякий следующий шаг отвечает `terminated = false`, `truncated = true`, `steps_remaining = 0`. `step` до `reset` → ошибка `not_reset` (протокольная: `reward 0.0`, `terminated = false`, `truncated = false`, шаг не тратится).
 
 ## 6. Выводы агента
 

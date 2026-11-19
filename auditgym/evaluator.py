@@ -242,7 +242,7 @@ class Evaluator:
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         if self._episode is None:
             return ({"type": "error", "error": error("not_reset"), "steps_remaining": 0},
-                    0.0, True, False, {})
+                    0.0, False, False, {})  # a protocol error, not an end of episode
         if self._done:
             # After a truncation every later step says so, too: terminated=false, truncated=true.
             return ({"type": "error", "error": error("episode_over"),

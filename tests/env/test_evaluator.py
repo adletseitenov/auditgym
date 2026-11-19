@@ -369,7 +369,7 @@ class ErrorsTest(unittest.TestCase):
         for _ in range(3):
             observation, reward, terminated, truncated, info = evaluator.step({"action": "list_records"})
             self.assertEqual(observation["error"]["code"], "not_reset")
-            self.assertEqual((reward, terminated, truncated, info), (0.0, True, False, {}))
+            self.assertEqual((reward, terminated, truncated, info), (0.0, False, False, {}))
         observation, _ = evaluator.load(TINY)
         self.assertEqual(observation["steps_remaining"], 100)
         self.assertEqual(evaluator.step({"action": "list_records", "table": "fx"})[0]["steps_remaining"], 99)

@@ -442,7 +442,7 @@ def fixed_error_outside_episode() -> Optional[str]:
     evaluator = _evaluator()
     if evaluator.step({"action": "list_records", "table": "fx"}) != (
             {"type": "error", "error": {"code": "not_reset", "message": "Call reset first."}, "steps_remaining": 0},
-            0.0, True, False, {}):
+            0.0, False, False, {}):
         return "step before reset"
     evaluator.load(TINY)
     evaluator.step({"action": "submit", "findings": TINY_ANSWER})
