@@ -14,6 +14,12 @@ Episode lifetime:
   a small closed seed by generating candidates. Without one (the default) the seed is used as is.
 - After the end (submit, 100 steps, time limit) every step returns `episode_over` with the
   flags and the step count of the final reply, and changes nothing.
+
+Order of the pages: ledger rows, invoices and payments are served in the order of a hash of their
+own id (`order_key`), fx rates by their key (date, then currencies). The files keep the order of the
+episode, but what a policy pages through says nothing about dates, posting times or injected
+errors (served by date, the first and last invoices were the cut-off errors: AUDIT R6, task E8),
+and reordering the rows of an episode's files changes no observation.
 """
 from __future__ import annotations
 
@@ -47,6 +53,7 @@ _FIELDS = {
 _MANIFEST_FIELDS = ("schema_version", "episode_id", "base_currency", "period_start", "period_end",
                     "timezone", "counts", "rounding", "config_version")
 _CURSOR_SALT = "auditgym-cursor-v1"
+_ORDER_SALT = b"auditgym-order-v1"
 _SECRET_SALT = b"auditgym-secret-seed-v1"
 _RESULTS_FLAGS = os.O_WRONLY | os.O_APPEND | os.O_CREAT
 _RESULTS_MODE = 0o600  # the judge log holds rewards: owner only (AUDIT L3)
@@ -63,6 +70,16 @@ class MonotonicClock:
 
 def fx_id(record: dict) -> str:
     return f"{record['date']}|{record['source_currency']}|{record['target_currency']}"
+
+
+def order_key(table: str, record: dict) -> bytes:
+    """Sort key of a record in the pages of its table: from its own id only (see the module notes)."""
+    if table == "fx":
+        return fx_id(record).encode("utf-8", "surrogatepass")
+    identity = record.get(actions.ID_FIELDS[table][0])
+    text = identity if isinstance(identity, str) else ""
+    return hashlib.sha256(_ORDER_SALT + b"\x1f" + table.encode("ascii") + b"\x1f"
+                          + text.encode("utf-8", "surrogatepass")).digest()
 
 
 def _project(record: dict, fields: tuple[str, ...]) -> dict:
@@ -227,7 +244,8 @@ class Evaluator:
             raise ValueError("episode without an id or a truth")
         tables, index, cursors = {}, {}, {}
         for table, fields in _FIELDS.items():
-            records = [_project(record, fields) for record in public[table]]
+            records = sorted((_project(record, fields) for record in public[table]),
+                             key=lambda record, table=table: order_key(table, record))
             tables[table] = records
             by_field = {field: {} for field in actions.ID_FIELDS[table]}
             for position, record in enumerate(records):

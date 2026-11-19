@@ -2,6 +2,7 @@
 import unittest
 
 from auditgym import Env
+from auditgym.evaluator import order_key
 from auditgym.generate import generate
 from auditgym.solver import solve
 from policies.runner import make_policy, run_episode
@@ -42,7 +43,11 @@ class EndToEndTest(unittest.TestCase):
             with self.subTest(seed=seed), Env() as env:
                 observation, info = env.reset(seed, CONFIG)
                 public, steps = read_everything(env, observation)
-                self.assertEqual(public, {k: v for k, v in generate(seed, CONFIG)["public"].items()})
+                expected = generate(seed, CONFIG)["public"]
+                # Pages follow evaluator.order_key, not the file order (E8): same records, other order.
+                for table in TABLES:
+                    expected[table] = sorted(expected[table], key=lambda record, table=table: order_key(table, record))
+                self.assertEqual(public, expected)
                 answer = {"episode_id": public["manifest"]["episode_id"], "findings": solve(public)}
                 observation, reward, terminated, truncated, info = env.step({"action": "submit", "findings": answer})
                 self.assertTrue(terminated and not truncated)

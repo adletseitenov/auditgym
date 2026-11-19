@@ -169,8 +169,11 @@ def paging() -> Optional[str]:
             cursors[table] = observation["next_cursor"]
             if cursors[table] is None:
                 pending.discard(table)
+    from auditgym.evaluator import order_key
+
     for table in TABLES:
-        if _json(seen[table]) != _json(episode["public"][table]):
+        served = sorted(episode["public"][table], key=lambda record, table=table: order_key(table, record))
+        if _json(seen[table]) != _json(served):
             return f"{table}: a full interleaved walk does not give every record exactly once"
     again = _evaluator()
     again.reset(5, CLEAN)

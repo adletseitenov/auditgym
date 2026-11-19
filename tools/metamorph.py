@@ -15,7 +15,8 @@ try/except around generate, so the tool widens as soon as new error types and in
              loaded with Env.from_files: the oracle answer rewritten with mapping.json gets the same
              reward; the honest solver policy (pages every table through the contract, runs
              auditgym.solver.solve, submits) gets the same reward and the same findings up to the
-             mapping; cursors give every record of the transformed files exactly once
+             mapping; cursors give every record of the transformed files exactly once (in the
+             evaluator's id-derived page order)
 
 The oracle answer is built here from the episode's private truth (first evidence set of each
 issue), never through the agent-facing API. Exits 1 on any mismatch.
@@ -284,12 +285,15 @@ def check_surface(seed: int, config: dict, surface_seed: int) -> str | None:
 
 
 def _files_view(directory) -> dict:
-    """The tables of an episode directory as the evaluator serves them (projection of the public files)."""
-    from auditgym.evaluator import _FIELDS, _project
+    """The tables of an episode directory as the evaluator serves them: the projection of the public
+    files, in the evaluator's id-derived page order (not the order of the file rows)."""
+    from auditgym.evaluator import _FIELDS, _project, order_key
     from auditgym.storage import load_episode
 
     public = load_episode(directory)["public"]
-    return {table: [_project(record, fields) for record in public[table]] for table, fields in _FIELDS.items()}
+    return {table: sorted((_project(record, fields) for record in public[table]),
+                          key=lambda record, table=table: order_key(table, record))
+            for table, fields in _FIELDS.items()}
 
 
 def _honest_run(env) -> tuple[float, list, str | None, dict]:
@@ -349,7 +353,7 @@ def check_transform(seed: int, config: dict, number: int, workdir: pathlib.Path)
     for table in TABLES:
         got = outcomes["dst"][3][table]
         if json.dumps(got, sort_keys=True) != json.dumps(expected[table], sort_keys=True):
-            return f"{table}: cursors do not give the transformed file records exactly once, in order"
+            return f"{table}: cursors do not give the transformed file records exactly once, in page order"
     counts = transformed["public"]["manifest"]["counts"]
     if any(counts[table] != len(outcomes["dst"][3][table]) for table in TABLES):
         return "paged record counts differ from manifest counts"

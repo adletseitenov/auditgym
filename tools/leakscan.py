@@ -32,14 +32,15 @@ train, reward 0.0 and info {} everywhere in eval.
 
 Surface statistics on what the agent can read. For each error type, affected documents are
 compared with documents no issue touches, pooled over the episodes, feature by feature: id rank,
-table position, second / minute / hour of the document time, posting time equals document time,
+position in the pages as served (evaluator.order_key) and the distance from the nearer end of the
+pages, second / minute / hour of the document time, posting time equals document time,
 paid / unpaid (invoices), line-item count, payment terms in days, reference count and refund
 (payments). The separation measure is the AUC (Mann-Whitney, ties averaged; a boolean is 0/1).
 A feature separates when |AUC - 0.5| > 0.25 (a single threshold then classifies at least 75 %
 of pairs correctly) with at least 20 affected documents; fewer is reported as "few". Known
 generator defects awaiting a fix may be listed as `pending:` (none now: C1 and C2 are fixed);
-a feature that is the error's own definition (period_cutoff: table order is by document date)
-is reported as `explained`.
+a feature that is the error's own definition may be listed as `explained` (none now: pages used
+to follow the document date, which put cut-off errors at both ends; AUDIT R6, task E8).
 
 Side channels: `get_record` on affected vs unaffected documents, reply size and round-trip time,
 medians reported. Fail only on a clear separation: |AUC - 0.5| > 0.35 for size, > 0.40 for time.
@@ -95,9 +96,9 @@ FORBIDDEN_WORDS = ("truth", "provenance", "pre_ledger", "pre_invoices", "pre_pay
 # measured at AUC ~0.5, so `paid` and `posting_equals_document_time` are real checks again: a
 # separation there now FAILs.
 PENDING: dict = {}
-EXPLAINED = {
-    ("period_cutoff", "position"): "table order is by document date; a date outside the period is the definition",
-}
+# Nothing is explained away any more: pages are served in an id-derived order (evaluator.order_key),
+# so `position` and `edge_distance` must look like chance for every error type (AUDIT R6, task E8).
+EXPLAINED: dict = {}
 
 
 # --- raw server --------------------------------------------------------------------------------
@@ -421,19 +422,27 @@ def document_features(public: dict) -> dict[str, tuple[str, dict]]:
         key = ("pay", row["payment_id"]) if row["payment_id"] else ("inv", row["invoice_id"]) if row["invoice_id"] else None
         if key:
             groups.setdefault(key, []).append(row)
+    from auditgym.evaluator import order_key
+
     paid = {ref for payment in public["payments"] for ref in payment["invoice_refs"] or []}
     out = {}
     for table, time_field in (("invoices", "issued_at"), ("payments", "timestamp")):
         records = public[table]
         ranks = {doc_id: rank for rank, doc_id in enumerate(sorted(r["doc_id"] for r in records))}
+        # Position as the agent pages through the table (the evaluator's order, not the file's).
+        served = {r["doc_id"]: rank for rank, r in
+                  enumerate(sorted(records, key=lambda r, table=table: order_key(table, r)))}
         span = max(len(records) - 1, 1)
-        for position, record in enumerate(records):
+        for record in records:
+            position = served[record["doc_id"]]
             moment = _moment(record[time_field])
             if table == "invoices":
                 own = groups.get(("inv", record["invoice_id"]), [])
             else:
                 own = groups.get(("pay", record["payment_id"]), [])
+            # edge_distance catches errors gathered at both ends, which a rank AUC of position misses.
             features = {"id_rank": ranks[record["doc_id"]] / span, "position": position / span,
+                        "edge_distance": min(position, span - position) / span,
                         "second": moment.second, "minute": moment.minute, "hour": moment.hour,
                         "posting_equals_document_time": int(any(row["timestamp"] == record[time_field] for row in own))}
             if table == "invoices":
