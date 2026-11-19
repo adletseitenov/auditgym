@@ -69,6 +69,6 @@ def terminal_reward_exact(f1: object, inspection_steps: int) -> Fraction:
 
 def terminal_reward(f1: object, inspection_steps: int) -> float:
     """max(-1.0, min(1.0, 2*f1 - 1 - 0.002*steps)) in float arithmetic, written exactly so."""
-    f1 = float(_rational(f1, "f1"))
+    f1 = float(_rational(f1, "f1"))  # determinism: a score, not money; the case defines it in floats
     steps = _count(inspection_steps, "inspection_steps")
     return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))
