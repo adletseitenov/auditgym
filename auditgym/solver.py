@@ -14,11 +14,14 @@ Readings chosen where the definitions leave a case open:
   identical posted invoices give three findings; an unposted copy gives none. Evidence: both
   doc_ids plus the rows of each invoice's own posting group (normally Dr and Cr, so six ids).
 - allocation_gap needs exactly one unallocated row with a positive credit for the payment;
-  a payment with several such rows is left unreported.
+  a payment with several such rows is left unreported. Evidence: both doc_ids, the unallocated
+  row, the invoice's receivable debit and the payment's receivable credit for that invoice.
 - fx_error is evaluated for every posted foreign-currency document, in or out of the period, at
   the rate of the document's own company-local date (DECISIONS A4). An error only when
   |booked - correct| is strictly greater than the policy tolerance. A base-currency document is
-  never an fx_error.
+  never an fx_error, nor is a payment posted without a cash row (nothing converted it). Only
+  conversion rows count: the receivable debit and revenue credit of an invoice, the cash of a
+  payment. Evidence: the doc_id, the conversion rows and the fx key of the document's date.
 - period_cutoff reports the absolute document amount, so a refund never yields a negative claim.
 
 Robustness: a record that lacks a piece a predicate needs (a rate for its date, a parseable
@@ -34,9 +37,9 @@ import json
 from collections import defaultdict
 from decimal import Decimal
 
+from .limits import MAX_EVIDENCE_IDS as MAX_EVIDENCE
 from .money import convert, fx_key, in_period, local_date, parse_time
 
-MAX_EVIDENCE = 10
 ROWS_PER_DUPLICATE_INVOICE = 4  # 2 docs + 2 x 4 rows = 10 at most
 
 # What a malformed record can raise inside one predicate. Caught per record, never globally.
@@ -163,6 +166,9 @@ class _Books:
         _aware(timestamp)
         return in_period(timestamp, self.start, self.end)
 
+    def rate_key(self, currency: str, timestamp: str) -> str:
+        return fx_key(local_date(timestamp, self.offset), currency, self.base)
+
     def policy_amount(self, amount_minor: int, currency: str, timestamp: str) -> int | None:
         """Document amount at the rate of its own company-local date, or None when there is no rate."""
         if not _is_int(amount_minor):
@@ -218,7 +224,7 @@ def _duplicates(books: _Books) -> list[dict]:
 
 
 def _allocation_gaps(books: _Books) -> list[dict]:
-    unallocated = books.accounts["unallocated"]
+    unallocated, receivable = books.accounts["unallocated"], books.accounts["receivable"]
 
     def gaps(item) -> list[dict]:
         payment_id, rows = item
@@ -234,10 +240,15 @@ def _allocation_gaps(books: _Books) -> list[dict]:
             invoice = books.invoice_by_id.get(ref)
             if invoice is None or books.receivable.get(ref, 0) <= 0:
                 continue
+            debits = sorted((r for r in books.invoice_group.get(ref, [])
+                             if r["account"] == receivable and r["debit_minor"] > 0), key=_row_order)
+            closings = sorted((r for r in rows if r["account"] == receivable and r["invoice_id"] == ref
+                               and r["credit_minor"] > 0), key=_row_order)
+            context = [r["row_id"] for r in debits[:3] + closings[:3]]
             found.append({
                 "type": "allocation_gap", "affected_ids": sorted([payment["doc_id"], invoice["doc_id"]]),
                 "claimed_amount_minor": row["credit_minor"], "currency": books.base,
-                "evidence_ids": [payment["doc_id"], invoice["doc_id"], row["row_id"]],
+                "evidence_ids": [payment["doc_id"], invoice["doc_id"], row["row_id"], *context],
                 "explanation": "Part of the payment sits on unallocated while the invoice it refers to stays open.",
             })
         return found
@@ -246,7 +257,7 @@ def _allocation_gaps(books: _Books) -> list[dict]:
     return [finding for group in nested for finding in group]
 
 
-def _fx_finding(books: _Books, doc_id: str, deviations: list[tuple[int, dict]]) -> dict | None:
+def _fx_finding(books: _Books, doc_id: str, rate_key: str, deviations: list[tuple[int, dict]]) -> dict | None:
     """deviations: (|booked - correct|, row) for every conversion row of the document."""
     if not deviations:
         return None
@@ -256,7 +267,7 @@ def _fx_finding(books: _Books, doc_id: str, deviations: list[tuple[int, dict]]) 
     rows = [row["row_id"] for _, row in sorted(deviations, key=lambda pair: (-pair[0], _row_order(pair[1])))]
     return {
         "type": "fx_error", "affected_ids": [doc_id], "claimed_amount_minor": worst,
-        "currency": books.base, "evidence_ids": [doc_id, *rows[:MAX_EVIDENCE - 1]],
+        "currency": books.base, "evidence_ids": [doc_id, rate_key, *rows[:MAX_EVIDENCE - 2]],
         "explanation": "The posted base amount differs from document amount times the rate of the document date.",
     }
 
@@ -275,7 +286,8 @@ def _fx_errors(books: _Books) -> list[dict]:
                       if row["account"] == receivable and row["debit_minor"] > 0]
         deviations += [(abs(row["credit_minor"] - correct), row) for row in rows
                        if row["account"] == revenue and row["credit_minor"] > 0]
-        return _fx_finding(books, invoice["doc_id"], deviations)
+        return _fx_finding(books, invoice["doc_id"], books.rate_key(invoice["currency"], invoice["issued_at"]),
+                           deviations)
 
     def payment_fx(payment: dict) -> dict | None:
         rows = books.payment_group.get(payment["payment_id"])
@@ -286,7 +298,8 @@ def _fx_errors(books: _Books) -> list[dict]:
         if correct is None or not cash_rows:
             return None
         difference = abs(sum(row["debit_minor"] - row["credit_minor"] for row in cash_rows) - correct)
-        return _fx_finding(books, payment["doc_id"], [(difference, row) for row in cash_rows])
+        return _fx_finding(books, payment["doc_id"], books.rate_key(payment["currency"], payment["timestamp"]),
+                           [(difference, row) for row in cash_rows])
 
     return _each(books.invoices, invoice_fx) + _each(books.payments, payment_fx)
 

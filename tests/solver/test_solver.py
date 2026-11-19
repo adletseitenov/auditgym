@@ -7,6 +7,7 @@ import time
 import unittest
 
 from auditgym.generate import generate
+from auditgym.money import local_date
 from auditgym.solver import solve
 from auditgym.storage import load_episode
 
@@ -30,6 +31,7 @@ def all_cases(cases: dict):
 class ShapeMixin:
     def assert_shape(self, public: dict, findings: list[dict]) -> None:
         ids = {d["doc_id"] for d in public["invoices"] + public["payments"]} | {r["row_id"] for r in public["ledger"]}
+        ids |= {f"{r['date']}|{r['source_currency']}|{r['target_currency']}" for r in public["fx"]}
         for finding in findings:
             self.assertEqual(list(finding), FINDING_KEYS)
             self.assertIsInstance(finding["claimed_amount_minor"], int)
@@ -239,8 +241,10 @@ class ReadingTest(unittest.TestCase):
         rows = c.invoice_rows(invoice)
         for row in rows:  # Dr and Cr distorted equally (DECISIONS B)
             row["debit_minor" if row["debit_minor"] else "credit_minor"] += 500
-        (finding,) = solve(c.done())
-        self.assertEqual(set(finding["evidence_ids"]), {invoice["doc_id"]} | {r["row_id"] for r in rows})
+        public = c.done()
+        (finding,) = solve(public)
+        key = f"{local_date(invoice['issued_at'], c.policy['timezone'])}|{invoice['currency']}|{c.base}"
+        self.assertEqual(set(finding["evidence_ids"]), {invoice["doc_id"], key} | {r["row_id"] for r in rows})
 
     def test_posting_time_never_matters(self):
         """A clean posting whose time differs from the document date, even by days, is not an error."""
@@ -384,7 +388,7 @@ class IndependenceTest(unittest.TestCase):
                 imported.add(node.module or "")
             elif isinstance(node, ast.Import):
                 imported |= {alias.name for alias in node.names}
-        self.assertTrue(imported <= {"__future__", "json", "collections", "decimal", "money"}, imported)
+        self.assertTrue(imported <= {"__future__", "json", "collections", "decimal", "money", "limits"}, imported)
         self.assertNotIn("\"private\"", source)
 
 

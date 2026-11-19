@@ -608,4 +608,28 @@ def build(name: str, builder, seed: int, currencies, timezone: str):
     expected = builder(company)
     if expected is None:
         return None
-    return company.done(), expected
+    public = company.done()
+    return public, [_contract_sets(public, item) for item in expected]
+
+
+def _contract_sets(public: dict, item: dict) -> dict:
+    """CONTRACTS 3.1 after docs/AUDIT.md D1: an fx_error set also holds the fx key of the document's
+    company-local date; an allocation_gap set also holds the invoice's receivable debit and the
+    payment's receivable credit for that invoice. Read from the finished records, not the builder."""
+    docs = {d["doc_id"]: d for d in public["invoices"] + public["payments"]}
+    policy = public["policy"]
+    if item["type"] == "fx_error":
+        doc = docs[next(iter(item["affected"]))]
+        moment = doc.get("issued_at", doc.get("timestamp"))
+        key = f"{local_date(moment, policy['timezone'])}|{doc['currency']}|{policy['base_currency']}"
+        return dict(item, evidence_sets=[s | {key} for s in item["evidence_sets"]])
+    if item["type"] == "allocation_gap":
+        payment = next(docs[d] for d in item["affected"] if "payment_id" in docs[d])
+        invoice = next(docs[d] for d in item["affected"] if "line_items" in docs[d])
+        ledger = public["ledger"]
+        debit = {r["row_id"] for r in ledger if r["invoice_id"] == invoice["invoice_id"] and not r["payment_id"]
+                 and r["account"] == "receivable" and r["debit_minor"] > 0}
+        credit = {r["row_id"] for r in ledger if r["payment_id"] == payment["payment_id"]
+                  and r["invoice_id"] == invoice["invoice_id"] and r["account"] == "receivable" and r["credit_minor"] > 0}
+        return dict(item, evidence_sets=[s | debit | credit for s in item["evidence_sets"]])
+    return item
