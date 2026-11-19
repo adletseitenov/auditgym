@@ -100,20 +100,47 @@ class Company:
         (found,) = [r for r in rows if r["account"] == account]
         return found
 
+    def posted_inside(self, document: dict) -> bool:
+        """Dated inside the period and posted (distractor companies also hold unposted documents of the
+        neighbouring periods)."""
+        moment = document["issued_at"] if "issued_at" in document else document["timestamp"]
+        rows = self.invoice_rows(document) if "invoice_id" in document and "payment_id" not in document \
+            else self.payment_rows(document)
+        return self.inside(moment) and bool(rows)
+
+    def ordinary_payment(self, invoice: dict, payment: dict) -> bool:
+        """A posted, in-period payment of exactly the invoice total, with the invoice as its only reference
+        and no unallocated row: not an overpayment, partial or split payment, refund or advance."""
+        return (payment["invoice_refs"] == [invoice["invoice_id"]] and payment["amount_minor"] == invoice["total_minor"]
+                and payment["amount_minor"] > 0 and self.posted_inside(payment)
+                and not any(r["account"] == "unallocated" for r in self.payment_rows(payment)))
+
+    def has_twin(self, invoice: dict) -> bool:
+        """Another invoice with the same customer, currency and total (e.g. a recurring invoice for
+        another service period): edits that move dates or service periods avoid these."""
+        return any(other["doc_id"] != invoice["doc_id"] and other["entity_id"] == invoice["entity_id"]
+                   and other["currency"] == invoice["currency"] and other["total_minor"] == invoice["total_minor"]
+                   for other in self.public["invoices"])
+
+    def _plain(self, invoice: dict, foreign: bool | None) -> bool:
+        return ((foreign is None or (invoice["currency"] != self.base) == foreign)
+                and self.posted_inside(invoice) and not self.has_twin(invoice))
+
     def paid_once(self, foreign: bool | None = None) -> list[tuple[dict, dict]]:
-        """(invoice, payment) where one payment with a single reference closes the invoice."""
+        """(invoice, payment): a posted in-period invoice closed by exactly one ordinary payment (see
+        `ordinary_payment`) and referenced by no other payment or refund."""
         pairs = []
         for invoice in self.public["invoices"]:
-            if foreign is not None and (invoice["currency"] != self.base) != foreign:
+            if not self._plain(invoice, foreign):
                 continue
             payments = self.payments_of(invoice)
-            if len(payments) == 1 and payments[0]["invoice_refs"] == [invoice["invoice_id"]]:
+            if len(payments) == 1 and self.ordinary_payment(invoice, payments[0]):
                 pairs.append((invoice, payments[0]))
         return pairs
 
     def unpaid(self, foreign: bool | None = None) -> list[dict]:
-        return [inv for inv in self.public["invoices"] if not self.payments_of(inv)
-                and (foreign is None or (inv["currency"] != self.base) == foreign)]
+        """Posted in-period invoices that no payment (posted or not, of any period) references."""
+        return [inv for inv in self.public["invoices"] if self._plain(inv, foreign) and not self.payments_of(inv)]
 
     # ----- edits -----
     def add_row(self, timestamp, account, debit, credit, entity_id, invoice_id=None, payment_id=None) -> dict:

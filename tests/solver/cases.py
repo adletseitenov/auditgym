@@ -18,6 +18,11 @@ COMPANIES = [
     (3, ("CNY", "RUB"), "+05:30"), (4, ("USD",), "-03:00"), (5, ("EUR", "USD"), "+00:00"),
 ]
 SMALL = {"size": {"invoices": [20, 30], "background_pairs": [20, 40]}}
+# Per-case additions to SMALL. Clean companies have distractors by default, and with them Saturday and
+# Sunday repeat Friday's rate; October 2026 ends on Saturday 31.10 and the next period begins on Sunday,
+# so a case that needs different rates on the last day and the next day uses September (Wed 30.09 and
+# Thu 01.10) instead of switching distractors off.
+CASE_CONFIG = {"cutoff_by_own_offset_written_rate": {"period": {"start": "2026-09-01", "months": 1}}}
 
 
 def expect(kind, affected, amount, currency, evidence_sets):
@@ -98,8 +103,8 @@ def _fx_delta(correct: int) -> int:
 
 
 def fx_error_invoice(c: Company, sign: int = 1):
-    invoice = _first([inv for inv in c.public["invoices"] if inv["currency"] != c.base and c.invoice_rows(inv)
-                      and all(p["invoice_refs"] == [inv["invoice_id"]] for p in c.payments_of(inv))], c)
+    # Unpaid, or paid by one ordinary payment (the payment is rebooked to close what was booked).
+    invoice = _first(c.unpaid(foreign=True) + [inv for inv, _ in c.paid_once(foreign=True)], c)
     if invoice is None:
         return None
     rows = c.invoice_rows(invoice)
@@ -599,7 +604,7 @@ DISTRACTOR_CASES = {
 
 def build(name: str, builder, seed: int, currencies, timezone: str):
     """(public, expected) or None when this company has no record fit for the edit."""
-    company = Company(seed, currencies, timezone, **SMALL)
+    company = Company(seed, currencies, timezone, **{**SMALL, **CASE_CONFIG.get(name, {})})
     expected = builder(company)
     if expected is None:
         return None
