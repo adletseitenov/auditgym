@@ -82,13 +82,8 @@ def _judge(episode: dict, payload, inspection_steps: int) -> dict:
 
 def open_results_file(path) -> None:
     """Create the results file (mode 0600: it holds rewards the policy must not read) or tighten
-    an existing one, and fail now if that is impossible (audit L3)."""
-    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        if os.name == "posix":
-            os.fchmod(descriptor, 0o600)
-    finally:
-        os.close(descriptor)
+    an existing one, and fail now if that is impossible (audit L3; actions.open_results)."""
+    os.close(actions.open_results(path))
 
 
 # The generation secret and its sources live in secret.py; SECRET_ENV stays importable from here.
@@ -170,6 +165,8 @@ class Evaluator:
         running episode and the default-seed counter as they are."""
         if seed is None:
             if self._loaded is not None:
+                if config not in (None, {}):  # a loaded episode has no config to apply (CONTRACTS §4)
+                    raise EvaluatorError("bad_config")
                 return self._swap_in(copy.deepcopy(self._loaded))
             seed = self._next_seed
         elif isinstance(seed, str):
@@ -179,7 +176,8 @@ class Evaluator:
         if seed.bit_length() > MAX_SEED_BITS:
             raise EvaluatorError("bad_config")
         observation = self._swap_in(self._generate(seed, config))
-        self._next_seed = seed + 1
+        following = seed + 1  # past the largest seed the default sequence starts again at 0
+        self._next_seed = following if following.bit_length() <= MAX_SEED_BITS else DEFAULT_SEED
         return observation
 
     def _generate(self, seed: int, config) -> dict:
@@ -380,7 +378,7 @@ class Evaluator:
                 self._results_stream.write(text)
                 self._results_stream.flush()
             else:
-                with open(self._results_path, "a", encoding="utf-8") as handle:
+                with os.fdopen(actions.open_results(self._results_path), "a", encoding="utf-8") as handle:
                     handle.write(text)
         except OSError:  # a full disk must not turn a finished episode into a server error
             print("auditgym evaluator: cannot write the results file", file=sys.stderr)

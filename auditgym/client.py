@@ -33,7 +33,7 @@ import subprocess
 import sys
 import threading
 
-from .actions import default_results_path
+from .actions import default_results_path, open_results
 from .limits import json_depth_exceeds
 from .secret import SECRET_ENV, SECRET_FILE_ENV
 
@@ -42,6 +42,7 @@ _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal
 _NAME_KEYS = ("action", "tool", "name", "type")
 DEFAULT_TIMEOUT = 120.0  # seconds to wait for one reply (generating the largest episode takes a few)
 _UNSERIALISABLE = "<not serialisable>"
+_MAX_LINE_BYTES = 1 << 20  # serve.MAX_LINE_BYTES; not imported, so the client does not load the evaluator
 
 
 class EnvError(RuntimeError):
@@ -114,13 +115,11 @@ class Env:
         pass_fds = ()
         if results_path is not None:
             try:
-                path = pathlib.Path(results_path).resolve()
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path = os.fspath(path)
+                # abspath, not resolve(): a symlink planted at the journal path must be refused
+                path = os.path.abspath(os.fspath(results_path))
+                pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
                 if os.name == "posix":
-                    # Read and append: a signed journal continues the chain from its last line.
-                    descriptor = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
-                    os.fchmod(descriptor, 0o600)  # the results are not for the policy's user group
+                    descriptor = open_results(path)  # regular file, 0600, never descriptor 0-2
                     pass_fds = (descriptor,)
                     command += ["--results-fd", str(descriptor)]
                 else:
@@ -182,6 +181,8 @@ class Env:
         if process is None or process.poll() is not None:
             raise EnvError("closed")
         line = self._encode(message)
+        if line is not None and message.get("op") != "step" and len(line) >= _MAX_LINE_BYTES:
+            raise EnvError("bad_config")  # the server would not read it as a reset at all
         if line is None:
             if message.get("op") != "step":
                 raise EnvError("bad_config")  # a seed or config that is not JSON
@@ -225,13 +226,17 @@ class Env:
         observation = reply.get("observation") if isinstance(reply, dict) else None
         if not isinstance(observation, dict):
             raise EnvError("bad_reply")
-        if (message.get("op") in ("reset", "load") and observation.get("type") == "error"
-                and isinstance(observation.get("error"), dict)):
-            raise EnvError(str(observation["error"].get("code")))
+        if message.get("op") in ("reset", "load"):
+            if observation.get("type") == "error" and isinstance(observation.get("error"), dict):
+                raise EnvError(str(observation["error"].get("code")))
+            if observation.get("type") != "reset":  # never hand a step reply back as a reset
+                raise EnvError("bad_reply")
         return reply
 
     def reset(self, seed=None, config=None, options=None):
         message = {"op": "reset"}
+        if config is not None and options is not None:
+            raise EnvError("bad_config")  # two configurations: which one is meant?
         if config is None:
             config = options
         if seed is not None:

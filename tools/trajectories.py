@@ -270,16 +270,20 @@ def _without_records(observation: dict) -> dict:
 
 
 def _submitted_ids(action) -> set:
-    from auditgym.actions import parse_action, ActionError
+    """Ids a submit cites, in every form the environment accepts (a bare list, flat, a JSON string,
+    under "findings.json"), not only the documented one: truth ids hidden in another form must
+    not pass the training scan."""
+    from auditgym.actions import ActionError, parse_action, submit_payload
 
     try:
         name, arguments = parse_action(action)
+        payload = submit_payload(arguments, "") if name == "submit" else None
     except ActionError:
         return set()
-    if name != "submit" or not isinstance(arguments.get("findings"), dict):
+    if not isinstance(payload, dict) or not isinstance(payload.get("findings"), list):
         return set()
     ids = set()
-    for finding in arguments["findings"].get("findings") or []:
+    for finding in payload["findings"]:
         if isinstance(finding, dict):
             for field in ("affected_ids", "evidence_ids"):
                 if isinstance(finding.get(field), list):

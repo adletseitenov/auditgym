@@ -9,3 +9,4 @@ runs/
 *.oracle.jsonl
 build/
 *.egg-info/
+.claude/worktrees/

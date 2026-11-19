@@ -14,19 +14,22 @@ One JSON object per line on stdin, one per line on stdout (docs/CONTRACTS.md, se
 
 Protocol problems (a line that is not JSON, not an object, an unknown op, a load that is not
 the first request) never stop the server and never spend a step; the reply has the shape of a
-step reply with an error observation. A line longer than MAX_LINE_BYTES is the exception while
-an episode is running (audit L4): it is read whole and counts as a step with a `bad_arguments`
-error, or, if it looks like a submit anywhere in the line (an action/tool/name/type key with the value "submit"),
-as an invalid structure that ends the episode with reward -1. With no running episode it is a
-`bad_request` like any other bad line:
+step reply with an error observation. Lines that cannot be read are the exception while an
+episode is running (audit L4): a line longer than MAX_LINE_BYTES (read whole), and a line that
+does not decode but says `"op": "step"` (nested deeper than the parser goes, cut short), count
+as a step with a `bad_arguments` error, or, if they name a submit action (an action/tool/name/type
+key with the value "submit", also inside an action sent as a JSON string), as an invalid
+structure that ends the episode with reward -1. A long line that names another op (a reset with
+a huge config) is a `bad_request` and spends nothing. With no running episode, or after its end,
+it is a `bad_request` like any other bad line:
 
     <- {"observation": {"type": "error", "error": {"code": "bad_request", "message": "Bad request."},
         "steps_remaining": N}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
 
 `--no-load` refuses `load` altogether (Env() without files starts the server this way, so a
-policy writing to the pipe cannot point the server at a directory). `--results-fd N` takes the
-results file as an inherited, already open descriptor instead of a path, so the path is not in
-the server's argv (the process list); Env uses it on POSIX. `--secret-file PATH` reads the
+policy writing to the pipe cannot point the server at a directory). `--results-fd N` (N >= 3)
+takes the results file as an inherited, already open descriptor instead of a path, so the path is
+not in the server's argv (the process list); Env uses it on POSIX. `--secret-file PATH` reads the
 generation secret from a file (auditgym/secret.py; else $AUDITGYM_SECRET_FILE, else $AUDITGYM_SECRET);
 an unusable secret file stops the server with exit code 2 before the first request.
 
@@ -89,16 +92,18 @@ class Server:
         """One request line -> one reply. None means: stop serving."""
         first = self.requests == 0
         self.requests += 1
-        if line in (_TOO_LONG, _TOO_LONG_SUBMIT):
-            try:
-                return _step_reply(self.evaluator.reject(submit=line == _TOO_LONG_SUBMIT))
-            except EvaluatorError:  # nothing is running: a plain bad request
-                return protocol_error("bad_request", self._remaining())
+        if isinstance(line, Unreadable):
+            return self._unreadable(line)
         try:
             request = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, ValueError, RecursionError):
-            return protocol_error("bad_request", self._remaining())
-        if json_depth_exceeds(request):
+            request = None
+        if request is None or json_depth_exceeds(request):
+            # Not JSON, or nested deeper than MAX_JSON_DEPTH: a step that cannot be read is still a step
+            ops: set = set()
+            submit = _scan(_WHITESPACE.sub(b" ", line), ops)
+            if ops == {b"step"}:
+                return self._unreadable(Unreadable(ops, submit))
             return protocol_error("bad_request", self._remaining())
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
             return protocol_error("bad_request", self._remaining())
@@ -108,9 +113,11 @@ class Server:
                 return _step_reply(self.evaluator.step(request.get("action")))
             if op == "reset":
                 seed = request.get("seed")
-                config = request.get("config")
+                config, options = request.get("config"), request.get("options")
+                if config is not None and options is not None:
+                    return protocol_error("bad_config", self._remaining())  # which one is meant?
                 if config is None:
-                    config = request.get("options")  # the Gymnasium name for the same thing
+                    config = options  # the Gymnasium name for the same thing
                 observation, info = self.evaluator.reset(seed, config)
                 return {"observation": observation, "info": info}
             if op == "load":
@@ -128,39 +135,59 @@ class Server:
             return protocol_error("internal_error", self._remaining())
         return protocol_error("bad_request", self._remaining())
 
+    def _unreadable(self, line: "Unreadable") -> dict:
+        if line.ops - {b"step"}:  # names a reset, load or close: not a step of the episode
+            return protocol_error("bad_request", self._remaining())
+        try:
+            return _step_reply(self.evaluator.reject(submit=line.submit))
+        except EvaluatorError:  # nothing is running: a plain bad request
+            return protocol_error("bad_request", self._remaining())
 
-_TOO_LONG = b"\x00too long"  # not JSON; marks a line over the limit
-_TOO_LONG_SUBMIT = b"\x00too long submit"
-_SUBMIT_HINT = re.compile(rb'"(?:action|tool|name|type)"\s*:\s*"\s*submit\s*"', re.IGNORECASE)
+
+class Unreadable:
+    """A request line that could not be taken as JSON: the "op" values seen in it, and whether it
+    names a submit action."""
+
+    def __init__(self, ops: set, submit: bool) -> None:
+        self.ops = ops
+        self.submit = submit
+
+
+_OP = re.compile(rb'"op"\s*:\s*"([A-Za-z_]{1,16})"')
+# An action named submit, also inside an action sent as a JSON string (there the quotes are \").
+_SUBMIT_HINT = re.compile(rb'\\?"(?:action|tool|name|type)\\?"\s*:\s*\\?"\s*submit\s*\\?"', re.IGNORECASE)
 _WHITESPACE = re.compile(rb"\s+")
-_HINT_TAIL = 64  # bytes carried between chunks; the longest hint with whitespace collapsed is ~25
+_HINT_TAIL = 64  # bytes carried between reads; the longest hint with whitespace collapsed is ~30
 
 
-def _read_line(stream) -> bytes | None:
+def _scan(chunk: bytes, ops: set) -> bool:
+    """Add the "op" values in `chunk` to `ops`; True when it names a submit action."""
+    ops.update(match.group(1) for match in _OP.finditer(chunk))
+    return _SUBMIT_HINT.search(chunk) is not None
+
+
+def _read_line(stream):
     """One line of at most MAX_LINE_BYTES (not counting the newline); a longer line is consumed
-    whole and replaced by _TOO_LONG, or by _TOO_LONG_SUBMIT when an action named submit occurs
-    anywhere in it (audit D2). The rest is scanned chunk by chunk: runs of whitespace are
-    collapsed and a short tail is carried over, so a hint split by a chunk border is still found
-    and memory stays at about one chunk. None at end of input."""
+    whole, scanned on the way (audit D2), and returned as Unreadable. Each read is scanned with runs
+    of whitespace collapsed and a short tail of the previous read carried over, so a hint split by a
+    read border or padded with megabytes of spaces is still found and memory stays at about one
+    read. None at end of input."""
     line = stream.readline(MAX_LINE_BYTES + 1)
     if not line:
         return None
-    if len(line) > MAX_LINE_BYTES and not line.endswith(b"\n"):
-        chunk = line
-        tail = b""
-        submit = False
-        while True:
-            window = _WHITESPACE.sub(b" ", tail + chunk)
-            if not submit and _SUBMIT_HINT.search(window) is not None:
-                submit = True
-            tail = window[-_HINT_TAIL:]
-            chunk = stream.readline(MAX_LINE_BYTES)
-            if not chunk or chunk.endswith(b"\n"):
-                if chunk and not submit:
-                    submit = _SUBMIT_HINT.search(_WHITESPACE.sub(b" ", tail + chunk)) is not None
-                break
-        return _TOO_LONG_SUBMIT if submit else _TOO_LONG
-    return line
+    if len(line) <= MAX_LINE_BYTES or line.endswith(b"\n"):
+        return line
+    ops, submit, tail, chunk = set(), False, b"", line
+    while True:
+        window = _WHITESPACE.sub(b" ", tail + chunk)
+        submit = _scan(window, ops) or submit
+        if chunk.endswith(b"\n"):
+            break
+        tail = window[-_HINT_TAIL:]
+        chunk = stream.readline(MAX_LINE_BYTES)
+        if not chunk:
+            break
+    return Unreadable(ops, submit)
 
 
 def serve(evaluator: Evaluator, stdin=None, stdout=None, allow_load: bool = True) -> int:
@@ -171,7 +198,7 @@ def serve(evaluator: Evaluator, stdin=None, stdout=None, allow_load: bool = True
         line = _read_line(stdin)
         if line is None:
             return 0
-        if not line.strip():
+        if not isinstance(line, Unreadable) and not line.strip():
             continue
         reply = server.handle(line)
         if reply is None:
@@ -214,6 +241,8 @@ def main(argv: list[str]) -> int:
             pass  # the open below reports it
     try:
         if arguments.results_fd is not None:
+            if arguments.results_fd < 3:  # never a standard stream: stdout is the protocol channel
+                raise ValueError("results descriptor")
             stream = open(arguments.results_fd, "a", encoding="utf-8", closefd=True)
         evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results, results_stream=stream,
                               shaped_reward=arguments.shaped_reward, secret=secret)
