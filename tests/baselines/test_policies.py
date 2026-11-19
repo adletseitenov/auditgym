@@ -12,6 +12,7 @@ from auditgym.generate import generate
 from auditgym.storage import write_episode
 from policies.runner import MAX_STEPS, make_policy, read_results, run_episode
 from tools import episodes as episodes_tool
+from tools.transform import transform
 from tools.report import generated_cases, ordering_problems, run_generated
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -106,6 +107,35 @@ class CompletionTest(unittest.TestCase):
         for row in result["trajectory"]:
             self.assertEqual(set(row), {"episode_id", "step", "action", "observation", "reward",
                                         "terminated", "truncated"})
+
+
+class RowOrderTest(unittest.TestCase):
+    """Audit R8: reordering the rows of the public tables (tools.transform, ids kept) must not
+    change the reward of any policy. random_explorer is excluded (its actions are random by design)
+    and the oracle does not read tables."""
+    POLICIES = ("reconcile", "flag_all", "flag_all_cutoff", "flag_all_duplicates", "silence", "solver_policy")
+    CASES = (3, 8, 21)
+
+    def _reward(self, name: str, directory: str) -> float:
+        env = Env.from_files(directory)
+        try:
+            return run_episode(env, make_policy(name), None)["reward"]
+        finally:
+            env.close()
+
+    def test_shuffled_rows_give_the_same_reward(self):
+        configs = episodes_tool.supported_pool(episodes_tool.ERROR_POOL, quiet=True)
+        for seed in self.CASES:
+            config = configs[seed % len(configs)]
+            with tempfile.TemporaryDirectory() as scratch:
+                source, shuffled = pathlib.Path(scratch) / "src", pathlib.Path(scratch) / "shuffled"
+                write_episode(generate(seed, config), source)
+                transform(source, shuffled, seed=seed + 1000, shuffle=True, rename=False)
+                self.assertNotEqual((source / "public" / "ledger.csv").read_bytes(),
+                                    (shuffled / "public" / "ledger.csv").read_bytes())
+                for name in self.POLICIES:
+                    with self.subTest(seed=seed, policy=name):
+                        self.assertEqual(self._reward(name, str(source)), self._reward(name, str(shuffled)))
 
 
 class OrderingTest(unittest.TestCase):

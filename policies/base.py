@@ -26,6 +26,23 @@ def finding(kind: str, affected: list[str], amount: int, currency: str, evidence
             "currency": currency, "evidence_ids": cited[:MAX_EVIDENCE], "explanation": explanation[:1000]}
 
 
+SORT_KEYS = {"ledger": ("row_id",), "invoices": ("invoice_id", "doc_id"), "payments": ("payment_id", "doc_id"),
+             "fx": ("date", "source_currency", "target_currency")}
+
+
+def canonical(table: str, records: list[dict]) -> list[dict]:
+    """What a policy decides on: records sorted by a stable key (never by arrival order), so that
+    a reordered table gives the same answer. Reference lists inside a record are sorted too."""
+    keys = SORT_KEYS[table]
+    out = []
+    for record in records:
+        record = dict(record)
+        if isinstance(record.get("invoice_refs"), list):
+            record["invoice_refs"] = sorted(record["invoice_refs"])
+        out.append(record)
+    return sorted(out, key=lambda record: tuple(str(record.get(key) or "") for key in keys))
+
+
 class Reader:
     """Pages through tables with list_records. `max_pages` limits pages per table (None: all)."""
 
@@ -83,7 +100,7 @@ class ReadThenSubmit:
         self.done = True
         public = {"manifest": self.manifest, "policy": self.policy}
         for table in TABLES:
-            public[table] = list(self.reader.records.get(table, []))
+            public[table] = canonical(table, self.reader.records.get(table, []))
         return submit(self.episode_id, self.decide(public))
 
     def decide(self, public: dict) -> list[dict]:

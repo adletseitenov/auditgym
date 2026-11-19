@@ -1,12 +1,12 @@
 """A deliberately simple reconciliation, the kind of script an auditor writes in ten minutes.
 
-It reads all invoices and payments and only a sample of the ledger (the first `ledger_pages`
-pages), never the fx table, and applies two rules:
+It reads all invoices, payments and the whole ledger (never the fx table), sorts them by id so the
+order of rows in the files does not matter, and applies two rules:
 - two invoices of the same customer with the same total are a duplicate (no check of currency,
   line items or whether both are posted);
 - an invoice whose issue date (the date part of `issued_at`) is outside the manifest period is a
   period cutoff (payments are not checked).
-Evidence is the documents plus the posting rows it happened to see in its ledger sample. It has
+Evidence is the documents plus their posting rows. It has
 no fx reasoning and never looks for allocation gaps, so it finds some issues and misses others.
 """
 from __future__ import annotations
@@ -18,8 +18,9 @@ class Reconcile(ReadThenSubmit):
     name = "reconcile"
     tables = ("invoices", "payments", "ledger")
 
-    def __init__(self, ledger_pages: int = 6) -> None:
-        self.max_pages = {"ledger": ledger_pages}
+    def __init__(self, ledger_pages: int | None = None) -> None:
+        """`ledger_pages` limits the read to the first pages of the ledger; None reads the whole book."""
+        self.max_pages = {} if ledger_pages is None else {"ledger": ledger_pages}
 
     def decide(self, public: dict) -> list[dict]:
         start = public["manifest"].get("period_start", "")[:10]
