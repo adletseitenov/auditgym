@@ -4,7 +4,8 @@ One JSON object per line on stdin, one per line on stdout (docs/CONTRACTS.md, se
 
     -> {"op": "load", "directory": "..."}     only as the very first request (Env.from_files)
     -> {"op": "reset", "seed": 7, "config": {}}   or {"op": "reset"}: restart a loaded episode,
-                                                  else the episode of the default seed
+                                                  else the episode of the next default seed
+                                                  (0, then the previous seed + 1)
                                                   ("options" is accepted as a synonym of "config")
     <- {"observation": {...}, "info": {}}
     -> {"op": "step", "action": {...}}

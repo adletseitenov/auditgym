@@ -147,7 +147,9 @@ env = Env(mode="train")                      # клиент; сам запуск
 observation, info = env.reset(seed, config)
 observation, reward, terminated, truncated, info = env.step(action)
 env = Env.from_files("<dir>")                # эпизод из каталога, reset() без seed
+observation, info = env.reset(seed=7, options={})   # options — синоним config (имя Gymnasium)
 ```
+`reset()` без seed: у `Env.from_files` — тот же эпизод заново; без файлов — эпизод по seed по умолчанию с конфигурацией по умолчанию: первый раз seed 0, дальше seed последнего удавшегося `reset` + 1 (0, 1, 2…, как у Gymnasium-среды, чей генератор идёт дальше). Seed длиннее 256 бит (`MAX_SEED_BITS`), не целый seed и плохой config — `bad_config`. Отказ в `reset` или `load` не трогает идущий эпизод. Клиент наружу бросает только `EnvError` с коротким кодом (`bad_config`, `bad_episode`, `bad_request`, `bad_mode`, `bad_results_path`, `timeout`, `server_exited`, `bad_reply`, `closed`); ответа сервера ждёт не дольше `timeout` секунд (по умолчанию 120), затем останавливает его.
 Процесс-оценщик: `python -m auditgym serve [--mode train|eval] [--results PATH]`, по одной JSON-строке на запрос и ответ:
 ```json
 → {"op": "reset", "seed": 7, "config": {}}
@@ -155,7 +157,7 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 → {"op": "step", "action": {...}}
 ← {"observation": {...}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
 ```
-В stdout идёт только протокол; журналы — в stderr или в файл `--results`.
+В stdout идёт только протокол; диагностика — в stderr. В запросе `reset` ключ `options` — синоним `config`. Журнал оценщика (строка JSON на каждый законченный эпизод, с кодом ошибки структуры) пишется в режиме `eval`: в `--results PATH`, в унаследованный дескриптор `--results-fd N` (так делает `Env` на POSIX) или по умолчанию в `$AUDITGYM_RESULTS`, иначе `runs/results.jsonl` в рабочем каталоге; каталог создаётся, файл — с правами 0600. Целые числа в запросе любой длины. Строка длиннее 1 МиБ во время эпизода — шаг с ошибкой `bad_arguments`, а если в ней есть действие `submit` — `submit` с неверной структурой (награда −1); вне эпизода — `bad_request`.
 
 ### 5.2 Действия
 ```json
@@ -165,7 +167,14 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 {"action": "calculator", "expression": "125000 * 465.37"}
 {"action": "submit", "findings": {"episode_id": "…", "findings": [...]}}
 ```
-Таблицы: `ledger`, `invoices`, `payments`, `fx`. Парсер также принимает имя действия в ключах `tool`, `name`, `type` и аргументы во вложенном `args`, `arguments` или `params`. `limit` больше 50 обрезается до 50, по умолчанию 50. `get_record` для `fx` принимает составной ключ.
+Таблицы: `ledger`, `invoices`, `payments`, `fx`. Парсер также принимает имя действия в ключах `tool`, `name`, `type` и аргументы во вложенном `args`, `arguments`, `params`, `input` или `parameters` (вложенные важнее плоских). `limit` больше 50 обрезается до 50, по умолчанию 50. `get_record` для `fx` принимает составной ключ.
+
+Форма запроса нестрогая, смысл строгий (`docs/AUDIT.md` C1–C3, C9):
+- действие — словарь или строка с JSON-объектом; имя действия и таблицы — без учёта регистра и пробелов по краям; у таблицы допускаются расширение файла и единственное число (`Ledger`, `ledger.csv`, `invoice`);
+- синонимы аргументов: `get_record` — `id`, `record_id`, `row_id`, `doc_id`, `invoice_id`, `payment_id` (берётся первый непустой в этом порядке); `get_document` — `doc_id`, `id`, `document_id`; общий `id` ищется сначала по `doc_id`, затем по `invoice_id`/`payment_id`;
+- курсор `null`, `""`, `0`, `"0"` — первая страница; `limit` — целое, строка из цифр или целое число с плавающей точкой (`"50"`, `50.0`);
+- `submit` принимает findings.json объектом, строкой JSON, голым списком выводов (подставляется `episode_id` идущего эпизода), плоско в действии (`episode_id` и `findings` рядом) или под ключом `"findings.json"`. Все правила структуры §6 применяются к результату. `submit`, чьи аргументы нельзя прочитать (`"args": 5`, строка не JSON), — неверная структура.
+Неизвестные действие, таблица и ID остаются ошибками.
 
 ### 5.3 Наблюдения
 Всегда словарь с `type` и `steps_remaining`:
@@ -184,11 +193,11 @@ env = Env.from_files("<dir>")                # эпизод из каталог�
 
 ### 5.4 Завершение и награда
 - До терминального шага `reward = 0.0`, `info = {}`.
-- `submit` → `terminated = true`. Сотый шаг без `submit` или лимит времени → `truncated = true`, ответ считается пустым, `inspection_steps = 100`.
+- `submit` → `terminated = true`. Сотый шаг без `submit` или лимит времени → `truncated = true`, ответ считается пустым, `inspection_steps = 100`, `steps_remaining = 0`.
 - `train`: терминальный `reward` — формула кейса; `info = {"reward", "precision", "recall", "f1", "inspection_steps"}`. Никаких вердиктов по отдельным выводам.
-- `eval`: политике возвращается `reward = 0.0`, `info = {}`; настоящая награда и разбор пишутся в файл `--results` (одна JSON-строка на эпизод).
+- `eval`: политике возвращается `reward = 0.0`, `info = {}`; настоящая награда и разбор пишутся в журнал оценщика (§5.1; одна JSON-строка на эпизод).
 - Неверная структура выводов → `terminated = true`, награда `-1.0`.
-- `step` после конца → ошибка `episode_over`, `reward 0.0`, `terminated = true`, состояние не меняется. `step` до `reset` → `not_reset`.
+- `step` после конца → ошибка `episode_over`, `reward 0.0`, состояние не меняется и шаг не тратится; флаги и `steps_remaining` — как в финальном ответе: после `submit` `terminated = true`, `truncated = false`, после усечения (по шагам или по времени) всякий следующий шаг отвечает `terminated = false`, `truncated = true`, `steps_remaining = 0`. `step` до `reset` → `not_reset`.
 
 ## 6. Выводы агента
 
