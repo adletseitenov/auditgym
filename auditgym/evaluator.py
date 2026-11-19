@@ -80,12 +80,15 @@ class EvaluatorError(Exception):
 
 class Evaluator:
     def __init__(self, mode: str = "train", results_path=None, clock=None,
-                 time_limit=DEFAULT_TIME_LIMIT) -> None:
+                 time_limit=DEFAULT_TIME_LIMIT, results_stream=None) -> None:
+        """`results_stream` is an already open text stream (the server gets the results file as an
+        inherited descriptor, so its path never appears in the process list); it wins over the path."""
         if mode not in MODES:
             raise ValueError("mode must be 'train' or 'eval'")
         self._mode = mode
-        self._results_path = results_path
-        if results_path is not None:
+        self._results_path = None if results_stream is not None else results_path
+        self._results_stream = results_stream
+        if self._results_path is not None:
             with open(results_path, "a", encoding="utf-8"):
                 pass  # fail at start, not at the end of the first episode
         self._clock = clock if clock is not None else MonotonicClock()
@@ -227,14 +230,19 @@ class Evaluator:
         return observation, result["reward"], not truncated, truncated, info
 
     def _write_result(self, result: dict, inspection_steps: int, truncated: bool) -> None:
-        if self._results_path is None:
+        if self._results_path is None and self._results_stream is None:
             return
         line = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "terminated": not truncated, "truncated": truncated, "inspection_steps": inspection_steps}
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
+        text = json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n"
+        if self._results_stream is not None:
+            self._results_stream.write(text)
+            self._results_stream.flush()
+            return
         with open(self._results_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.write(text)
 
     # --- read actions -----------------------------------------------------------------------
     @staticmethod

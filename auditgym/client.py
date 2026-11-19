@@ -8,6 +8,15 @@
 
 The client keeps no episode data beyond the last reply: no truth, no provenance, no seed, no
 paths (the episode directory and the results path are handed to the server and dropped).
+
+Hardening of the process boundary:
+- The results file is opened here and handed to the server as an inherited descriptor
+  (`--results-fd`), so its path is not in the server's argv and not in the process list. On a
+  platform without descriptor passing (not POSIX) the path goes on the command line instead.
+- The server's stderr goes to /dev/null, not to this process: diagnostics never reach a policy.
+- A policy holding this object can still reach the pipes (Python has no private attributes), so
+  the server gives the pipe no more power than reset/step: `load` is accepted only as the first
+  request and only by a server started for Env.from_files; Env() starts it with `--no-load`.
 """
 from __future__ import annotations
 
@@ -30,25 +39,40 @@ class EnvError(RuntimeError):
 
 
 class Env:
-    def __init__(self, mode: str = "train", results_path=None) -> None:
+    def __init__(self, mode: str = "train", results_path=None, *, _files: bool = False) -> None:
         if mode not in ("train", "eval"):
             raise ValueError("mode must be 'train' or 'eval'")
         self.mode = mode
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
+        if not _files:
+            command.append("--no-load")
+        pass_fds = ()
         if results_path is not None:
-            command += ["--results", os.fspath(pathlib.Path(results_path).resolve())]
+            path = os.fspath(pathlib.Path(results_path).resolve())
+            if os.name == "posix":
+                descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+                pass_fds = (descriptor,)
+                command += ["--results-fd", str(descriptor)]
+            else:
+                command += ["--results", path]
+            del path
         environment = dict(os.environ)
         environment["PYTHONPATH"] = os.pathsep.join(
             [_PACKAGE_PARENT] + ([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else []))
-        self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                         env=environment, cwd=_PACKAGE_PARENT)
-        # Popen keeps its argv; drop it so the results path is not reachable from the client.
+        try:
+            self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                             stderr=subprocess.DEVNULL, env=environment, cwd=_PACKAGE_PARENT,
+                                             pass_fds=pass_fds)
+        finally:
+            for descriptor in pass_fds:
+                os.close(descriptor)  # the server holds its own copy
+        # Popen keeps its argv; drop it so nothing about the server's arguments stays here.
         self._process.args = ["auditgym-serve"]
         del command, environment, results_path
 
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None) -> "Env":
-        env = cls(mode=mode, results_path=results_path)
+        env = cls(mode=mode, results_path=results_path, _files=True)
         try:
             env._request({"op": "load", "directory": os.fspath(pathlib.Path(directory).resolve())})
         except BaseException:
