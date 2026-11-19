@@ -114,10 +114,14 @@ class ResetTest(unittest.TestCase):
             self.assertEqual(caught.exception.code, "bad_config")
         self.assertEqual(evaluator.step({"action": "list_records", "table": "fx"})[0]["error"]["code"], "not_reset")
 
-    def test_reset_without_seed_needs_a_loaded_episode(self):
-        with self.assertRaises(EvaluatorError) as caught:
-            Evaluator(clock=FakeClock()).reset()
-        self.assertEqual(caught.exception.code, "not_loaded")
+    def test_reset_without_seed_and_nothing_loaded_uses_the_default_seed(self):
+        """C7: reset() is a valid call; the default seed is DEFAULT_SEED with the default config."""
+        from auditgym.evaluator import DEFAULT_SEED
+
+        observation, info = Evaluator(clock=FakeClock()).reset()
+        reference, _ = Evaluator(clock=FakeClock()).reset(DEFAULT_SEED, None)
+        self.assertEqual(strict_json(observation), strict_json(reference))
+        self.assertEqual(info, {})
 
     def test_bad_directory_is_one_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -265,8 +269,8 @@ class PagingTest(unittest.TestCase):
             {"action": "list_records", "table": "ledger", "limit": 10})[0]["next_cursor"]
         self.assertNotEqual(ledger_cursor, other_episode_cursor)
         bad = [("invoices", ledger_cursor), ("ledger", other_episode_cursor), ("ledger", ledger_cursor[:-1] + "x"),
-               ("ledger", ""), ("ledger", 10), ("ledger", ["x"]), ("ledger", ledger_cursor.upper()),
-               ("ledger", "0"), ("ledger", "50")]
+               ("ledger", 10), ("ledger", ["x"]), ("ledger", ledger_cursor.upper()),
+               ("ledger", "50"), ("ledger", 1), ("ledger", False), ("ledger", "00")]
         remaining = evaluator.steps_remaining()
         for table, cursor in bad:
             observation = evaluator.step({"action": "list_records", "table": table, "cursor": cursor})[0]
@@ -276,10 +280,11 @@ class PagingTest(unittest.TestCase):
 
     def test_bad_limits_are_bad_arguments(self):
         evaluator = tiny()
-        for limit in (0, -1, "10", True, 1.5, [], {}):
+        bad = (0, -1, "0", "ten", "-3", "1.5", True, 1.5, [], {}, "", float("nan"), float("inf"))
+        for limit in bad:
             observation = evaluator.step({"action": "list_records", "table": "ledger", "limit": limit})[0]
             self.assertEqual(observation["error"]["code"], "bad_arguments", limit)
-        self.assertEqual(evaluator.steps_remaining(), 93)
+        self.assertEqual(evaluator.steps_remaining(), 100 - len(bad))
 
     def test_cursor_says_nothing_about_the_offset(self):
         evaluator = generated(5)
@@ -368,7 +373,7 @@ class ParseActionTest(unittest.TestCase):
         for shape, code in (({"tool": "get_record", "args": "not json"}, "bad_arguments"),
                             ({"tool": "get_record", "args": "[1, 2]"}, "bad_arguments"),
                             ({"tool": ["get_record"]}, "unknown_action"),
-                            ({"tool": "GET_RECORD"}, "unknown_action"),
+                            ({"tool": "get record"}, "unknown_action"),
                             ({}, "unknown_action")):
             with self.assertRaises(ActionError) as caught:
                 parse_action(shape)
@@ -435,7 +440,7 @@ class TerminationTest(unittest.TestCase):
         clock.t += 1
         observation, reward, terminated, truncated, info = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         self.assertEqual((terminated, truncated), (False, True))
-        self.assertEqual(observation, {"type": "final", "steps_remaining": 97})
+        self.assertEqual(observation, {"type": "final", "steps_remaining": 0})  # C10: nothing left
         self.assertEqual(info["inspection_steps"], 100)
         self.assertEqual(reward, -1.0)
 
@@ -594,8 +599,20 @@ class IsolationTest(unittest.TestCase):
             from_files = strict_json([loaded.load(directory)] + full_walk(loaded))
         self.assertEqual(from_files, self.transcript(Evaluator(clock=FakeClock()), 13))
 
-    def test_failed_reset_ends_the_previous_episode(self):
+    def test_failed_reset_keeps_the_running_episode(self):
+        """C10: a refused reset must not destroy the episode that is running."""
         evaluator = tiny()
+        evaluator.step({"action": "list_records", "table": "fx"})
+        with self.assertRaises(EvaluatorError):
+            evaluator.reset(1, {"nope": 1})
+        with self.assertRaises(EvaluatorError):
+            evaluator.reset("x", None)
+        observation = evaluator.step({"action": "list_records", "table": "fx"})[0]
+        self.assertEqual((observation["type"], observation["steps_remaining"]), ("records", 98))
+        self.assertTrue(evaluator.step({"action": "submit", "findings": CORRECT_TINY})[2])
+
+    def test_failed_reset_before_any_episode_still_says_not_reset(self):
+        evaluator = Evaluator(clock=FakeClock())
         with self.assertRaises(EvaluatorError):
             evaluator.reset(1, {"nope": 1})
         self.assertEqual(evaluator.step({"action": "list_records", "table": "fx"})[0]["error"]["code"], "not_reset")

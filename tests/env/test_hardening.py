@@ -92,7 +92,7 @@ class PipeInjectionTest(unittest.TestCase):
             reply = _raw(env, {"op": "load", "directory": str(TINY)})
             self.assertEqual(reply["observation"]["error"]["code"], "bad_request")
             reply = _raw(env, {"op": "reset"})
-            self.assertEqual(reply["observation"]["error"]["code"], "not_loaded")
+            self.assertEqual(reply["observation"]["type"], "reset")  # default seed (C7), not a load
 
     def test_server_stderr_is_not_connected_to_the_client(self):
         seen = {}

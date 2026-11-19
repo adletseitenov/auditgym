@@ -98,9 +98,8 @@ class ProcessTest(unittest.TestCase):
                 with self.assertRaises(EnvError) as caught:
                     env.reset(seed, config)
                 self.assertEqual(caught.exception.code, "bad_config")
-            with self.assertRaises(EnvError) as caught:
-                env.reset()
-            self.assertEqual(caught.exception.code, "not_loaded")
+            observation, info = env.reset()  # C7: no seed is the default seed, not an error
+            self.assertEqual((observation["type"], info), ("reset", {}))
 
     def test_bad_directory_is_a_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -168,7 +167,10 @@ class ProtocolTest(unittest.TestCase):
         output = serve_transcript(lines, 0).decode("ascii").splitlines()
         replies = [json.loads(line) for line in output]
         self.assertEqual(len(replies), 14)  # one per request up to close
-        for reply in replies[:11]:
+        for number, reply in enumerate(replies[:11]):
+            if number == 8:  # a 5 000-digit integer is valid JSON for the server (R1): a step before reset
+                self.assertEqual(reply["observation"]["error"]["code"], "not_reset")
+                continue
             self.assertEqual(reply["observation"], {"type": "error", "steps_remaining": 0,
                                                     "error": {"code": "bad_request", "message": "Bad request."}})
             self.assertEqual((reply["reward"], reply["terminated"], reply["info"]), (0.0, False, {}))
@@ -249,7 +251,7 @@ class NoLeakTest(unittest.TestCase):
                         else:
                             env.reset()
                         env.step({"action": "list_records", "table": "ledger"})
-                        self.assertEqual(set(vars(env)), {"mode", "_process"})
+                        self.assertEqual(set(vars(env)), {"mode", "_process", "_timeout"})
                         objects = reachable(env)
                         strings = [o for o in objects if isinstance(o, (str, bytes))]
                         joined = "\n".join(s if isinstance(s, str) else s.decode("latin-1") for s in strings)

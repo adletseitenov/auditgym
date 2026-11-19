@@ -9,12 +9,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import sys
 
 from . import actions
-from .actions import MAX_STEPS, PAGE_SIZE, ActionError, error
+from .actions import MAX_STEPS, ActionError, error
 from .calc import CalcError, calculate
 
 DEFAULT_TIME_LIMIT = 60
+DEFAULT_SEED = 0  # reset() without a seed and without a loaded episode (audit C7)
 MODES = ("train", "eval")
 
 # Fields a policy may see (CONTRACTS section 2). Anything else in a record or the manifest is
@@ -29,7 +32,9 @@ _FIELDS = {
 }
 _MANIFEST_FIELDS = ("schema_version", "episode_id", "base_currency", "period_start", "period_end",
                     "timezone", "counts", "rounding", "config_version")
-# Keys under which get_record finds a record in each table. Ids are globally unique tokens.
+# Keys under which get_record finds a record in each table, in priority order: a doc_id is looked up
+# before an invoice_id/payment_id, so a renumbered id of one record can never shadow another
+# record's doc_id (audit R10).
 _ID_FIELDS = {"ledger": ("row_id",), "invoices": ("doc_id", "invoice_id"),
               "payments": ("doc_id", "payment_id")}
 _CURSOR_SALT = "auditgym-cursor-v1"
@@ -63,11 +68,25 @@ def _judge(episode: dict, payload, inspection_steps: int) -> dict:
     try:
         return judge(episode, payload, inspection_steps)
     except Exception as exc:  # a judge defect must not crash the episode; logged by class only
-        import sys
-
         print(f"auditgym evaluator: judge raised {type(exc).__name__}", file=sys.stderr)
+        # A defect of ours is never a free win: reward -1, no credit, and the journal says why.
+        try:
+            missed = len(episode["private"]["truth"].get("issues", []))
+        except Exception:  # noqa: BLE001 - the episode itself may be what is broken
+            missed = 0
         return {"reward": -1.0, "precision": 0.0, "recall": 0.0, "f1": 0.0, "tp": 0, "fp": 0,
-                "fn": len(episode["private"]["truth"].get("issues", [])), "structure_error": "judge_exception"}
+                "fn": missed, "structure_error": "judge_exception"}
+
+
+def open_results_file(path) -> None:
+    """Create the results file (mode 0600: it holds rewards the policy must not read) or tighten
+    an existing one, and fail now if that is impossible (audit L3)."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
 
 
 class EvaluatorError(Exception):
@@ -89,8 +108,7 @@ class Evaluator:
         self._results_path = None if results_stream is not None else results_path
         self._results_stream = results_stream
         if self._results_path is not None:
-            with open(results_path, "a", encoding="utf-8"):
-                pass  # fail at start, not at the end of the first episode
+            open_results_file(self._results_path)  # fail at start, not at the end of the first episode
         self._clock = clock if clock is not None else MonotonicClock()
         self._time_limit = time_limit
         self._loaded = None   # episode from load(); reset() without seed restarts it
@@ -105,6 +123,7 @@ class Evaluator:
         self._episode = None
         self._steps = 0
         self._done = False
+        self._truncated = False
         self._started_at = None
         self._tables = {}
         self._index = {}
@@ -113,37 +132,53 @@ class Evaluator:
 
     # --- episode setup ---------------------------------------------------------------------
     def reset(self, seed=None, config=None) -> tuple[dict, dict]:
-        """With a seed: generate a new episode. Without: restart the episode from load()."""
-        self._clear()
+        """With a seed: generate a new episode. Without: restart the episode from load(), or, when
+        none was loaded, generate the one of DEFAULT_SEED with the default configuration. A refused
+        reset (bad seed or config) leaves the running episode as it is."""
         if seed is None:
-            if self._loaded is None:
-                raise EvaluatorError("not_loaded")
-            episode = copy.deepcopy(self._loaded)
+            if self._loaded is not None:
+                episode = copy.deepcopy(self._loaded)
+            else:
+                episode = self._generate(DEFAULT_SEED, config)
         else:
-            from .config import ConfigError
-            from .generate import generate
-
             if not isinstance(seed, int) or isinstance(seed, bool):
                 raise EvaluatorError("bad_config")
-            try:
-                episode = generate(seed, config)
-            except ConfigError:
-                raise EvaluatorError("bad_config") from None
-        return self._start(episode)
+            episode = self._generate(seed, config)
+        return self._swap_in(episode)
+
+    @staticmethod
+    def _generate(seed: int, config) -> dict:
+        from .config import ConfigError
+        from .generate import generate
+
+        try:
+            return generate(seed, config)
+        except ConfigError:
+            raise EvaluatorError("bad_config") from None
 
     def load(self, directory) -> tuple[dict, dict]:
         from .storage import load_episode
 
-        self._clear()
-        self._loaded = None
         try:
             loaded = load_episode(directory)
-            observation = self._start(copy.deepcopy(loaded))
+            observation = self._swap_in(copy.deepcopy(loaded))
+        except EvaluatorError:
+            raise
         except Exception:  # files are outside input: any defect is one fixed error
-            self._clear()
             raise EvaluatorError("bad_episode") from None
         self._loaded = loaded
         return observation
+
+    def _swap_in(self, episode: dict) -> tuple[dict, dict]:
+        """Start `episode`; if that fails, the previous state is put back untouched."""
+        saved = dict(self.__dict__)
+        self._clear()
+        try:
+            return self._start(episode)
+        except BaseException:
+            self.__dict__.clear()
+            self.__dict__.update(saved)
+            raise
 
     def _start(self, episode: dict) -> tuple[dict, dict]:
         public = episode["public"]
@@ -156,8 +191,8 @@ class Evaluator:
                 index = {fx_id(record): position for position, record in enumerate(records)}
             else:
                 index = {}
-                for position, record in enumerate(records):
-                    for field in _ID_FIELDS[table]:
+                for field in _ID_FIELDS[table]:  # one pass per key: doc_id first (R10)
+                    for position, record in enumerate(records):
                         if isinstance(record[field], str):
                             index.setdefault(record[field], position)
             self._index[table] = index
@@ -173,7 +208,7 @@ class Evaluator:
             "type": "reset",
             "task": actions.build_task(public["policy"]),
             "manifest": manifest,
-            "policy": copy.deepcopy(public["policy"]),
+            "policy": actions.open_policy(public["policy"]),
             "steps_remaining": MAX_STEPS,
         }
         self._started_at = self._clock.now()
@@ -187,30 +222,56 @@ class Evaluator:
         """Steps left in the running episode; 0 when nothing has been reset."""
         return 0 if self._episode is None else self._remaining()
 
+    @property
+    def running(self) -> bool:
+        """An episode is in progress (reset, not finished)."""
+        return self._episode is not None and not self._done
+
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         if self._episode is None:
             return ({"type": "error", "error": error("not_reset"), "steps_remaining": 0},
                     0.0, True, False, {})
         if self._done:
-            return ({"type": "error", "error": error("episode_over"), "steps_remaining": self._remaining()},
-                    0.0, True, False, {})
+            # After a truncation every later step says so, too: terminated=false, truncated=true.
+            return ({"type": "error", "error": error("episode_over"),
+                     "steps_remaining": 0 if self._truncated else self._remaining()},
+                    0.0, not self._truncated, self._truncated, {})
         self._steps += 1
         if self._clock.now() - self._started_at >= self._time_limit:
             return self._finish(None, truncated=True)
         try:
             name, arguments = actions.parse_action(action)
             if name == "submit":
-                return self._finish(arguments.get("findings"), truncated=False)
+                episode_id = self._episode["public"]["manifest"]["episode_id"]
+                return self._finish(actions.submit_payload(arguments, episode_id), truncated=False)
             observation = getattr(self, "_do_" + name)(arguments)
         except ActionError as exc:
+            if exc.action == "submit":  # a malformed submit wrapper is an invalid structure (C9)
+                return self._finish({}, truncated=False)
             observation = {"type": "error", "error": error(exc.code)}
+        return self._after_step(observation)
+
+    def _after_step(self, observation: dict):
         observation["steps_remaining"] = self._remaining()
         if self._steps >= MAX_STEPS:
             return self._finish(None, truncated=True)
         return observation, 0.0, False, False, {}
 
+    def reject(self, submit: bool = False):
+        """A request line the server could not take as an action (too long, audit L4) during an
+        episode: a step with an error, or, if it was a submit, an invalid structure."""
+        if not self.running:
+            raise EvaluatorError("bad_request")
+        self._steps += 1
+        if self._clock.now() - self._started_at >= self._time_limit:
+            return self._finish(None, truncated=True)
+        if submit:
+            return self._finish({}, truncated=False)
+        return self._after_step({"type": "error", "error": error("bad_arguments")})
+
     def _finish(self, payload, truncated: bool):
         self._done = True
+        self._truncated = truncated
         if truncated:
             payload = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "findings": []}
             inspection_steps = MAX_STEPS
@@ -222,7 +283,8 @@ class Evaluator:
                 payload = {}
         result = _judge(self._episode, payload, inspection_steps)
         self._write_result(result, inspection_steps, truncated)
-        observation = {"type": "final", "steps_remaining": self._remaining()}
+        # A truncated episode has no steps left, whichever limit ended it (audit C10).
+        observation = {"type": "final", "steps_remaining": 0 if truncated else self._remaining()}
         if self._mode == "eval":
             return observation, 0.0, not truncated, truncated, {}
         info = {"reward": result["reward"], "precision": result["precision"], "recall": result["recall"],
@@ -237,31 +299,29 @@ class Evaluator:
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
         text = json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n"
-        if self._results_stream is not None:
-            self._results_stream.write(text)
-            self._results_stream.flush()
-            return
-        with open(self._results_path, "a", encoding="utf-8") as handle:
-            handle.write(text)
+        try:
+            if self._results_stream is not None:
+                self._results_stream.write(text)
+                self._results_stream.flush()
+            else:
+                with open(self._results_path, "a", encoding="utf-8") as handle:
+                    handle.write(text)
+        except OSError:  # a full disk must not turn a finished episode into a server error
+            print("auditgym evaluator: cannot write the results file", file=sys.stderr)
 
     # --- read actions -----------------------------------------------------------------------
     @staticmethod
     def _table(arguments: dict) -> str:
-        table = arguments.get("table")
-        if not isinstance(table, str) or table not in _FIELDS:
+        table = actions.table_name(arguments.get("table"))
+        if table is None:
             raise ActionError("unknown_table")
         return table
 
     def _do_list_records(self, arguments: dict) -> dict:
         table = self._table(arguments)
-        limit = arguments.get("limit", PAGE_SIZE)
-        if limit is None:
-            limit = PAGE_SIZE
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-            raise ActionError("bad_arguments")
-        limit = min(limit, PAGE_SIZE)
+        limit = actions.parse_limit(arguments.get("limit"))
         cursor = arguments.get("cursor")
-        if cursor is None:
+        if actions.is_first_page(cursor):
             offset = 0
         elif isinstance(cursor, str) and cursor in self._cursors[table]:
             offset = self._cursors[table][cursor]
