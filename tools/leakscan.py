@@ -115,6 +115,8 @@ PENDING: dict = {
 EXPLAINED = {
     ("period_cutoff", "position"): "table order is by document date; a date outside the period is the definition",
     ("allocation_gap", "paid"): "a gap needs a payment, so the affected invoice is paid: the definition",
+    ("allocation_gap", "group_size"): "the gap payment's group holds the unallocated row of the definition; "
+                                      "its receivable credit is cited as evidence (docs/AUDIT.md D1)",
     ("duplicate_invoice", "same_service_period"): "a duplicate repeats the same service: the definition "
                                                   "(a legitimate repeat bills another period)",
 }
