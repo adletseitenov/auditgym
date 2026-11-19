@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 
 from .findings import MAX_MESSAGE_BYTES
 
@@ -26,6 +27,40 @@ DEFAULT_RESULTS_PATH = "runs/results.jsonl"
 def default_results_path() -> str:
     """The journal path of an eval run without an explicit one (one rule for client and server)."""
     return os.environ.get(RESULTS_ENV) or DEFAULT_RESULTS_PATH
+
+
+_RESULTS_FLAGS = (os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                  | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+
+
+def open_results(path) -> int:
+    """An append-only descriptor of the journal at `path` (client and evaluator use it).
+
+    The journal holds rewards, so the file is owner-only (0600; an existing one is narrowed,
+    audit L3). Against a same-user policy planting things at a guessable path: a symlink is
+    refused (no appending to someone else's file), and so is anything but a regular file (opening
+    a FIFO would hang). The descriptor is never 0-2: with a closed stdout it would otherwise be
+    passed to the server as --results-fd 1, its protocol channel. None of this hides the journal
+    from a policy running as the same user: in a closed run the evaluator and its journal belong
+    to another user or container."""
+    descriptor = os.open(path, _RESULTS_FLAGS, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("the journal must be a regular file")
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)  # the results are not for the policy's user group
+            os.set_blocking(descriptor, True)
+            if descriptor < 3:
+                import fcntl
+
+                moved = fcntl.fcntl(descriptor, fcntl.F_DUPFD_CLOEXEC, 3)
+                os.close(descriptor)
+                descriptor = moved
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
 
 
 ACTIONS = ("list_records", "get_record", "get_document", "calculator", "submit")
@@ -55,6 +90,9 @@ _NESTED_KEYS = ("args", "arguments", "params", "input", "parameters")
 GET_RECORD_ID_KEYS = ("id", "record_id", "row_id", "doc_id", "invoice_id", "payment_id")
 GET_DOCUMENT_ID_KEYS = ("doc_id", "id", "document_id")
 SUBMIT_FINDINGS_KEYS = ("findings", "findings.json", "findings_json")
+
+# An action named submit in JSON text, also inside a JSON string (escaped quotes).
+_SUBMIT_TEXT = re.compile(r'\\?"(?:action|tool|name|type)\\?"\s*:\s*\\?"\s*submit\s*\\?"', re.IGNORECASE)
 
 _TABLE_ALIASES = {"ledger": "ledger", "invoice": "invoices", "invoices": "invoices",
                   "payment": "payments", "payments": "payments", "fx": "fx"}
@@ -105,8 +143,13 @@ def parse_action(action: object) -> tuple[str, dict]:
     containers in the order of _NESTED_KEYS. Synonyms of an id argument are filled in (C3).
     An unknown name stays `unknown_action`; a malformed container is `bad_arguments`, and the
     error carries the action name so that a malformed submit can end the episode (C9)."""
+    text = action if isinstance(action, str) else None
     action = _json_value(action)
     if not isinstance(action, dict):
+        if text is not None and _SUBMIT_TEXT.search(text):
+            # JSON text that names a submit but does not decode (cut short, nested too deep):
+            # a submit whose arguments cannot be read, so the episode ends (audit C9, R1)
+            raise ActionError("bad_arguments", "submit")
         raise ActionError("unknown_action")
     name = None
     for key in _NAME_KEYS:
@@ -193,17 +236,18 @@ def submit_payload(arguments: dict, episode_id: str) -> object:
     - the message or the list as a JSON string (also the inner `findings` of a message);
     - the message under `findings.json`.
     Nothing else is repaired: a message without `episode_id` stays a structure error."""
-    raw = None
-    for key in SUBMIT_FINDINGS_KEYS:
-        if arguments.get(key) is not None:
-            raw = arguments[key]
-            break
-    if raw is None:
+    given = [arguments[key] for key in SUBMIT_FINDINGS_KEYS if arguments.get(key) is not None]
+    if not given:
         return {}  # nothing to judge: an invalid structure, not silence
-    raw = _json_value(raw, rounds=2)
+    if any(value != given[0] for value in given[1:]):
+        raise ActionError("bad_arguments", "submit")  # two different answers: an invalid structure
+    raw = _json_value(given[0], rounds=2)
     flat_id = arguments.get("episode_id")
     if isinstance(raw, list):
-        return {"episode_id": flat_id if flat_id is not None else episode_id, "findings": raw}
+        # A flat episode_id is used as given, even null (which the judge refuses, as it refuses the
+        # same null inside a message); only an absent one means the running episode.
+        return {"episode_id": arguments["episode_id"] if "episode_id" in arguments else episode_id,
+                "findings": raw}
     if isinstance(raw, dict):
         message = dict(raw)
         if isinstance(message.get("findings"), str):
