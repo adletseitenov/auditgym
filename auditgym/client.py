@@ -27,13 +27,14 @@ import subprocess
 import sys
 import threading
 
-from .actions import default_results_path
+from .actions import default_results_path, open_results
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
 _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal_error")
 _NAME_KEYS = ("action", "tool", "name", "type")
 DEFAULT_TIMEOUT = 120.0  # seconds to wait for one reply (generating the largest episode takes a few)
 _UNSERIALISABLE = "<not serialisable>"
+_MAX_LINE_BYTES = 1 << 20  # serve.MAX_LINE_BYTES; not imported, so the client does not load the evaluator
 
 
 class EnvError(RuntimeError):
@@ -74,7 +75,7 @@ class Env:
     """
 
     def __init__(self, mode: str = "train", results_path=None, *, timeout: float | None = DEFAULT_TIMEOUT,
-                 _files: bool = False) -> None:
+                 secret_file=None, _files: bool = False) -> None:
         if mode not in ("train", "eval"):
             raise EnvError("bad_mode")
         self.mode = mode
@@ -84,15 +85,23 @@ class Env:
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
         if not _files:
             command.append("--no-load")
+        if secret_file is not None:  # the evaluator secret of a closed run (audit L1)
+            try:
+                secret_path = pathlib.Path(secret_file).resolve()
+                if not secret_path.is_file():
+                    raise OSError("not a file")
+            except (TypeError, ValueError, OSError):
+                raise EnvError("bad_secret") from None
+            command += ["--secret-file", os.fspath(secret_path)]
+            del secret_path
         pass_fds = ()
         if results_path is not None:
             try:
-                path = pathlib.Path(results_path).resolve()
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path = os.fspath(path)
+                # abspath, not resolve(): a symlink planted at the journal path must be refused
+                path = os.path.abspath(os.fspath(results_path))
+                pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
                 if os.name == "posix":
-                    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-                    os.fchmod(descriptor, 0o600)  # the results are not for the policy's user group
+                    descriptor = open_results(path)  # regular file, 0600, never descriptor 0-2
                     pass_fds = (descriptor,)
                     command += ["--results-fd", str(descriptor)]
                 else:
@@ -114,12 +123,12 @@ class Env:
                 os.close(descriptor)  # the server holds its own copy
         # Popen keeps its argv; drop it so nothing about the server's arguments stays here.
         self._process.args = ["auditgym-serve"]
-        del command, environment, results_path
+        del command, environment, results_path, secret_file
 
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None, *,
-                   timeout: float | None = DEFAULT_TIMEOUT) -> "Env":
-        env = cls(mode=mode, results_path=results_path, timeout=timeout, _files=True)
+                   timeout: float | None = DEFAULT_TIMEOUT, secret_file=None) -> "Env":
+        env = cls(mode=mode, results_path=results_path, timeout=timeout, secret_file=secret_file, _files=True)
         try:
             try:
                 path = os.fspath(pathlib.Path(directory).resolve())
@@ -144,6 +153,8 @@ class Env:
         if process is None or process.poll() is not None:
             raise EnvError("closed")
         line = self._encode(message)
+        if line is not None and message.get("op") != "step" and len(line) >= _MAX_LINE_BYTES:
+            raise EnvError("bad_config")  # the server would not read it as a reset at all
         if line is None:
             if message.get("op") != "step":
                 raise EnvError("bad_config")  # a seed or config that is not JSON
@@ -187,13 +198,17 @@ class Env:
         observation = reply.get("observation") if isinstance(reply, dict) else None
         if not isinstance(observation, dict):
             raise EnvError("bad_reply")
-        if (message.get("op") in ("reset", "load") and observation.get("type") == "error"
-                and isinstance(observation.get("error"), dict)):
-            raise EnvError(str(observation["error"].get("code")))
+        if message.get("op") in ("reset", "load"):
+            if observation.get("type") == "error" and isinstance(observation.get("error"), dict):
+                raise EnvError(str(observation["error"].get("code")))
+            if observation.get("type") != "reset":  # never hand a step reply back as a reset
+                raise EnvError("bad_reply")
         return reply
 
     def reset(self, seed=None, config=None, options=None):
         message = {"op": "reset"}
+        if config is not None and options is not None:
+            raise EnvError("bad_config")  # two configurations: which one is meant?
         if config is None:
             config = options
         if seed is not None:

@@ -81,13 +81,8 @@ def _judge(episode: dict, payload, inspection_steps: int) -> dict:
 
 def open_results_file(path) -> None:
     """Create the results file (mode 0600: it holds rewards the policy must not read) or tighten
-    an existing one, and fail now if that is impossible (audit L3)."""
-    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        if os.name == "posix":
-            os.fchmod(descriptor, 0o600)
-    finally:
-        os.close(descriptor)
+    an existing one, and fail now if that is impossible (audit L3; actions.open_results)."""
+    os.close(actions.open_results(path))
 
 
 class EvaluatorError(Exception):
@@ -100,9 +95,14 @@ class EvaluatorError(Exception):
 
 class Evaluator:
     def __init__(self, mode: str = "train", results_path=None, clock=None,
-                 time_limit=DEFAULT_TIME_LIMIT, results_stream=None) -> None:
+                 time_limit=DEFAULT_TIME_LIMIT, results_stream=None, secret: str = "") -> None:
         """`results_stream` is an already open text stream (the server gets the results file as an
-        inherited descriptor, so its path never appears in the process list); it wins over the path."""
+        inherited descriptor, so its path never appears in the process list); it wins over the path.
+        `secret` is the evaluator secret passed to generate() (audit L1): with one, an agent that
+        imports this package cannot find a closed seed by generating candidates. Empty: none."""
+        if not isinstance(secret, str):
+            raise ValueError("secret must be a string")
+        self._secret = secret
         if mode not in MODES:
             raise ValueError("mode must be 'train' or 'eval'")
         self._mode = mode
@@ -141,6 +141,8 @@ class Evaluator:
         running episode and the default-seed counter as they are."""
         if seed is None:
             if self._loaded is not None:
+                if config not in (None, {}):  # a loaded episode has no config to apply (CONTRACTS §4)
+                    raise EvaluatorError("bad_config")
                 return self._swap_in(copy.deepcopy(self._loaded))
             seed = self._next_seed
         elif not isinstance(seed, int) or isinstance(seed, bool):
@@ -148,16 +150,16 @@ class Evaluator:
         if seed.bit_length() > MAX_SEED_BITS:
             raise EvaluatorError("bad_config")
         observation = self._swap_in(self._generate(seed, config))
-        self._next_seed = seed + 1
+        following = seed + 1  # past the largest seed the default sequence starts again at 0
+        self._next_seed = following if following.bit_length() <= MAX_SEED_BITS else DEFAULT_SEED
         return observation
 
-    @staticmethod
-    def _generate(seed: int, config) -> dict:
+    def _generate(self, seed: int, config) -> dict:
         from .config import ConfigError
         from .generate import generate
 
         try:
-            return generate(seed, config)
+            return generate(seed, config, secret=self._secret)
         except ConfigError:
             raise EvaluatorError("bad_config") from None
 
@@ -175,15 +177,23 @@ class Evaluator:
         return observation
 
     def _swap_in(self, episode: dict) -> tuple[dict, dict]:
-        """Start `episode`; if that fails, the previous state is put back untouched."""
+        """Start `episode`; if that fails, the previous state is put back untouched. A running
+        episode with at least one step that the new one replaces is written to the journal as
+        abandoned (scored as a truncation: empty answer, 100 inspection steps), so every episode a
+        policy acted in leaves one line and a policy cannot choose which of its episodes count."""
+        abandoned = self._episode if self.running and self._steps else None
         saved = dict(self.__dict__)
         self._clear()
         try:
-            return self._start(episode)
+            result = self._start(episode)
         except BaseException:
             self.__dict__.clear()
             self.__dict__.update(saved)
             raise
+        if abandoned is not None:
+            empty = {"episode_id": abandoned["public"]["manifest"]["episode_id"], "findings": []}
+            self._write_result(_judge(abandoned, empty, MAX_STEPS), MAX_STEPS, truncated=True, episode=abandoned)
+        return result
 
     def _start(self, episode: dict) -> tuple[dict, dict]:
         public = episode["public"]
@@ -297,11 +307,14 @@ class Evaluator:
                 "f1": result["f1"], "inspection_steps": inspection_steps}
         return observation, result["reward"], not truncated, truncated, info
 
-    def _write_result(self, result: dict, inspection_steps: int, truncated: bool) -> None:
+    def _write_result(self, result: dict, inspection_steps: int, truncated: bool, episode=None) -> None:
+        """One journal line; `episode` is given only for an abandoned one (the line says so)."""
         if self._results_path is None and self._results_stream is None:
             return
-        line = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "mode": self._mode,
+        line = {"episode_id": (episode or self._episode)["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "terminated": not truncated, "truncated": truncated, "inspection_steps": inspection_steps}
+        if episode is not None:
+            line["abandoned"] = True
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
         text = json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n"
@@ -310,7 +323,7 @@ class Evaluator:
                 self._results_stream.write(text)
                 self._results_stream.flush()
             else:
-                with open(self._results_path, "a", encoding="utf-8") as handle:
+                with os.fdopen(actions.open_results(self._results_path), "a", encoding="utf-8") as handle:
                     handle.write(text)
         except OSError:  # a full disk must not turn a finished episode into a server error
             print("auditgym evaluator: cannot write the results file", file=sys.stderr)
