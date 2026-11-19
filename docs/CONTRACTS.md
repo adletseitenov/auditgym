@@ -114,11 +114,12 @@ episode = {
 ### 3.2 provenance.json
 ```json
 {"seed": 91827, "config": {...}, "generator_version": "0.1.0", "attempt": 0,
+ "retries": [],
  "steps": [{"operator": "duplicate_invoice", "params": {...}, "issue_id": "t1",
             "before": [...records...], "after": [...records...]}],
  "id_map": {"<внутренний ID>": "<открытый ID>"}}
 ```
-Записи `before` и `after` — в открытых (финальных) ID.
+`retries` — причины отброшенных попыток до удавшейся (`{"attempt": 0, "reason": "no target: I1"}`); пусто, если удалась первая. Записи `before` и `after` — в открытых (финальных) ID.
 
 ## 4. Конфигурация
 
