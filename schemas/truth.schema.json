@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "private/truth.json",
+  "description": "The closed reference of an episode (evaluator side only).",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "1"
+      ]
+    },
+    "episode_id": {
+      "type": "string",
+      "pattern": "^ep_[0-9a-z]{8,}$"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "duplicate_invoice",
+              "allocation_gap",
+              "fx_error",
+              "period_cutoff"
+            ]
+          },
+          "affected_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[^\\s]+$"
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "expected_amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "KZT",
+              "USD",
+              "EUR",
+              "RUB",
+              "CNY"
+            ]
+          },
+          "evidence_sets": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\s]+$"
+              },
+              "minItems": 1,
+              "maxItems": 10
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "issue_id",
+          "type",
+          "affected_ids",
+          "expected_amount_minor",
+          "currency",
+          "evidence_sets"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0,
+      "maxItems": 30
+    }
+  },
+  "required": [
+    "schema_version",
+    "episode_id",
+    "issues"
+  ],
+  "additionalProperties": false
+}

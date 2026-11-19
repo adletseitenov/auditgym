@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Action calculator",
+  "description": "Decimal arithmetic, at most 200 characters.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "calculator"
+      ]
+    },
+    "expression": {
+      "type": "string",
+      "pattern": "^[\\s\\S]{1,200}$"
+    }
+  },
+  "required": [
+    "action",
+    "expression"
+  ],
+  "additionalProperties": false
+}

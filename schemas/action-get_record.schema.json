@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Action get_record",
+  "description": "One record of a table by its id.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "get_record"
+      ]
+    },
+    "table": {
+      "type": "string",
+      "enum": [
+        "ledger",
+        "invoices",
+        "payments",
+        "fx"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[^\\s]+$"
+    }
+  },
+  "required": [
+    "action",
+    "table",
+    "id"
+  ],
+  "additionalProperties": false
+}

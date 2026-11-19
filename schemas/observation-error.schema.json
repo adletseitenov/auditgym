@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observation: error",
+  "description": "Fixed code and fixed text; never ids, paths or values.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "error"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unknown_action",
+            "unknown_table",
+            "unknown_id",
+            "bad_cursor",
+            "bad_arguments",
+            "bad_expression",
+            "episode_over",
+            "not_reset",
+            "bad_request",
+            "bad_config",
+            "not_loaded",
+            "bad_episode",
+            "internal_error"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "steps_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "type",
+    "error",
+    "steps_remaining"
+  ],
+  "additionalProperties": false
+}

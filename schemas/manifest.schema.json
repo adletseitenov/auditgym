@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "public/manifest.json",
+  "description": "Episode header; versions of the schema and of the configuration.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "1"
+      ]
+    },
+    "episode_id": {
+      "type": "string",
+      "pattern": "^ep_[0-9a-z]{8,}$"
+    },
+    "base_currency": {
+      "type": "string",
+      "enum": [
+        "KZT",
+        "USD",
+        "EUR",
+        "RUB",
+        "CNY"
+      ]
+    },
+    "period_start": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "period_end": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "timezone": {
+      "type": "string",
+      "pattern": "^[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "ledger": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "invoices": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fx": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ledger",
+        "invoices",
+        "payments",
+        "fx"
+      ],
+      "additionalProperties": false
+    },
+    "rounding": {
+      "type": "string",
+      "enum": [
+        "half_even"
+      ]
+    },
+    "config_version": {
+      "type": "string",
+      "enum": [
+        "1"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "episode_id",
+    "base_currency",
+    "period_start",
+    "period_end",
+    "timezone",
+    "counts",
+    "rounding",
+    "config_version"
+  ],
+  "additionalProperties": false
+}

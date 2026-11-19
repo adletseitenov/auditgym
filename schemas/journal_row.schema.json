@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One line of the evaluator's journal (runs/results.jsonl)",
+  "description": "Written in eval mode, one line per finished episode.",
+  "type": "object",
+  "properties": {
+    "episode_id": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "train",
+        "eval"
+      ]
+    },
+    "terminated": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "inspection_steps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "reward": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+    },
+    "precision": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "recall": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "f1": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tp": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "fp": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "fn": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "structure_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "episode_id",
+    "mode",
+    "terminated",
+    "truncated",
+    "inspection_steps",
+    "reward",
+    "precision",
+    "recall",
+    "f1",
+    "tp",
+    "fp",
+    "fn",
+    "structure_error"
+  ],
+  "additionalProperties": false
+}

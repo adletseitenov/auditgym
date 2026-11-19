@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Episode configuration",
+  "description": "Input of reset(seed, config). Every key is optional; the normalized config stored in provenance.json validates against the same schema. Cross-key limits (density, size, pages) are checked by auditgym.config.normalize_config and listed in README.md.",
+  "type": "object",
+  "properties": {
+    "config_version": {
+      "type": "string",
+      "enum": [
+        "1"
+      ]
+    },
+    "size": {
+      "type": "object",
+      "properties": {
+        "invoices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 200
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "background_pairs": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "currencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "KZT",
+          "USD",
+          "EUR",
+          "RUB",
+          "CNY"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 3
+    },
+    "base_currency": {
+      "type": "string",
+      "enum": [
+        "KZT",
+        "USD",
+        "EUR",
+        "RUB",
+        "CNY"
+      ]
+    },
+    "timezone": {
+      "type": "string",
+      "pattern": "^[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "period": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-01$"
+        },
+        "months": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "required": [
+        "start",
+        "months"
+      ],
+      "additionalProperties": false
+    },
+    "errors": {
+      "type": "object",
+      "properties": {
+        "duplicate_invoice": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "allocation_gap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "fx_error": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "period_cutoff": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "interaction": {
+      "type": "string",
+      "enum": [
+        "none",
+        "I1",
+        "I2"
+      ]
+    },
+    "distractors": {
+      "type": "boolean"
+    },
+    "surface_seed": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

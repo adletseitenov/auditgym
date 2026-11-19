@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One line of public/payments.jsonl",
+  "description": "Negative amount is a refund; invoice_refs null is an advance.",
+  "type": "object",
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "pattern": "^[^\\s]+$"
+    },
+    "payment_id": {
+      "type": "string",
+      "pattern": "^[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "currency": {
+      "type": "string",
+      "enum": [
+        "KZT",
+        "USD",
+        "EUR",
+        "RUB",
+        "CNY"
+      ]
+    },
+    "amount_minor": {
+      "type": "integer"
+    },
+    "invoice_refs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string",
+        "pattern": "^[^\\s]+$"
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "doc_id",
+    "payment_id",
+    "timestamp",
+    "currency",
+    "amount_minor",
+    "invoice_refs"
+  ],
+  "additionalProperties": false
+}

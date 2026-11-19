@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Action get_document",
+  "description": "One invoice or payment by doc_id.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "get_document"
+      ]
+    },
+    "doc_id": {
+      "type": "string",
+      "pattern": "^[^\\s]+$"
+    }
+  },
+  "required": [
+    "action",
+    "doc_id"
+  ],
+  "additionalProperties": false
+}

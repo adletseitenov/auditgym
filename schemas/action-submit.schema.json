@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Action submit",
+  "description": "The final answer. `findings` is validated against findings.schema.json.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "submit"
+      ]
+    },
+    "findings": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "action",
+    "findings"
+  ],
+  "additionalProperties": false
+}

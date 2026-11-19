@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observation: record",
+  "description": "One record; validates against the schema of its table.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "record"
+      ]
+    },
+    "table": {
+      "type": "string",
+      "enum": [
+        "ledger",
+        "invoices",
+        "payments",
+        "fx"
+      ]
+    },
+    "record": {
+      "type": "object"
+    },
+    "steps_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "type",
+    "table",
+    "record",
+    "steps_remaining"
+  ],
+  "additionalProperties": false
+}

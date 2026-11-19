@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observation: records",
+  "description": "A page of one table; each record validates against ledger_row, invoice, payment or fx_row by `table`. next_cursor is null on the last page.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "records"
+      ]
+    },
+    "table": {
+      "type": "string",
+      "enum": [
+        "ledger",
+        "invoices",
+        "payments",
+        "fx"
+      ]
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "minItems": 0,
+      "maxItems": 50
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "steps_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "type",
+    "table",
+    "records",
+    "next_cursor",
+    "steps_remaining"
+  ],
+  "additionalProperties": false
+}

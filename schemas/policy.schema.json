@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "public/policy.json",
+  "description": "Published rules of the books and of the judge (whitelist auditgym.generate.POLICY_KEYS).",
+  "type": "object",
+  "properties": {
+    "ledger_currency": {
+      "type": "string",
+      "enum": [
+        "base"
+      ]
+    },
+    "base_currency": {
+      "type": "string",
+      "enum": [
+        "KZT",
+        "USD",
+        "EUR",
+        "RUB",
+        "CNY"
+      ]
+    },
+    "timezone": {
+      "type": "string",
+      "pattern": "^[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "period_start": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "period_end": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "period_interval": {
+      "type": "string",
+      "enum": [
+        "[start, end)"
+      ]
+    },
+    "period_basis": {
+      "type": "string",
+      "enum": [
+        "document_date"
+      ]
+    },
+    "fx_rate_date": {
+      "type": "string",
+      "enum": [
+        "document_date_in_company_timezone"
+      ]
+    },
+    "fx_formula": {
+      "type": "string"
+    },
+    "rounding": {
+      "type": "string",
+      "enum": [
+        "half_even"
+      ]
+    },
+    "currency_exponents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 6
+      }
+    },
+    "accounts": {
+      "type": "object",
+      "properties": {
+        "cash": {
+          "type": "string"
+        },
+        "receivable": {
+          "type": "string"
+        },
+        "revenue": {
+          "type": "string"
+        },
+        "unallocated": {
+          "type": "string"
+        },
+        "fx_difference": {
+          "type": "string"
+        },
+        "expense": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cash",
+        "receivable",
+        "revenue",
+        "unallocated",
+        "fx_difference",
+        "expense"
+      ],
+      "additionalProperties": false
+    },
+    "document_date": {
+      "type": "object",
+      "properties": {
+        "invoice": {
+          "type": "string",
+          "enum": [
+            "issued_at"
+          ]
+        },
+        "payment": {
+          "type": "string",
+          "enum": [
+            "timestamp"
+          ]
+        }
+      },
+      "required": [
+        "invoice",
+        "payment"
+      ],
+      "additionalProperties": false
+    },
+    "refund": {
+      "type": "string"
+    },
+    "payment_rule": {
+      "type": "string"
+    },
+    "duplicate_signature": {
+      "type": "string"
+    },
+    "amount_tolerance_minor": {
+      "type": "object",
+      "properties": {
+        "duplicate_invoice": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "allocation_gap": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fx_error": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "period_cutoff": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "duplicate_invoice",
+        "allocation_gap",
+        "fx_error",
+        "period_cutoff"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_superset_allowed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ledger_currency",
+    "base_currency",
+    "timezone",
+    "period_start",
+    "period_end",
+    "period_interval",
+    "period_basis",
+    "fx_rate_date",
+    "fx_formula",
+    "rounding",
+    "currency_exponents",
+    "accounts",
+    "document_date",
+    "refund",
+    "payment_rule",
+    "duplicate_signature",
+    "amount_tolerance_minor",
+    "evidence_superset_allowed"
+  ],
+  "additionalProperties": false
+}

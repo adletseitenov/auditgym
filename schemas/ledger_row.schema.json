@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One row of public/ledger.csv",
+  "description": "Exactly one side is positive (checked by auditgym.verify). Missing references are null (an empty CSV field).",
+  "type": "object",
+  "properties": {
+    "row_id": {
+      "type": "string",
+      "pattern": "^[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+    },
+    "account": {
+      "type": "string",
+      "enum": [
+        "cash",
+        "receivable",
+        "revenue",
+        "unallocated",
+        "fx_difference",
+        "expense"
+      ]
+    },
+    "debit_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "credit_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "currency": {
+      "type": "string",
+      "enum": [
+        "KZT",
+        "USD",
+        "EUR",
+        "RUB",
+        "CNY"
+      ]
+    },
+    "entity_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payment_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "row_id",
+    "timestamp",
+    "account",
+    "debit_minor",
+    "credit_minor",
+    "currency",
+    "entity_id",
+    "invoice_id",
+    "payment_id"
+  ],
+  "additionalProperties": false
+}

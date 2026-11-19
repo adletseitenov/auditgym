@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observation: reset",
+  "description": "manifest and policy validate against their own schemas.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "reset"
+      ]
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "accounts": {
+          "type": "object"
+        },
+        "error_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "duplicate_invoice",
+              "allocation_gap",
+              "fx_error",
+              "period_cutoff"
+            ]
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "findings_schema": {
+          "type": "object"
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_steps": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "page_size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_findings": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_evidence_ids": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_explanation_chars": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_expression_chars": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_submit_bytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "max_steps",
+            "page_size",
+            "max_findings",
+            "max_evidence_ids",
+            "max_explanation_chars",
+            "max_expression_chars",
+            "max_submit_bytes"
+          ],
+          "additionalProperties": false
+        },
+        "tolerances": {
+          "type": "object",
+          "properties": {
+            "amount_tolerance_minor": {
+              "type": "object"
+            },
+            "evidence_superset_allowed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "amount_tolerance_minor",
+            "evidence_superset_allowed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "text",
+        "accounts",
+        "error_types",
+        "findings_schema",
+        "limits",
+        "tolerances"
+      ],
+      "additionalProperties": false
+    },
+    "manifest": {
+      "type": "object"
+    },
+    "policy": {
+      "type": "object"
+    },
+    "steps_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "type",
+    "task",
+    "manifest",
+    "policy",
+    "steps_remaining"
+  ],
+  "additionalProperties": false
+}
