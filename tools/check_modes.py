@@ -68,9 +68,11 @@ def secret_line(environ=None) -> str:
     environ = os.environ if environ is None else environ
     source = secret_source(environ)
     if source == "file":
-        return f"{SECRET_ENV}: set via {SECRET_FILE_ENV} (the closed run is not reproducible without it)"
+        return (f"{SECRET_ENV}: set via {SECRET_FILE_ENV} in this environment (read by `serve` and `export`; "
+                f"Env never inherits it: pass Env(secret_file=...) for a closed run; this check runs without it)")
     if source == "value":
-        return (f"{SECRET_ENV}: set as a value (a policy started from this environment sees it too; "
+        return (f"{SECRET_ENV}: set as a value in this environment (read by `serve` and `export`; Env never "
+                f"inherits it: pass Env(secret_file=...); a policy started from here sees it too, "
                 f"prefer {SECRET_FILE_ENV} readable only by the evaluator)")
     return (f"{SECRET_ENV}: not set (open episodes are reproducible from the seed; "
             f"set it for a closed run, see README «Закрытая проверка»)")

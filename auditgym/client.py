@@ -21,7 +21,10 @@ Hardening of the process boundary:
   $AUDITGYM_SECRET and $AUDITGYM_SECRET_FILE are removed from the server's environment, always
   (otherwise a policy could start its own Env(mode="train") that inherits the secret and rebuild
   a hidden episode by trying seeds, audit A3). Only `secret_file=PATH` gives the server a secret:
-  the path, as $AUDITGYM_SECRET_FILE in its environment. A server started by Env runs as the
+  the path, as $AUDITGYM_SECRET_FILE in its environment. In eval mode a secret variable in the
+  environment without an explicit `secret_file=` (or `server_command=`) is a refusal,
+  `EnvError("bad_secret_file")`, not a silent run without the secret (DECISIONS H); in train it is a
+  RuntimeWarning. A server started by Env runs as the
   policy's user, so this is not a security
   boundary by itself; the boundary is `server_command` (README «Закрытая проверка»): the evaluator
   in its own container or under its own user, holding the secret and the journal, while the policy
@@ -126,8 +129,12 @@ class Env:
                 environment[SECRET_FILE_ENV] = os.fspath(pathlib.Path(secret_file).resolve())
             except (TypeError, ValueError, OSError):
                 raise EnvError("bad_secret_file") from None
-        elif mode == "eval" and server_command is None and (os.environ.get(SECRET_ENV)
-                                                             or os.environ.get(SECRET_FILE_ENV)):
+        elif server_command is None and (os.environ.get(SECRET_ENV) or os.environ.get(SECRET_FILE_ENV)):
+            # A secret is configured in this process's environment but not handed to the server Env
+            # starts. In eval that would be a silent run without the secret (DECISIONS H: a refusal,
+            # not a silent run): refuse. Neither the value nor the path is named.
+            if mode == "eval":
+                raise EnvError("bad_secret_file")
             import warnings
 
             warnings.warn("the evaluator secret in the environment is not passed to the server Env starts; "

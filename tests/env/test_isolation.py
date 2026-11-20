@@ -11,6 +11,7 @@ import io
 import json
 import os
 import pathlib
+import sys
 import tempfile
 import unittest
 import warnings
@@ -47,11 +48,44 @@ class SecretNotInheritedTest(unittest.TestCase):
             explicit = self.episode_id({SECRET_ENV: "", SECRET_FILE_ENV: ""}, secret_file=secret)
         self.assertNotEqual(explicit, plain)  # only an explicit secret_file sets it
 
-    def test_eval_warns_when_the_secret_is_only_in_the_environment(self):
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.dict(os.environ, {SECRET_ENV: "jury-only", SECRET_FILE_ENV: ""}):
+    def test_eval_refuses_when_the_secret_is_only_in_the_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = pathlib.Path(directory) / "secret"
+            file.write_text("jury-only-value\n", encoding="utf-8")
+            for environ in ({SECRET_ENV: "jury-only-value", SECRET_FILE_ENV: ""},
+                            {SECRET_ENV: "", SECRET_FILE_ENV: str(file)}):
+                with mock.patch.dict(os.environ, environ), self.subTest(environ=sorted(environ)):
+                    results = pathlib.Path(directory) / "r.jsonl"
+                    with self.assertRaises(EnvError) as caught:
+                        Env(mode="eval", results_path=results)
+                    self.assertEqual(caught.exception.code, "bad_secret_file")
+                    self.assertNotIn("jury-only-value", str(caught.exception))
+                    self.assertNotIn(str(file), str(caught.exception))
+                    with self.assertRaises(EnvError):
+                        Env.from_files(TINY, mode="eval", results_path=results)
+
+    def test_eval_with_an_explicit_secret_file_or_server_command_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = pathlib.Path(directory) / "secret"
+            file.write_text("jury-only-value\n", encoding="utf-8")
+            results = pathlib.Path(directory) / "r.jsonl"
+            with mock.patch.dict(os.environ, {SECRET_ENV: "", SECRET_FILE_ENV: str(file)}):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error")
+                    with Env(mode="eval", results_path=results, secret_file=file) as env:
+                        explicit = env.reset(5, CLEAN)[0]["manifest"]["episode_id"]
+                    command = [sys.executable, "-m", "auditgym", "serve", "--results", str(results)]
+                    with Env(mode="eval", server_command=command) as env:
+                        env.reset(5, CLEAN)
+            with mock.patch.dict(os.environ, {SECRET_ENV: "", SECRET_FILE_ENV: ""}):
+                with Env(mode="eval", results_path=results) as env:
+                    plain = env.reset(5, CLEAN)[0]["manifest"]["episode_id"]
+        self.assertNotEqual(explicit, plain)
+
+    def test_train_warns_when_the_secret_is_only_in_the_environment(self):
+        with mock.patch.dict(os.environ, {SECRET_ENV: "jury-only", SECRET_FILE_ENV: ""}):
             with self.assertWarns(RuntimeWarning):
-                Env(mode="eval", results_path=pathlib.Path(directory) / "r.jsonl").close()
+                Env(mode="train").close()
 
 
 class EndOfInputTest(unittest.TestCase):
