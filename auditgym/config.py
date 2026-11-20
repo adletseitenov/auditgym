@@ -17,8 +17,10 @@ from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FINDINGS, MAX
 CONFIG_VERSION = "1"
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 INTERACTIONS = ("none", "I1", "I2")
-CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY")
-CURRENCY_EXPONENTS = {"KZT": 2, "USD": 2, "EUR": 2, "RUB": 2, "CNY": 2}
+# New currencies are appended: the first non-base currency is the default, so order must not change.
+CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY", "JPY", "KWD")
+# ISO 4217 minor-unit exponents: JPY has none, KWD has three (docs/DECISIONS.md M).
+CURRENCY_EXPONENTS = {"KZT": 2, "USD": 2, "EUR": 2, "RUB": 2, "CNY": 2, "JPY": 0, "KWD": 3}
 
 SIZE_LIMITS = {"invoices": (MIN_INVOICES, MAX_INVOICES), "background_pairs": (MIN_BACKGROUND_PAIRS, MAX_BACKGROUND_PAIRS)}
 DEFAULT_INVOICES = [48, 100]

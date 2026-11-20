@@ -52,7 +52,9 @@
               "USD",
               "EUR",
               "RUB",
-              "CNY"
+              "CNY",
+              "JPY",
+              "KWD"
             ]
           },
           "evidence_sets": {

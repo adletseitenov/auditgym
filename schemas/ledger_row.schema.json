@@ -38,7 +38,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "entity_id": {

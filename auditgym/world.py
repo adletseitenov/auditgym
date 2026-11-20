@@ -39,9 +39,9 @@ from .money import parse_offset, round_rate
 from .rng import Rng
 
 # Rough relative values, only to make synthetic rates look plausible. Not real quotes.
-_VALUE = {"KZT": 21, "USD": 10000, "EUR": 10900, "RUB": 110, "CNY": 1380}
+_VALUE = {"KZT": 21, "USD": 10000, "EUR": 10900, "RUB": 110, "CNY": 1380, "JPY": 70, "KWD": 33600}
 # Minor units per price step, so documents in every currency have comparable real value.
-PRICE_UNIT = {"USD": 1000, "EUR": 1000, "CNY": 7000, "RUB": 90000, "KZT": 500000}
+PRICE_UNIT = {"USD": 1000, "EUR": 1000, "CNY": 7000, "RUB": 90000, "KZT": 500000, "JPY": 1400, "KWD": 3000}
 _SERVICES = ("Consulting", "Software licence", "Support plan", "Hosting", "Training",
              "Integration work", "Audit preparation", "Data migration", "Maintenance", "Design work")
 TERMS_DAYS = (14, 30, 45)
