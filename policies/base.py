@@ -26,21 +26,71 @@ def finding(kind: str, affected: list[str], amount: int, currency: str, evidence
             "currency": currency, "evidence_ids": cited[:MAX_EVIDENCE], "explanation": explanation[:1000]}
 
 
-SORT_KEYS = {"ledger": ("row_id",), "invoices": ("invoice_id", "doc_id"), "payments": ("payment_id", "doc_id"),
-             "fx": ("date", "source_currency", "target_currency")}
+def _text(value) -> str:
+    return "" if value is None else str(value)
 
 
-def canonical(table: str, records: list[dict]) -> list[dict]:
-    """What a policy decides on: records sorted by a stable key (never by arrival order), so that
-    a reordered table gives the same answer. Reference lists inside a record are sorted too."""
-    keys = SORT_KEYS[table]
-    out = []
-    for record in records:
-        record = dict(record)
-        if isinstance(record.get("invoice_refs"), list):
-            record["invoice_refs"] = sorted(record["invoice_refs"])
-        out.append(record)
-    return sorted(out, key=lambda record: tuple(str(record.get(key) or "") for key in keys))
+def _base_key(table: str, record: dict) -> tuple:
+    """The content of a record without any id: what it says, not what it is called."""
+    if table == "ledger":
+        return (_text(record.get("timestamp")), _text(record.get("account")), record.get("debit_minor") or 0,
+                record.get("credit_minor") or 0, _text(record.get("currency")))
+    if table == "invoices":
+        items = tuple(sorted(tuple(sorted((k, _text(v)) for k, v in item.items()))
+                             for item in record.get("line_items") or [] if isinstance(item, dict)))
+        return (_text(record.get("issued_at")), _text(record.get("due_at")), _text(record.get("currency")),
+                record.get("total_minor") or 0, items)
+    if table == "payments":
+        return (_text(record.get("timestamp")), _text(record.get("currency")), record.get("amount_minor") or 0)
+    return (_text(record.get("date")), _text(record.get("source_currency")), _text(record.get("target_currency")),
+            _text(record.get("rate")))
+
+
+def canonical_public(raw: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """What a policy decides on: every table sorted by the content of its records, never by arrival
+    order and never by the text of an id, so that reordering rows and renaming ids changes nothing.
+
+    Ties are broken by the content around a record: an invoice by its posting rows and by what
+    its customer was billed in all, a payment by the invoices it pays, a posting row by the
+    document it belongs to. Reference lists inside a record are sorted by the content they point to.
+    Records that stay equal after that are interchangeable, whatever their ids are."""
+    ledger = [dict(row) for row in raw.get("ledger", [])]
+    invoices = [dict(row) for row in raw.get("invoices", [])]
+    payments = [dict(row) for row in raw.get("payments", [])]
+    rows_of: dict[tuple, list[tuple]] = {}
+    for row in ledger:
+        owner = ("p", row["payment_id"]) if row.get("payment_id") else ("i", row.get("invoice_id"))
+        rows_of.setdefault(owner, []).append(_base_key("ledger", row))
+    by_entity: dict = {}
+    for invoice in invoices:
+        by_entity.setdefault(invoice.get("entity_id"), []).append(_base_key("invoices", invoice))
+    invoice_key = {}
+    for invoice in invoices:
+        invoice_key[invoice.get("invoice_id")] = (
+            _base_key("invoices", invoice), tuple(sorted(rows_of.get(("i", invoice.get("invoice_id")), []))),
+            tuple(sorted(by_entity[invoice.get("entity_id")])))
+    # a payment refers to invoices by doc_id or invoice_id: both name the same invoice
+    ref_key = {}
+    for invoice in invoices:
+        ref_key[invoice.get("invoice_id")] = ref_key[invoice.get("doc_id")] = invoice_key[invoice.get("invoice_id")]
+    payment_key = {}
+    for payment in payments:
+        refs = sorted(payment.get("invoice_refs") or [], key=lambda ref: (ref not in ref_key, ref_key.get(ref), ref))
+        if isinstance(payment.get("invoice_refs"), list):
+            payment["invoice_refs"] = refs
+        payment_key[payment.get("payment_id")] = (
+            _base_key("payments", payment), tuple(ref_key.get(ref, ()) for ref in refs),
+            tuple(sorted(rows_of.get(("p", payment.get("payment_id")), []))))
+    owner_key = {("i", k): v for k, v in invoice_key.items()} | {("p", k): v for k, v in payment_key.items()}
+
+    def row_key(row: dict) -> tuple:
+        owner = ("p", row["payment_id"]) if row.get("payment_id") else ("i", row.get("invoice_id"))
+        return _base_key("ledger", row), owner_key.get(owner, ())
+
+    return {"ledger": sorted(ledger, key=row_key),
+            "invoices": sorted(invoices, key=lambda r: invoice_key[r.get("invoice_id")]),
+            "payments": sorted(payments, key=lambda r: payment_key[r.get("payment_id")]),
+            "fx": sorted((dict(row) for row in raw.get("fx", [])), key=lambda r: _base_key("fx", r))}
 
 
 class Reader:
@@ -99,8 +149,7 @@ class ReadThenSubmit:
             return action
         self.done = True
         public = {"manifest": self.manifest, "policy": self.policy}
-        for table in TABLES:
-            public[table] = canonical(table, self.reader.records.get(table, []))
+        public.update(canonical_public(self.reader.records))
         return submit(self.episode_id, self.decide(public))
 
     def decide(self, public: dict) -> list[dict]:
