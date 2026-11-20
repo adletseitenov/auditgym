@@ -1,20 +1,25 @@
 {
  "schema_version": "1",
- "episode_id": "ep_bffb2287d563",
+ "episode_id": "ep_a1254e30ac4e",
  "issues": [
   {
    "issue_id": "t1",
    "type": "fx_error",
    "affected_ids": [
-    "zdv7wm2c7f"
+    "1pwmzz6h7n"
    ],
-   "expected_amount_minor": 82197729,
+   "expected_amount_minor": 30446185,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "zdv7wm2c7f",
-     "pvaamkrffj",
-     "2026-10-22|USD|KZT"
+     "1pwmzz6h7n",
+     "5axh1b1fgm",
+     "2026-10-19|USD|KZT"
+    ],
+    [
+     "1pwmzz6h7n",
+     "r68z1c2xdh",
+     "2026-10-19|USD|KZT"
     ]
    ]
   },
@@ -22,35 +27,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "s0pta2gkdc",
-    "y2b7jmdw9r"
+    "km97rbttnz",
+    "tcz0w9qfpv"
    ],
-   "expected_amount_minor": 293000000,
-   "currency": "KZT",
+   "expected_amount_minor": 500000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "s0pta2gkdc",
-     "y2b7jmdw9r",
-     "5pntk66g3h",
-     "az36x3ntaz"
+     "km97rbttnz",
+     "tcz0w9qfpv",
+     "amq7yv0gdy",
+     "bzvxx7rw6v"
     ],
     [
-     "s0pta2gkdc",
-     "y2b7jmdw9r",
-     "5pntk66g3h",
-     "bcv7cpszw9"
+     "km97rbttnz",
+     "tcz0w9qfpv",
+     "amq7yv0gdy",
+     "c3bzg1r9bx"
     ],
     [
-     "s0pta2gkdc",
-     "y2b7jmdw9r",
-     "az36x3ntaz",
-     "q0fzmzf3p2"
+     "km97rbttnz",
+     "tcz0w9qfpv",
+     "bzvxx7rw6v",
+     "k3skm5368z"
     ],
     [
-     "s0pta2gkdc",
-     "y2b7jmdw9r",
-     "bcv7cpszw9",
-     "q0fzmzf3p2"
+     "km97rbttnz",
+     "tcz0w9qfpv",
+     "c3bzg1r9bx",
+     "k3skm5368z"
     ]
    ]
   },
@@ -58,18 +63,18 @@
    "issue_id": "t3",
    "type": "period_cutoff",
    "affected_ids": [
-    "y2b7jmdw9r"
+    "tcz0w9qfpv"
    ],
-   "expected_amount_minor": 293000000,
-   "currency": "KZT",
+   "expected_amount_minor": 500000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "y2b7jmdw9r",
-     "5pntk66g3h"
+     "tcz0w9qfpv",
+     "bzvxx7rw6v"
     ],
     [
-     "y2b7jmdw9r",
-     "q0fzmzf3p2"
+     "tcz0w9qfpv",
+     "c3bzg1r9bx"
     ]
    ]
   }

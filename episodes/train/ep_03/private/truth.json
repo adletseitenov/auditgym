@@ -1,23 +1,23 @@
 {
  "schema_version": "1",
- "episode_id": "ep_1ef19de723f5",
+ "episode_id": "ep_a26c439c1aa2",
  "issues": [
   {
    "issue_id": "t1",
    "type": "allocation_gap",
    "affected_ids": [
-    "ejhawqm98x",
-    "z9vsxs7jan"
+    "df7v2n3j9f",
+    "jfh3cwcr83"
    ],
-   "expected_amount_minor": 88799330,
+   "expected_amount_minor": 81264168,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "ejhawqm98x",
-     "z9vsxs7jan",
-     "2fbyfy3yfz",
-     "jgrm0bytwp",
-     "ye8x2x9xmx"
+     "df7v2n3j9f",
+     "jfh3cwcr83",
+     "08qkvfkds7",
+     "4a3brj7s1n",
+     "895j1bsfjc"
     ]
    ]
   },
@@ -25,18 +25,18 @@
    "issue_id": "t2",
    "type": "allocation_gap",
    "affected_ids": [
-    "jezg0e0632",
-    "mg90bm6h1h"
+    "06fmgnyskn",
+    "nv42wr4xmw"
    ],
-   "expected_amount_minor": 10460000,
+   "expected_amount_minor": 64923339,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "jezg0e0632",
-     "mg90bm6h1h",
-     "2gtqcr8tp9",
-     "mk4kyjxm62",
-     "zqcbscypc3"
+     "06fmgnyskn",
+     "nv42wr4xmw",
+     "5xse5t49en",
+     "wvhge874kn",
+     "zy34yfym45"
     ]
    ]
   }

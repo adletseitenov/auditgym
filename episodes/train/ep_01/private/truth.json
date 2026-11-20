@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_629a15fa27df",
+ "episode_id": "ep_526532bbb704",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "fmvb1yc468",
-    "yzkv7jxd9x"
+    "6j9wh2f10t",
+    "wxy41439gr"
    ],
-   "expected_amount_minor": 664000,
+   "expected_amount_minor": 2324000,
    "currency": "USD",
    "evidence_sets": [
     [
-     "fmvb1yc468",
-     "yzkv7jxd9x",
-     "5kk32pnsty",
-     "e1b62f6jqr"
+     "6j9wh2f10t",
+     "wxy41439gr",
+     "4g9pdxzj9b",
+     "s09vgem7tj"
     ],
     [
-     "fmvb1yc468",
-     "yzkv7jxd9x",
-     "5kk32pnsty",
-     "kp9j5e7g97"
+     "6j9wh2f10t",
+     "wxy41439gr",
+     "4g9pdxzj9b",
+     "v78234a7wt"
     ],
     [
-     "fmvb1yc468",
-     "yzkv7jxd9x",
-     "e1b62f6jqr",
-     "gze3f67wpd"
+     "6j9wh2f10t",
+     "wxy41439gr",
+     "djsejq6mj4",
+     "s09vgem7tj"
     ],
     [
-     "fmvb1yc468",
-     "yzkv7jxd9x",
-     "gze3f67wpd",
-     "kp9j5e7g97"
+     "6j9wh2f10t",
+     "wxy41439gr",
+     "djsejq6mj4",
+     "v78234a7wt"
     ]
    ]
   },
@@ -42,35 +42,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "cyypm6vdxp",
-    "f6e9wxetvj"
+    "2b37f8ykyw",
+    "6ktnj5k9k0"
    ],
-   "expected_amount_minor": 742000000,
-   "currency": "KZT",
+   "expected_amount_minor": 1004000,
+   "currency": "USD",
    "evidence_sets": [
     [
-     "cyypm6vdxp",
-     "f6e9wxetvj",
-     "qfsn4n778m",
-     "shm9k0zgg5"
+     "2b37f8ykyw",
+     "6ktnj5k9k0",
+     "eb0jafydt9",
+     "jr1e3zj66t"
     ],
     [
-     "cyypm6vdxp",
-     "f6e9wxetvj",
-     "qfsn4n778m",
-     "vvaw79dtd2"
+     "2b37f8ykyw",
+     "6ktnj5k9k0",
+     "eb0jafydt9",
+     "zkv7jxd9xr"
     ],
     [
-     "cyypm6vdxp",
-     "f6e9wxetvj",
-     "sb3g66q150",
-     "shm9k0zgg5"
+     "2b37f8ykyw",
+     "6ktnj5k9k0",
+     "jr1e3zj66t",
+     "v75p67qtp1"
     ],
     [
-     "cyypm6vdxp",
-     "f6e9wxetvj",
-     "sb3g66q150",
-     "vvaw79dtd2"
+     "2b37f8ykyw",
+     "6ktnj5k9k0",
+     "v75p67qtp1",
+     "zkv7jxd9xr"
     ]
    ]
   }

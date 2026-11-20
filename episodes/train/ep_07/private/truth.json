@@ -1,23 +1,23 @@
 {
  "schema_version": "1",
- "episode_id": "ep_40ccc4a337d0",
+ "episode_id": "ep_d1aa45238f32",
  "issues": [
   {
    "issue_id": "t1",
    "type": "period_cutoff",
    "affected_ids": [
-    "qjf2q8bknt"
+    "7e544mbr92"
    ],
    "expected_amount_minor": 479000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "qjf2q8bknt",
-     "58x5znjppj"
+     "7e544mbr92",
+     "hpkbyyfms2"
     ],
     [
-     "qjf2q8bknt",
-     "smr1a4spkm"
+     "7e544mbr92",
+     "jbv4swrrwm"
     ]
    ]
   },
@@ -25,35 +25,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "9f5bmdc214",
-    "mkjc0d6zxb"
+    "5357g5qmg6",
+    "rrwx874zhf"
    ],
-   "expected_amount_minor": 289500000,
+   "expected_amount_minor": 825000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "9f5bmdc214",
-     "mkjc0d6zxb",
-     "2mf3n4xks7",
-     "7rbj1j2zm3"
+     "5357g5qmg6",
+     "rrwx874zhf",
+     "b4peqhtqgx",
+     "b77mpvezqm"
     ],
     [
-     "9f5bmdc214",
-     "mkjc0d6zxb",
-     "2mf3n4xks7",
-     "sjfa0yqst4"
+     "5357g5qmg6",
+     "rrwx874zhf",
+     "b4peqhtqgx",
+     "mcj95tzv5f"
     ],
     [
-     "9f5bmdc214",
-     "mkjc0d6zxb",
-     "7rbj1j2zm3",
-     "bqc324c7gv"
+     "5357g5qmg6",
+     "rrwx874zhf",
+     "b77mpvezqm",
+     "xddekqx8fd"
     ],
     [
-     "9f5bmdc214",
-     "mkjc0d6zxb",
-     "bqc324c7gv",
-     "sjfa0yqst4"
+     "5357g5qmg6",
+     "rrwx874zhf",
+     "mcj95tzv5f",
+     "xddekqx8fd"
     ]
    ]
   },
@@ -61,18 +61,18 @@
    "issue_id": "t3",
    "type": "period_cutoff",
    "affected_ids": [
-    "9f5bmdc214"
+    "5357g5qmg6"
    ],
-   "expected_amount_minor": 289500000,
+   "expected_amount_minor": 825000000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "9f5bmdc214",
-     "2mf3n4xks7"
+     "5357g5qmg6",
+     "b77mpvezqm"
     ],
     [
-     "9f5bmdc214",
-     "bqc324c7gv"
+     "5357g5qmg6",
+     "mcj95tzv5f"
     ]
    ]
   }

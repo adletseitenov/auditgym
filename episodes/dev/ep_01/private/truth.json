@@ -1,40 +1,40 @@
 {
  "schema_version": "1",
- "episode_id": "ep_f66a7b479d37",
+ "episode_id": "ep_41acbbc2c3a0",
  "issues": [
   {
    "issue_id": "t1",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "6rgvy27qdc",
-    "jxbbdk172x"
+    "054fsvk14g",
+    "552t1bt6tj"
    ],
-   "expected_amount_minor": 1174000,
-   "currency": "USD",
+   "expected_amount_minor": 561000000,
+   "currency": "KZT",
    "evidence_sets": [
     [
-     "6rgvy27qdc",
-     "jxbbdk172x",
-     "53vf86xdvf",
-     "5ts4qhchvw"
+     "054fsvk14g",
+     "552t1bt6tj",
+     "tjfyraj2z8",
+     "xdvfshp7gk"
     ],
     [
-     "6rgvy27qdc",
-     "jxbbdk172x",
-     "53vf86xdvf",
-     "e94hdw47np"
+     "054fsvk14g",
+     "552t1bt6tj",
+     "tjfyraj2z8",
+     "zwvxrzj2sk"
     ],
     [
-     "6rgvy27qdc",
-     "jxbbdk172x",
-     "5ts4qhchvw",
-     "6s2ftwywd2"
+     "054fsvk14g",
+     "552t1bt6tj",
+     "wrn3b5gn4t",
+     "xdvfshp7gk"
     ],
     [
-     "6rgvy27qdc",
-     "jxbbdk172x",
-     "6s2ftwywd2",
-     "e94hdw47np"
+     "054fsvk14g",
+     "552t1bt6tj",
+     "wrn3b5gn4t",
+     "zwvxrzj2sk"
     ]
    ]
   },
@@ -42,35 +42,35 @@
    "issue_id": "t2",
    "type": "duplicate_invoice",
    "affected_ids": [
-    "82tb1x3qyb",
-    "f4n7797tqj"
+    "240dfnmqjy",
+    "rqr4c1bys7"
    ],
-   "expected_amount_minor": 534000,
+   "expected_amount_minor": 80000,
    "currency": "EUR",
    "evidence_sets": [
     [
-     "82tb1x3qyb",
-     "f4n7797tqj",
-     "2fe3nd67q0",
-     "3zh8rf6v9v"
+     "240dfnmqjy",
+     "rqr4c1bys7",
+     "23nm8qg3qe",
+     "egyv01988z"
     ],
     [
-     "82tb1x3qyb",
-     "f4n7797tqj",
-     "2fe3nd67q0",
-     "cqywzbyghv"
+     "240dfnmqjy",
+     "rqr4c1bys7",
+     "23nm8qg3qe",
+     "w5k7zj5qax"
     ],
     [
-     "82tb1x3qyb",
-     "f4n7797tqj",
-     "3zh8rf6v9v",
-     "kwjkv5x413"
+     "240dfnmqjy",
+     "rqr4c1bys7",
+     "egyv01988z",
+     "h26q09xet8"
     ],
     [
-     "82tb1x3qyb",
-     "f4n7797tqj",
-     "cqywzbyghv",
-     "kwjkv5x413"
+     "240dfnmqjy",
+     "rqr4c1bys7",
+     "h26q09xet8",
+     "w5k7zj5qax"
     ]
    ]
   }

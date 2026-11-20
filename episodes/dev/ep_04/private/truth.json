@@ -1,25 +1,25 @@
 {
  "schema_version": "1",
- "episode_id": "ep_96bd5d2eba3b",
+ "episode_id": "ep_9b487a20cf8f",
  "issues": [
   {
    "issue_id": "t1",
    "type": "fx_error",
    "affected_ids": [
-    "tq85w531cy"
+    "w1xknq0sak"
    ],
-   "expected_amount_minor": 37884395,
+   "expected_amount_minor": 23554463,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "tq85w531cy",
-     "07pycfda11",
-     "2026-10-03|USD|KZT"
+     "w1xknq0sak",
+     "2e69symmkx",
+     "2026-10-07|RUB|KZT"
     ],
     [
-     "tq85w531cy",
-     "et6y7rze14",
-     "2026-10-03|USD|KZT"
+     "w1xknq0sak",
+     "vza7wa1mhf",
+     "2026-10-07|RUB|KZT"
     ]
    ]
   },
@@ -27,20 +27,20 @@
    "issue_id": "t2",
    "type": "fx_error",
    "affected_ids": [
-    "6vyzv63tyh"
+    "szkrcbkev8"
    ],
-   "expected_amount_minor": 47273728,
+   "expected_amount_minor": 90369141,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "6vyzv63tyh",
-     "4v9ser2vwn",
-     "2026-10-03|CNY|KZT"
+     "szkrcbkev8",
+     "j7nbaq0j12",
+     "2026-10-12|RUB|KZT"
     ],
     [
-     "6vyzv63tyh",
-     "mnqvg6ptw8",
-     "2026-10-03|CNY|KZT"
+     "szkrcbkev8",
+     "yxym16pvhc",
+     "2026-10-12|RUB|KZT"
     ]
    ]
   },
@@ -48,15 +48,15 @@
    "issue_id": "t3",
    "type": "fx_error",
    "affected_ids": [
-    "s1zzv8cyca"
+    "0erpbq2p20"
    ],
-   "expected_amount_minor": 13739778,
+   "expected_amount_minor": 4580396,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "s1zzv8cyca",
-     "b6a8nk8n0q",
-     "2026-10-25|USD|KZT"
+     "0erpbq2p20",
+     "w1ncs96h55",
+     "2026-10-13|USD|KZT"
     ]
    ]
   }

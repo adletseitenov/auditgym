@@ -1,19 +1,19 @@
 {
  "schema_version": "1",
- "episode_id": "ep_4b606ca8e65b",
+ "episode_id": "ep_036ac9ca99af",
  "issues": [
   {
    "issue_id": "t1",
    "type": "fx_error",
    "affected_ids": [
-    "tvyxeyh5m4"
+    "j8d7ba10p3"
    ],
-   "expected_amount_minor": 10214261,
+   "expected_amount_minor": 9531250,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "tvyxeyh5m4",
-     "gh5rb2cekc",
+     "j8d7ba10p3",
+     "beegzt5rj3",
      "2026-10-28|CNY|KZT"
     ]
    ]
@@ -22,14 +22,14 @@
    "issue_id": "t2",
    "type": "fx_error",
    "affected_ids": [
-    "9wfjr4mpr0"
+    "a8kzxrwn8x"
    ],
-   "expected_amount_minor": 20197964,
+   "expected_amount_minor": 20719306,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "9wfjr4mpr0",
-     "cc8qfjfsv2",
+     "a8kzxrwn8x",
+     "hzhwjmvzh4",
      "2026-10-30|CNY|KZT"
     ]
    ]
