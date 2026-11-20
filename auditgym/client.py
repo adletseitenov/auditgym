@@ -72,10 +72,12 @@ class Env:
     A `submit` that cannot be sent as JSON (NaN, a reference cycle, a 5 000-digit integer, nesting
     deeper than the recursion limit) is sent as a submit with an invalid structure: reward -1, the
     episode ends. Any other action that cannot be sent is an unknown action (a step is spent).
+    `shaped_reward=True` (train mode only, ignored in eval) asks for the experimental partial-credit
+    number `info["shaped_reward"]` in the terminal info (auditgym/shaped.py); by default the reply is unchanged.
     """
 
     def __init__(self, mode: str = "train", results_path=None, *, timeout: float | None = DEFAULT_TIMEOUT,
-                 _files: bool = False) -> None:
+                 shaped_reward: bool = False, _files: bool = False) -> None:
         if mode not in ("train", "eval"):
             raise EnvError("bad_mode")
         self.mode = mode
@@ -85,6 +87,8 @@ class Env:
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
         if not _files:
             command.append("--no-load")
+        if shaped_reward and mode == "train":  # never in eval: no hints, no extra journal data
+            command.append("--shaped-reward")
         pass_fds = ()
         if results_path is not None:
             try:
@@ -119,8 +123,9 @@ class Env:
 
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None, *,
-                   timeout: float | None = DEFAULT_TIMEOUT) -> "Env":
-        env = cls(mode=mode, results_path=results_path, timeout=timeout, _files=True)
+                   timeout: float | None = DEFAULT_TIMEOUT, shaped_reward: bool = False) -> "Env":
+        env = cls(mode=mode, results_path=results_path, timeout=timeout, shaped_reward=shaped_reward,
+                  _files=True)
         try:
             try:
                 path = os.fspath(pathlib.Path(directory).resolve())

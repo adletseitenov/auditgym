@@ -13,7 +13,7 @@ import os
 import re
 import sys
 
-from . import actions
+from . import actions, shaped
 from .actions import MAX_STEPS, ActionError, error
 from .calc import CalcError, calculate
 from .limits import MAX_SEED_BITS  # a longer seed is refused as bad_config; the running episode is untouched
@@ -117,12 +117,15 @@ class EvaluatorError(Exception):
 
 class Evaluator:
     def __init__(self, mode: str = "train", results_path=None, clock=None,
-                 time_limit=DEFAULT_TIME_LIMIT, results_stream=None) -> None:
+                 time_limit=DEFAULT_TIME_LIMIT, results_stream=None, shaped_reward=False) -> None:
         """`results_stream` is an already open text stream (the server gets the results file as an
-        inherited descriptor, so its path never appears in the process list); it wins over the path."""
+        inherited descriptor, so its path never appears in the process list); it wins over the path.
+        `shaped_reward` adds the experimental partial-credit reward (auditgym/shaped.py) to the terminal
+        `info` in train mode; it is off by default and ignored in eval mode, always."""
         if mode not in MODES:
             raise ValueError("mode must be 'train' or 'eval'")
         self._mode = mode
+        self._shaped = bool(shaped_reward) and mode == "train"
         self._results_path = None if results_stream is not None else results_path
         self._results_stream = results_stream
         if self._results_path is not None:
@@ -317,7 +320,16 @@ class Evaluator:
             return observation, 0.0, not truncated, truncated, {}
         info = {"reward": result["reward"], "precision": result["precision"], "recall": result["recall"],
                 "f1": result["f1"], "inspection_steps": inspection_steps}
+        if self._shaped:
+            info[shaped.INFO_KEY] = self._shaped_reward(payload, inspection_steps)
         return observation, result["reward"], not truncated, truncated, info
+
+    def _shaped_reward(self, payload, inspection_steps: int) -> float:
+        try:
+            return shaped.shaped_reward(self._episode, payload, inspection_steps)
+        except Exception as exc:  # an experimental number must not crash the episode; -1 as for a judge defect
+            print(f"auditgym evaluator: shaped reward raised {type(exc).__name__}", file=sys.stderr)
+            return -1.0
 
     def _write_result(self, result: dict, inspection_steps: int, truncated: bool) -> None:
         if self._results_path is None and self._results_stream is None:

@@ -191,6 +191,8 @@ def main(argv: list[str]) -> int:
     target.add_argument("--results", default=None)
     target.add_argument("--results-fd", type=int, default=None)
     parser.add_argument("--no-load", action="store_true")
+    parser.add_argument("--shaped-reward", action="store_true",
+                        help="train mode only: add info['shaped_reward'] (experimental) to the terminal info")
     arguments = parser.parse_args(argv)
     stream = None
     if arguments.mode == "eval" and arguments.results is None and arguments.results_fd is None:
@@ -202,7 +204,8 @@ def main(argv: list[str]) -> int:
     try:
         if arguments.results_fd is not None:
             stream = open(arguments.results_fd, "a", encoding="utf-8", closefd=True)
-        evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results, results_stream=stream)
+        evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results, results_stream=stream,
+                              shaped_reward=arguments.shaped_reward)
     except (OSError, ValueError):
         print("auditgym serve: cannot open the results file", file=sys.stderr)
         return 2

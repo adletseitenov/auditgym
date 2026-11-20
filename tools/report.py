@@ -46,7 +46,7 @@ def _row(result: dict, episode: dict) -> dict:
             pass
     info = result["info"]
     return {"reward": result["reward"], "precision": info.get("precision", 0.0), "recall": info.get("recall", 0.0),
-            "f1": info.get("f1", 0.0), "steps": result["steps"], "seconds": result["seconds"],
+            "f1": info.get("f1", 0.0), "shaped": info.get("shaped_reward"), "steps": result["steps"], "seconds": result["seconds"],
             "truncated": result["truncated"], "clean": not issues, "types": types}
 
 
@@ -83,7 +83,7 @@ def run_generated(names, cases, generation: dict | None = None) -> dict[str, lis
             generation.setdefault("attempts", []).append(episodes[-1]["private"]["provenance"].get("attempt", 0))
     rows: dict[str, list[dict]] = {}
     for name in names:
-        with Env(mode="train") as env:
+        with Env(mode="train", shaped_reward=True) as env:
             for (seed, config), episode in zip(cases, episodes):
                 result = run_episode(env, _policy(name, episode), seed, config)
                 rows.setdefault(name, []).append(_row(result, episode))
@@ -99,7 +99,7 @@ def run_directories(names, directories) -> dict[str, list[dict]]:
     for directory in directories:
         episode = load_episode(directory)
         for name in names:
-            env = Env.from_files(directory, mode="train")
+            env = Env.from_files(directory, mode="train", shaped_reward=True)
             try:
                 rows.setdefault(name, []).append(_row(run_episode(env, _policy(name, episode)), episode))
             finally:
@@ -118,7 +118,7 @@ def summary(rows: list[dict]) -> dict:
 
     return {"n": len(rows), "precision": mean(errors, "precision"), "recall": mean(errors, "recall"),
             "f1": mean(errors, "f1"), "reward_errors": mean(errors, "reward"), "reward_clean": mean(clean, "reward"),
-            "reward": mean(rows, "reward"), "steps": mean(rows, "steps"), "ms": 1000 * mean(rows, "seconds"),
+            "reward": mean(rows, "reward"), "shaped_errors": mean(errors, "shaped"), "steps": mean(rows, "steps"), "ms": 1000 * mean(rows, "seconds"),
             "truncated": sum(row["truncated"] for row in rows)}
 
 
@@ -194,15 +194,15 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 def _table(rows: dict[str, list[dict]]) -> list[str]:
     """Machine-independent metrics only: README copies these rows and `check` compares them byte for
     byte, so wall-clock time (different on every machine) lives in `_timing_table`."""
-    lines = ["| Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Шаги |",
-             "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    lines = ["| Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Shaped (эксп.): ошибки | Шаги |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for name in POLICIES:
         if name not in rows:
             continue
         s = summary(rows[name])
         lines.append(f"| {name} | {s['n']} | {_fmt(s['precision'])} | {_fmt(s['recall'])} | {_fmt(s['f1'])} | "
                      f"{_fmt(s['reward_errors'])} | {_fmt(s['reward_clean'])} | {_fmt(s['reward'])} | "
-                     f"{_fmt(s['steps'], 1)} |")
+                     f"{_fmt(s['shaped_errors'])} | {_fmt(s['steps'], 1)} |")
     return lines
 
 
@@ -265,7 +265,11 @@ def build_report(n: int, episodes_dir=None) -> str:
             "`heuristic` — демонстрационная эвристика без учёта отвлекающих случаев (не базовая политика и не часть "
             "баллов проверки): одинаковые суммы контрагента как дубли, любой неразнесённый остаток как разрыв, "
             "документ с датой вне периода и проводкой внутри как отсечка, расхождение с курсом напечатанной даты как "
-            "курсовая ошибка; частичные оплаты, позиции, пояс компании и переплаты она не различает.", ""]
+            "курсовая ошибка; частичные оплаты, позиции, пояс компании и переплаты она не различает.", "",
+            "Колонка «Shaped (эксп.): ошибки» — среднее экспериментальной награды с частичным баллом на книгах с "
+            "ошибками (`auditgym/shaped.py`, формула в `docs/DESIGN.md`). **Она экспериментальная и не входит в "
+            "награду кейса:** официальный возврат считается только по формуле CASE §05, колонки «Возврат» её не "
+            "используют. В режиме eval её нет нигде.", ""]
     for name, rows in sets.items():
         out += [f"## {titles[name][0].upper() + titles[name][1:]}", ""] + _table(rows) + [""] + _timing_table(rows) + [""]
         truncated = {policy: summary(policy_rows)["truncated"] for policy, policy_rows in rows.items()}
