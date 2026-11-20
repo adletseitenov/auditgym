@@ -362,7 +362,9 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
             if re.search(rf"(?<![0-9]){abs(seed)}(?![0-9])", text):
                 problems.append(f"{where}: the seed")
         if training:
-            unseen = _submitted_ids(line["action"]) - seen.get(run, set())
+            # A real id of the episode the agent was never shown; an invented token (random_explorer
+            # guesses one when it has seen no document) exists nowhere and carries nothing.
+            unseen = (_submitted_ids(line["action"]) - seen.get(run, set())) & (public_ids | truth_ids)
             if unseen:
                 problems.append(f"{where}: submitted ids the agent was never shown (truth in a training file)")
         _ids_in(observation, seen.setdefault(run, set()))
