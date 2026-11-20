@@ -91,7 +91,7 @@ row_id,timestamp,account,debit_minor,credit_minor,currency,entity_id,invoice_id,
 3tvzm6124t,2026-10-04T21:45:31+05:00,expense,298000,0,KZT,3y7xzy65pm,,
 3w83ze1g21,2026-10-23T02:43:31+05:00,revenue,0,1102500000,KZT,psf75pzw8b,4n2hkjkrcs,
 3ze1pw8a4b,2026-10-29T20:45:38+05:00,receivable,0,1134000000,KZT,5gyvx58nnf,y315dgznhk,xgf2wfqxsq
-44jp4e36gj,2026-10-20T14:20:09+05:00,receivable,0,471029512,KZT,r5md1xtwk9,xsf6jnr7a6,zh1j72w5pb
+44jp4e36gj,2026-10-20T14:20:09+05:00,receivable,0,347173146,KZT,5gyvx58nnf,xsf6jnr7a6,zh1j72w5pb
 44zgvvd6yx,2026-10-01T14:58:01+05:00,revenue,0,135000000,KZT,msxfddkwyf,tb2n0nkfne,
 46m5b099h9,2026-10-03T01:18:12+05:00,expense,824000,0,KZT,3y7xzy65pm,,
 48aaz69mnf,2026-10-31T03:52:59+05:00,expense,1490000,0,KZT,3y7xzy65pm,,
@@ -405,7 +405,7 @@ jjda9ppz20,2026-10-29T00:44:02+05:00,fx_difference,14308036,0,KZT,52mnm99mta,,qd
 jk4q1xc8d1,2026-10-22T14:58:49+05:00,expense,3033000,0,KZT,nv38201m13,,
 jmq72pdezd,2026-10-07T14:42:38+05:00,cash,0,3208000,KZT,cpr9cjgv35,,
 jny0spgxw6,2026-10-09T07:45:29+05:00,expense,1720000,0,KZT,7dje1em47z,,
-jr1e3zj66t,2026-10-10T15:57:57+05:00,receivable,471029512,0,KZT,r5md1xtwk9,xsf6jnr7a6,
+jr1e3zj66t,2026-10-10T15:57:57+05:00,receivable,347173146,0,KZT,5gyvx58nnf,xsf6jnr7a6,
 js3yr1zcc3,2026-10-17T22:57:55+05:00,expense,3723000,0,KZT,3y7xzy65pm,,
 jswm52mgnn,2026-10-25T13:31:21+05:00,expense,3535000,0,KZT,cpr9cjgv35,,
 jv09r4q70s,2026-10-27T21:08:10+05:00,cash,0,3957000,KZT,cpr9cjgv35,,
@@ -654,11 +654,11 @@ xeaxhe8ecp,2026-10-05T08:24:32+05:00,cash,0,1327000,KZT,q7cq7hcma6,,
 xjc7qcdx3w,2026-10-22T20:12:51+05:00,expense,1874000,0,KZT,3y7xzy65pm,,
 xmf42jp0yd,2026-10-01T20:24:41+05:00,cash,0,1304000,KZT,3y7xzy65pm,,
 xn2zve40t8,2026-10-23T11:39:54+05:00,cash,0,324000,KZT,7dje1em47z,,
-xs1wmpzfkp,2026-10-20T14:20:09+05:00,cash,472112928,0,KZT,r5md1xtwk9,xsf6jnr7a6,zh1j72w5pb
+xs1wmpzfkp,2026-10-20T14:20:09+05:00,cash,347971680,0,KZT,5gyvx58nnf,xsf6jnr7a6,zh1j72w5pb
 xv37q9m315,2026-10-13T06:33:36+05:00,expense,3990000,0,KZT,7dje1em47z,,
 xv7cmg6cpz,2026-10-28T16:55:55+05:00,cash,0,2817000,KZT,nv38201m13,,
 xx13x2jwdw,2026-10-12T04:17:00+05:00,receivable,0,496363768,KZT,yc7z9dkd08,75bd5ngzdh,ep4pjpnzc5
-xyq7ea1t5m,2026-10-20T14:20:09+05:00,fx_difference,0,1083416,KZT,r5md1xtwk9,,zh1j72w5pb
+xyq7ea1t5m,2026-10-20T14:20:09+05:00,fx_difference,0,798534,KZT,5gyvx58nnf,,zh1j72w5pb
 y0539hz21v,2026-10-06T09:44:02+05:00,expense,3732000,0,KZT,3y7xzy65pm,,
 y1dmj507h4,2026-10-03T01:19:12+05:00,cash,0,2071000,KZT,3y7xzy65pm,,
 y2hsj3608k,2026-10-05T16:46:03+05:00,cash,0,1368000,KZT,q7cq7hcma6,,
@@ -692,7 +692,7 @@ zg8tecw0qx,2026-10-26T07:52:22+05:00,expense,2856000,0,KZT,q7cq7hcma6,,
 zgd80zxhdg,2026-10-05T11:55:50+05:00,expense,288000,0,KZT,q7cq7hcma6,,
 zj4rmft8a5,2026-10-06T16:31:20+05:00,expense,3818000,0,KZT,cpr9cjgv35,,
 zkpz0as9w3,2026-10-26T15:40:40+05:00,receivable,0,1425652785,KZT,rpc5hhnsk5,1qbezp2ef2,by46k4pw2d
-zkv7jxd9xr,2026-10-10T15:57:57+05:00,revenue,0,471029512,KZT,r5md1xtwk9,xsf6jnr7a6,
+zkv7jxd9xr,2026-10-10T15:57:57+05:00,revenue,0,347173146,KZT,5gyvx58nnf,xsf6jnr7a6,
 zpp49v0cfb,2026-10-09T03:13:22+05:00,expense,3245000,0,KZT,7dje1em47z,,
 zqpmd58af1,2026-10-26T12:05:15+05:00,cash,0,2417000,KZT,nv38201m13,,
 zv0dagehd0,2026-10-25T14:35:31+05:00,expense,3131000,0,KZT,7dje1em47z,,

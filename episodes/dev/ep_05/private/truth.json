@@ -1,25 +1,25 @@
 {
  "schema_version": "1",
- "episode_id": "ep_f44953e04765",
+ "episode_id": "ep_085dbad78e2d",
  "issues": [
   {
    "issue_id": "t1",
    "type": "fx_error",
    "affected_ids": [
-    "f5ndkbsfd6"
+    "fa8jwxxkw6"
    ],
-   "expected_amount_minor": 1341990,
+   "expected_amount_minor": 18163619,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "f5ndkbsfd6",
-     "cgqf7v38ja",
-     "2026-10-21|USD|KZT"
+     "fa8jwxxkw6",
+     "cctt3664f0",
+     "2026-10-01|USD|KZT"
     ],
     [
-     "f5ndkbsfd6",
-     "vsj23q0mky",
-     "2026-10-21|USD|KZT"
+     "fa8jwxxkw6",
+     "jj1czzeav6",
+     "2026-10-01|USD|KZT"
     ]
    ]
   },

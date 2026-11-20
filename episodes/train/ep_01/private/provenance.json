@@ -98,7 +98,7 @@
   {
    "operator": "duplicate_invoice",
    "params": {
-    "original_doc_id": "2b37f8ykyw",
+    "original_doc_id": "130gde7vp8",
     "copy_paid": true
    },
    "issue_id": "t2",
@@ -109,7 +109,7 @@
      "payment_id": "zh1j72w5pb",
      "timestamp": "2026-10-12T04:21:13+05:00",
      "currency": "USD",
-     "amount_minor": 1004000,
+     "amount_minor": 740000,
      "invoice_refs": [
       "xsf6jnr7a6"
      ]
@@ -117,27 +117,19 @@
     {
      "doc_id": "6ktnj5k9k0",
      "invoice_id": "xsf6jnr7a6",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "issued_at": "2026-10-10T15:50:54+05:00",
      "due_at": "2026-11-09T15:50:54+05:00",
      "currency": "USD",
-     "total_minor": 1004000,
+     "total_minor": 740000,
      "line_items": [
       {
-       "description": "Software licence",
-       "quantity": 3,
-       "unit_price_minor": 43000,
-       "amount_minor": 129000,
-       "service_start": "2026-10-01",
-       "service_end": "2026-10-31"
-      },
-      {
-       "description": "Design work",
+       "description": "Audit preparation",
        "quantity": 5,
-       "unit_price_minor": 175000,
-       "amount_minor": 875000,
-       "service_start": "2026-10-01",
-       "service_end": "2026-10-31"
+       "unit_price_minor": 148000,
+       "amount_minor": 740000,
+       "service_start": "2026-11-01",
+       "service_end": "2026-11-30"
       }
      ]
     },
@@ -146,9 +138,9 @@
      "timestamp": "2026-10-20T14:20:09+05:00",
      "account": "receivable",
      "debit_minor": 0,
-     "credit_minor": 471029512,
+     "credit_minor": 347173146,
      "currency": "KZT",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "invoice_id": "xsf6jnr7a6",
      "payment_id": "zh1j72w5pb"
     },
@@ -156,10 +148,10 @@
      "row_id": "jr1e3zj66t",
      "timestamp": "2026-10-10T15:57:57+05:00",
      "account": "receivable",
-     "debit_minor": 471029512,
+     "debit_minor": 347173146,
      "credit_minor": 0,
      "currency": "KZT",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "invoice_id": "xsf6jnr7a6",
      "payment_id": null
     },
@@ -167,10 +159,10 @@
      "row_id": "xs1wmpzfkp",
      "timestamp": "2026-10-20T14:20:09+05:00",
      "account": "cash",
-     "debit_minor": 472112928,
+     "debit_minor": 347971680,
      "credit_minor": 0,
      "currency": "KZT",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "invoice_id": "xsf6jnr7a6",
      "payment_id": "zh1j72w5pb"
     },
@@ -179,9 +171,9 @@
      "timestamp": "2026-10-20T14:20:09+05:00",
      "account": "fx_difference",
      "debit_minor": 0,
-     "credit_minor": 1083416,
+     "credit_minor": 798534,
      "currency": "KZT",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "invoice_id": null,
      "payment_id": "zh1j72w5pb"
     },
@@ -190,9 +182,9 @@
      "timestamp": "2026-10-10T15:57:57+05:00",
      "account": "revenue",
      "debit_minor": 0,
-     "credit_minor": 471029512,
+     "credit_minor": 347173146,
      "currency": "KZT",
-     "entity_id": "r5md1xtwk9",
+     "entity_id": "5gyvx58nnf",
      "invoice_id": "xsf6jnr7a6",
      "payment_id": null
     }

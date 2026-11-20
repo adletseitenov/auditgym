@@ -1,6 +1,6 @@
 {
  "schema_version": "1",
- "episode_id": "ep_e2167db88b83",
+ "episode_id": "ep_07eeed972351",
  "issues": [
   {
    "issue_id": "t1",
@@ -172,18 +172,18 @@
    "issue_id": "t8",
    "type": "allocation_gap",
    "affected_ids": [
-    "m1ce0he6k9",
-    "x9ksb1rjtw"
+    "6tq0xpjc0a",
+    "gv6g98bar1"
    ],
-   "expected_amount_minor": 370140000,
+   "expected_amount_minor": 48742225,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "m1ce0he6k9",
-     "x9ksb1rjtw",
-     "670pvdzrb7",
-     "bd8pad7hf9",
-     "vjzs5vesk1"
+     "6tq0xpjc0a",
+     "gv6g98bar1",
+     "5cx494m84w",
+     "tgd8rshh6b",
+     "v8zanexvv2"
     ]
    ]
   }

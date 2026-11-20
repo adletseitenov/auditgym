@@ -39,127 +39,170 @@
    "operator": "fx_error",
    "params": {
     "mode": "wrong_date",
-    "rate_date": "2026-10-25",
-    "used_rate": "481.8762",
-    "policy_rate": "476.7147"
+    "rate_date": "2026-10-06",
+    "used_rate": "478.4279",
+    "policy_rate": "474.4165"
    },
    "issue_id": "t1",
    "before": [
     {
-     "doc_id": "f5ndkbsfd6",
-     "invoice_id": "0p53ew3fn9",
-     "entity_id": "0y50qd7te6",
-     "issued_at": "2026-10-22T05:18:01+14:00",
-     "due_at": "2026-11-05T05:18:01+14:00",
+     "doc_id": "fa8jwxxkw6",
+     "invoice_id": "64x0bcbczh",
+     "entity_id": "2mz4qz0nzp",
+     "issued_at": "2026-10-01T01:13:59+05:00",
+     "due_at": "2026-10-15T01:13:59+05:00",
      "currency": "USD",
-     "total_minor": 260000,
+     "total_minor": 4528000,
      "line_items": [
       {
-       "description": "Training",
+       "description": "Consulting",
        "quantity": 4,
-       "unit_price_minor": 65000,
-       "amount_minor": 260000,
-       "service_start": "2026-10-01",
-       "service_end": "2026-10-31"
+       "unit_price_minor": 525000,
+       "amount_minor": 2100000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
+      },
+      {
+       "description": "Maintenance",
+       "quantity": 2,
+       "unit_price_minor": 319000,
+       "amount_minor": 638000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
+      },
+      {
+       "description": "Data migration",
+       "quantity": 2,
+       "unit_price_minor": 895000,
+       "amount_minor": 1790000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
       }
      ]
     },
     {
-     "row_id": "cgqf7v38ja",
-     "timestamp": "2026-10-22T14:41:02+05:00",
+     "row_id": "9ewzpd266f",
+     "timestamp": "2026-10-23T08:08:34+05:00",
+     "account": "fx_difference",
+     "debit_minor": 0,
+     "credit_minor": 19040693,
+     "currency": "KZT",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": null,
+     "payment_id": "xdb2emss2f"
+    },
+    {
+     "row_id": "cctt3664f0",
+     "timestamp": "2026-10-01T19:18:51+05:00",
      "account": "revenue",
      "debit_minor": 0,
-     "credit_minor": 123945822,
+     "credit_minor": 2148157912,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
      "payment_id": null
     },
     {
-     "row_id": "kzznn8bwz6",
-     "timestamp": "2026-10-23T06:43:21+05:00",
+     "row_id": "h81thqsmwa",
+     "timestamp": "2026-10-23T08:08:34+05:00",
      "account": "receivable",
      "debit_minor": 0,
-     "credit_minor": 123945822,
+     "credit_minor": 2148157912,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
-     "payment_id": "xm36gapywz"
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
+     "payment_id": "xdb2emss2f"
     },
     {
-     "row_id": "pz2s3easnq",
-     "timestamp": "2026-10-23T06:43:21+05:00",
-     "account": "fx_difference",
-     "debit_minor": 0,
-     "credit_minor": 1341990,
-     "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": null,
-     "payment_id": "xm36gapywz"
-    },
-    {
-     "row_id": "vsj23q0mky",
-     "timestamp": "2026-10-22T14:41:02+05:00",
+     "row_id": "jj1czzeav6",
+     "timestamp": "2026-10-01T19:18:51+05:00",
      "account": "receivable",
-     "debit_minor": 123945822,
+     "debit_minor": 2148157912,
      "credit_minor": 0,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
      "payment_id": null
     }
    ],
    "after": [
     {
-     "doc_id": "f5ndkbsfd6",
-     "invoice_id": "0p53ew3fn9",
-     "entity_id": "0y50qd7te6",
-     "issued_at": "2026-10-22T05:18:01+14:00",
-     "due_at": "2026-11-05T05:18:01+14:00",
+     "doc_id": "fa8jwxxkw6",
+     "invoice_id": "64x0bcbczh",
+     "entity_id": "2mz4qz0nzp",
+     "issued_at": "2026-10-01T01:13:59+05:00",
+     "due_at": "2026-10-15T01:13:59+05:00",
      "currency": "USD",
-     "total_minor": 260000,
+     "total_minor": 4528000,
      "line_items": [
       {
-       "description": "Training",
+       "description": "Consulting",
        "quantity": 4,
-       "unit_price_minor": 65000,
-       "amount_minor": 260000,
-       "service_start": "2026-10-01",
-       "service_end": "2026-10-31"
+       "unit_price_minor": 525000,
+       "amount_minor": 2100000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
+      },
+      {
+       "description": "Maintenance",
+       "quantity": 2,
+       "unit_price_minor": 319000,
+       "amount_minor": 638000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
+      },
+      {
+       "description": "Data migration",
+       "quantity": 2,
+       "unit_price_minor": 895000,
+       "amount_minor": 1790000,
+       "service_start": "2026-09-01",
+       "service_end": "2026-09-30"
       }
      ]
     },
     {
-     "row_id": "cgqf7v38ja",
-     "timestamp": "2026-10-22T14:41:02+05:00",
+     "row_id": "9ewzpd266f",
+     "timestamp": "2026-10-23T08:08:34+05:00",
+     "account": "fx_difference",
+     "debit_minor": 0,
+     "credit_minor": 877074,
+     "currency": "KZT",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": null,
+     "payment_id": "xdb2emss2f"
+    },
+    {
+     "row_id": "cctt3664f0",
+     "timestamp": "2026-10-01T19:18:51+05:00",
      "account": "revenue",
      "debit_minor": 0,
-     "credit_minor": 125287812,
+     "credit_minor": 2166321531,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
      "payment_id": null
     },
     {
-     "row_id": "kzznn8bwz6",
-     "timestamp": "2026-10-23T06:43:21+05:00",
+     "row_id": "h81thqsmwa",
+     "timestamp": "2026-10-23T08:08:34+05:00",
      "account": "receivable",
      "debit_minor": 0,
-     "credit_minor": 125287812,
+     "credit_minor": 2166321531,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
-     "payment_id": "xm36gapywz"
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
+     "payment_id": "xdb2emss2f"
     },
     {
-     "row_id": "vsj23q0mky",
-     "timestamp": "2026-10-22T14:41:02+05:00",
+     "row_id": "jj1czzeav6",
+     "timestamp": "2026-10-01T19:18:51+05:00",
      "account": "receivable",
-     "debit_minor": 125287812,
+     "debit_minor": 2166321531,
      "credit_minor": 0,
      "currency": "KZT",
-     "entity_id": "0y50qd7te6",
-     "invoice_id": "0p53ew3fn9",
+     "entity_id": "2mz4qz0nzp",
+     "invoice_id": "64x0bcbczh",
      "payment_id": null
     }
    ]
