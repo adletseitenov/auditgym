@@ -26,7 +26,9 @@ as an invalid structure that ends the episode with reward -1. With no running ep
 `--no-load` refuses `load` altogether (Env() without files starts the server this way, so a
 policy writing to the pipe cannot point the server at a directory). `--results-fd N` takes the
 results file as an inherited, already open descriptor instead of a path, so the path is not in
-the server's argv (the process list); Env uses it on POSIX.
+the server's argv (the process list); Env uses it on POSIX. `--secret-file PATH` reads the
+generation secret from a file (auditgym/secret.py; else $AUDITGYM_SECRET_FILE, else $AUDITGYM_SECRET);
+an unusable secret file stops the server with exit code 2 before the first request.
 
 A refused reset or load replies the same way with code `bad_config` (bad seed or config),
 `not_loaded` (reset without seed and nothing loaded) or `bad_episode` (directory unreadable).
@@ -193,7 +195,16 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--no-load", action="store_true")
     parser.add_argument("--shaped-reward", action="store_true",
                         help="train mode only: add info['shaped_reward'] (experimental) to the terminal info")
+    parser.add_argument("--secret-file", default=None,
+                        help="file with the generation secret (wins over $AUDITGYM_SECRET_FILE and $AUDITGYM_SECRET)")
     arguments = parser.parse_args(argv)
+    from .secret import SecretError, read_secret
+
+    try:
+        secret = read_secret(secret_file=arguments.secret_file)
+    except SecretError as error:  # fixed code only: no path, no value
+        print(f"auditgym serve: cannot use the secret ({error.code})", file=sys.stderr)
+        return 2
     stream = None
     if arguments.mode == "eval" and arguments.results is None and arguments.results_fd is None:
         arguments.results = default_results_path()  # the journal of an eval run always exists (C5)
@@ -205,7 +216,7 @@ def main(argv: list[str]) -> int:
         if arguments.results_fd is not None:
             stream = open(arguments.results_fd, "a", encoding="utf-8", closefd=True)
         evaluator = Evaluator(mode=arguments.mode, results_path=arguments.results, results_stream=stream,
-                              shaped_reward=arguments.shaped_reward)
+                              shaped_reward=arguments.shaped_reward, secret=secret)
     except (OSError, ValueError):
         print("auditgym serve: cannot open the results file", file=sys.stderr)
         return 2

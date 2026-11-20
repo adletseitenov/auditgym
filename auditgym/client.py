@@ -17,6 +17,12 @@ Hardening of the process boundary:
 - A policy holding this object can still reach the pipes (Python has no private attributes), so
   the server gives the pipe no more power than reset/step: `load` is accepted only as the first
   request and only by a server started for Env.from_files; Env() starts it with `--no-load`.
+- The client never reads the generation secret. `secret_file=PATH` hands the server the path
+  ($AUDITGYM_SECRET_FILE in the server's environment) and drops $AUDITGYM_SECRET from that
+  environment. A server started by Env runs as the policy's user, so this is not a security
+  boundary by itself; the boundary is `server_command` (README «Закрытая проверка»): the evaluator
+  in its own container or under its own user, holding the secret and the journal, while the policy
+  gets nothing but the two pipes.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ import threading
 
 from .actions import default_results_path
 from .limits import json_depth_exceeds
+from .secret import SECRET_ENV, SECRET_FILE_ENV
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
 _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal_error")
@@ -61,7 +68,12 @@ def _is_submit(action: object) -> bool:
 class Env:
     """Client of the evaluator process.
 
-    `Env(mode="train" | "eval", results_path=None, timeout=120.0)`. In eval mode without a
+    `Env(mode="train" | "eval", results_path=None, timeout=120.0, secret_file=None, server_command=None)`.
+    `secret_file`: path of the generation secret, passed to the server, never read here.
+    `server_command`: argv that starts `python -m auditgym serve ...` elsewhere (docker run -i ...,
+    sudo -u ...); the client appends `--mode M` and `--no-load`, and the journal and the secret are
+    configured in that command (results_path and secret_file are then refused: bad_server_command).
+    In eval mode without a
     `results_path` the journal is $AUDITGYM_RESULTS or `runs/results.jsonl` in the current directory (audit C5); it is
     created with mode 0600. `timeout` bounds the wait for one reply (None: no bound); on expiry
     the server is stopped and `EnvError("timeout")` is raised.
@@ -77,14 +89,24 @@ class Env:
     """
 
     def __init__(self, mode: str = "train", results_path=None, *, timeout: float | None = DEFAULT_TIMEOUT,
-                 shaped_reward: bool = False, _files: bool = False) -> None:
+                 shaped_reward: bool = False, secret_file=None, server_command=None,
+                 _files: bool = False) -> None:
         if mode not in ("train", "eval"):
             raise EnvError("bad_mode")
         self.mode = mode
         self._timeout = timeout
-        if mode == "eval" and results_path is None:
-            results_path = default_results_path()
-        command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
+        if server_command is not None:
+            # An evaluator started elsewhere (a container, another user): it owns its journal and
+            # its secret, the client adds only the mode and the load rule (README «Закрытая проверка»).
+            if (results_path is not None or secret_file is not None or isinstance(server_command, (str, bytes))
+                    or not all(isinstance(part, str) for part in server_command) or not server_command):
+                raise EnvError("bad_server_command")
+            command = list(server_command)
+        else:
+            command = [sys.executable, "-m", "auditgym", "serve"]
+            if mode == "eval" and results_path is None:
+                results_path = default_results_path()
+        command += ["--mode", mode]
         if not _files:
             command.append("--no-load")
         if shaped_reward and mode == "train":  # never in eval: no hints, no extra journal data
@@ -108,6 +130,12 @@ class Env:
         environment = dict(os.environ)
         environment["PYTHONPATH"] = os.pathsep.join(
             [_PACKAGE_PARENT] + ([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else []))
+        if secret_file is not None:
+            try:
+                environment[SECRET_FILE_ENV] = os.fspath(pathlib.Path(secret_file).resolve())
+            except (TypeError, ValueError, OSError):
+                raise EnvError("bad_secret_file") from None
+            environment.pop(SECRET_ENV, None)  # the file wins; the value need not travel further
         try:
             self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                              stderr=subprocess.DEVNULL, env=environment, cwd=_PACKAGE_PARENT,
@@ -119,13 +147,14 @@ class Env:
                 os.close(descriptor)  # the server holds its own copy
         # Popen keeps its argv; drop it so nothing about the server's arguments stays here.
         self._process.args = ["auditgym-serve"]
-        del command, environment, results_path
+        del command, environment, results_path, secret_file
 
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None, *,
-                   timeout: float | None = DEFAULT_TIMEOUT, shaped_reward: bool = False) -> "Env":
+                   timeout: float | None = DEFAULT_TIMEOUT, shaped_reward: bool = False,
+                   secret_file=None) -> "Env":
         env = cls(mode=mode, results_path=results_path, timeout=timeout, shaped_reward=shaped_reward,
-                  _files=True)
+                  secret_file=secret_file, _files=True)
         try:
             try:
                 path = os.fspath(pathlib.Path(directory).resolve())

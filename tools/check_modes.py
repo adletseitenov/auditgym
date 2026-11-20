@@ -61,11 +61,15 @@ def suite(full: bool, start: str = "tests") -> unittest.TestSuite:
 
 def secret_line(environ=None) -> str:
     """Whether the evaluator secret is set (docs/DECISIONS.md H). The value is never printed."""
-    from auditgym.evaluator import SECRET_ENV
+    from auditgym.secret import SECRET_ENV, SECRET_FILE_ENV, secret_source
 
     environ = os.environ if environ is None else environ
-    if environ.get(SECRET_ENV, ""):
-        return f"{SECRET_ENV}: set (the closed run is not reproducible without it)"
+    source = secret_source(environ)
+    if source == "file":
+        return f"{SECRET_ENV}: set via {SECRET_FILE_ENV} (the closed run is not reproducible without it)"
+    if source == "value":
+        return (f"{SECRET_ENV}: set as a value (a policy started from this environment sees it too; "
+                f"prefer {SECRET_FILE_ENV} readable only by the evaluator)")
     return (f"{SECRET_ENV}: not set (open episodes are reproducible from the seed; "
             f"set it for a closed run, see README «Закрытая проверка»)")
 

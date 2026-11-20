@@ -1,8 +1,8 @@
 """python -m auditgym export --seed N [--config JSON | --config-file PATH] --out DIR
 
 Writes one episode directory (public/ + private/, the layout of episodes/train/*) built the way the
-evaluator builds it: the secret comes from the environment variable AUDITGYM_SECRET, through the same
-constant as the evaluator. A jury that runs closed episodes with a secret gets the reference for its
+evaluator builds it: the secret comes from --secret-file, else $AUDITGYM_SECRET_FILE, else
+$AUDITGYM_SECRET, read by the same function as the evaluator (auditgym/secret.py). A jury that runs closed episodes with a secret gets the reference for its
 own oracle here (generate(seed, config) without the secret builds a different episode). The directory
 loads with Env.from_files(DIR). The secret is read, never printed and never written; private/ holds
 the truth and the seed, keep it on the evaluator side.
@@ -18,13 +18,14 @@ import sys
 from .limits import MAX_SEED_BITS
 
 
-def build_episode(seed: int, config, environ=None) -> dict:
-    """The episode the evaluator builds for (seed, config) under the secret in `environ`."""
-    from .evaluator import SECRET_ENV
+def build_episode(seed: int, config, environ=None, secret_file=None) -> dict:
+    """The episode the evaluator builds for (seed, config) under the secret of `environ`
+    (or of `secret_file`)."""
     from .generate import generate
+    from .secret import read_secret
 
     environ = os.environ if environ is None else environ
-    return generate(seed, config, secret=environ.get(SECRET_ENV, ""))
+    return generate(seed, config, secret=read_secret(environ, secret_file))
 
 
 def main(argv: list[str]) -> int:
@@ -34,6 +35,8 @@ def main(argv: list[str]) -> int:
     source.add_argument("--config", help="configuration as a JSON object")
     source.add_argument("--config-file", help="path of a JSON file with the configuration")
     parser.add_argument("--out", required=True, help="directory to create (must be empty or missing)")
+    parser.add_argument("--secret-file", default=None,
+                        help="file with the evaluator secret (wins over $AUDITGYM_SECRET_FILE and $AUDITGYM_SECRET)")
     args = parser.parse_args(argv)
 
     def fail(message: str) -> int:
@@ -55,12 +58,15 @@ def main(argv: list[str]) -> int:
         return fail(f"{out} exists and is not an empty directory")
 
     from .config import ConfigError
+    from .secret import SecretError
     from .storage import write_episode
 
     try:
-        episode = build_episode(args.seed, config)
+        episode = build_episode(args.seed, config, secret_file=args.secret_file)
     except ConfigError as error:
         return fail(f"bad configuration ({error.code})")
+    except SecretError as error:
+        return fail(f"cannot use the secret ({error.code})")
     write_episode(episode, out)
     print(f"wrote episode {episode['public']['manifest']['episode_id']} to {out}")
     return 0
