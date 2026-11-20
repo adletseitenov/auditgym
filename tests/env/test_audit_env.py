@@ -405,7 +405,7 @@ class JournalTest(unittest.TestCase):
     def test_terminated_and_truncated_are_in_the_journal(self):
         evaluator, path = self.journal()
         evaluator.step({"action": "submit", "findings": CORRECT_TINY})
-        again = Evaluator(mode="eval", results_path=path, clock=FakeClock())  # eval plays a loaded episode once
+        again = Evaluator(mode="eval", results_path=path, clock=FakeClock())
         again.load(TINY)
         for _ in range(100):
             again.step(FX_PAGE)

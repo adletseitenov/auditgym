@@ -146,23 +146,51 @@ class EndOfInputTest(unittest.TestCase):
 
 
 class EvalRestartTest(unittest.TestCase):
-    def test_eval_refuses_a_restart_of_the_loaded_episode_after_its_first_step(self):
+    """One rule for reset in the middle of an eval episode, by seed or for a loaded episode: it is
+    allowed (the jury may test that reset isolates the episode), the spent run is journaled as
+    `abandoned`, and the new run starts with the full budget (DECISIONS H, A1/A2)."""
+
+    def test_eval_restarts_the_loaded_episode_and_journals_the_abandoned_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "r.jsonl"
+            with Env.from_files(TINY, mode="eval", results_path=path) as env:
+                first = env.reset()[0]
+                second = env.reset()[0]  # before the first step: the same episode, no journal row
+                self.assertEqual(first, second)
+                self.assertEqual(env.step(FX_PAGE)[0]["steps_remaining"], 99)
+                self.assertEqual(env.step(FX_PAGE)[0]["steps_remaining"], 98)
+                self.assertEqual(env.reset()[0], first)  # mid-episode: allowed, a full budget again
+                self.assertEqual(rows(path)[0]["event"], "abandoned")
+                self.assertEqual(env.step(FX_PAGE)[0]["steps_remaining"], 99)
+                env.step({"action": "submit", "findings": {"episode_id": "ep_tiny0001", "findings": []}})
+                self.assertEqual(env.reset()[0], first)  # after the end: a new run of the same episode
+            found = rows(path)
+        self.assertEqual([(row["event"], row["episode_run"], row["inspection_steps"]) for row in found],
+                         [("abandoned", 1, 2), ("finished", 2, 1)])
+        self.assertIsNone(found[0]["reward"])
+        self.assertEqual(found[1]["reward"], -1.0)  # silence on a book with an error
+
+    def test_a_restarted_loaded_episode_closed_untouched_is_not_a_minus_one(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "r.jsonl"
             with Env.from_files(TINY, mode="eval", results_path=path) as env:
                 env.reset()
-                env.reset()  # before the first step: allowed, the same episode
-                observation = env.step(FX_PAGE)[0]
-                self.assertEqual(observation["steps_remaining"], 99)
-                with self.assertRaises(EnvError) as caught:
-                    env.reset()
-                self.assertEqual(caught.exception.code, "bad_request")
-                self.assertEqual(env.step(FX_PAGE)[0]["steps_remaining"], 98)  # the episode goes on
-                env.step({"action": "submit", "findings": {"episode_id": "ep_tiny0001", "findings": []}})
-                with self.assertRaises(EnvError):
-                    env.reset()  # nor after its end
-            [row] = rows(path)
-        self.assertEqual((row["inspection_steps"], row["episode_run"]), (2, 1))
+                env.step(FX_PAGE)
+                env.reset()  # abandons the first run; the new one has no step
+            found = rows(path)
+        self.assertEqual([(row["event"], row["inspection_steps"]) for row in found], [("abandoned", 1)])
+
+    def test_the_same_rule_for_an_episode_by_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "r.jsonl"
+            with Env(mode="eval", results_path=path) as env:
+                first = env.reset(5, CLEAN)[0]
+                env.step(FX_PAGE)
+                self.assertEqual(env.reset(5, CLEAN)[0], first)
+                self.assertEqual(env.step(FX_PAGE)[0]["steps_remaining"], 99)
+            found = rows(path)
+        self.assertEqual([(row["event"], row["inspection_steps"], row["ended_by"] if "ended_by" in row else None)
+                          for row in found], [("abandoned", 1, None), ("finished", 100, "close")])
 
     def test_train_still_restarts_the_loaded_episode(self):
         with Env.from_files(TINY) as env:

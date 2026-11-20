@@ -140,7 +140,6 @@ class Evaluator:
         self._episode = None  # the running episode, public and private
         self._resets_abandoned = 0  # episodes of this session replaced by reset/load while running
         self._episode_runs = {}   # episode_id -> journal rows written for it in this session (episode_run)
-        self._loaded_spent = False  # the loaded episode has had a step (eval: no restart after that)
         self._clear()
 
     @property
@@ -170,11 +169,9 @@ class Evaluator:
             if self._loaded is not None:
                 if config not in (None, {}):  # a loaded episode has no config to apply (CONTRACTS §4)
                     raise EvaluatorError("bad_config")
-                if self._mode == "eval" and self._loaded_spent:
-                    # Eval plays the loaded episode once: a restart after its first step would give a
-                    # fresh 100 steps and 60 s on the same books (audit A1). A protocol error; the
-                    # running or finished episode stays as it is.
-                    raise EvaluatorError("bad_request")
+                # A restart is allowed in eval as it is for an episode by seed (the jury may test that
+                # reset isolates the episode); what was spent before it is journaled as `abandoned`
+                # by _swap_in (audit A1), and the new run starts with the full budget.
                 return self._swap_in(copy.deepcopy(self._loaded), from_loaded=True)
             seed = self._next_seed
         elif isinstance(seed, str):
@@ -211,7 +208,6 @@ class Evaluator:
         except Exception:  # files are outside input: any defect is one fixed error
             raise EvaluatorError("bad_episode") from None
         self._loaded = loaded
-        self._loaded_spent = False
         return observation
 
     def _swap_in(self, episode: dict, from_loaded: bool = False) -> tuple[dict, dict]:
@@ -327,8 +323,6 @@ class Evaluator:
 
     def _count_step(self) -> None:
         self._steps += 1
-        if self._from_loaded:
-            self._loaded_spent = True
 
     def _after_step(self, observation: dict):
         observation["steps_remaining"] = self._remaining()
