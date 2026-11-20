@@ -1,0 +1,65 @@
+# Закрытая проверка
+
+Вынесено из `README.md` без изменений.
+
+> **Для закрытого прогона задайте секрет оценщика — лучше файлом `AUDITGYM_SECRET_FILE`, а не значением `AUDITGYM_SECRET`. Переменная окружения работает для `python3 -m auditgym serve` и `export`; для `Env` секрет нужен явно: `Env(mode="eval", secret_file=PATH)` или `server_command=[...]`.** Без секрета эпизод по seed и конфигурации воспроизводится кодом из этого репозитория: агент, который может импортировать `auditgym.generate`, переберёт малый seed и восстановит эталон (`python3 -m tools.seed_recovery`: seed 100 находится за 101 кандидата). Секрет оценщика подмешивается в каждый поток случайности, и по открытому коду без него эпизод не собрать. Воспроизводимость при этом сохраняется: **один и тот же секрет, seed и конфигурация дают побайтно один и тот же эпизод**, а смена секрета даёт другой. Значение нигде не печатается и не попадает в наблюдения, журналы и траектории.
+
+**Где настоящая граница.** Секрет защищает эталон, только если политика не может его прочитать. Переменная `AUDITGYM_SECRET`, заданная в оболочке, видна каждому процессу, запущенному из неё, в том числе политике: это утечка по настройке, и код её не исправит. `Env()` запускает оценщик дочерним процессом под тем же пользователем, что и политика, поэтому сам по себе `Env` — удобство, а не граница. Граница — **оценщик в отдельном процессе под отдельным пользователем или в отдельном контейнере**: только он читает файл секрета и пишет журнал, а политика получает лишь два канала (stdin и stdout оценщика). Клиент секрет не читает и сам не передаёт: `Env()` всегда убирает `AUDITGYM_SECRET` и `AUDITGYM_SECRET_FILE` из окружения оценщика, который запускает, поэтому политика не может поднять свой `Env(mode="train")` с тем же секретом и перебором seed найти скрытый эпизод. Секрет оценщику передаётся только явно: `Env(secret_file=PATH)` передаёт только путь, а `Env(mode="eval")`, у которого секрет есть лишь в окружении, отказывает (`EnvError("bad_secret_file")`, значение и путь не называются): тихого прогона без секрета нет. В режиме `train` в этом случае только `RuntimeWarning`. `Env(server_command=[...])` подключается к оценщику, запущенному чужой командой (журнал и секрет тогда настраивает эта команда, клиент добавляет только `--mode` и `--no-load`).
+
+Рецепт: оценщик под пользователем `auditgym-eval` (Linux, команды от root один раз):
+
+```
+useradd --system --no-create-home auditgym-eval
+install -d -o auditgym-eval -m 700 /etc/auditgym /var/lib/auditgym
+head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /etc/auditgym/secret
+chown auditgym-eval /etc/auditgym/secret && chmod 400 /etc/auditgym/secret
+cat > /usr/local/bin/auditgym-eval-serve <<'SH'
+#!/bin/sh
+# Только то, что добавляет Env: режим eval без load. Свой --mode train или --results политике не передать.
+[ "$*" = "--mode eval --no-load" ] || exit 2
+cd /opt/auditgym && exec /usr/bin/python3.11 -m auditgym serve --mode eval --no-load \
+    --secret-file /etc/auditgym/secret --results /var/lib/auditgym/results.jsonl
+SH
+chmod 755 /usr/local/bin/auditgym-eval-serve
+echo 'policy ALL=(auditgym-eval) NOPASSWD: /usr/local/bin/auditgym-eval-serve' > /etc/sudoers.d/auditgym
+```
+
+Код репозитория лежит в `/opt/auditgym` (владелец root, только чтение). Политика работает под пользователем `policy` и не может прочитать ни секрет, ни журнал:
+
+```python
+from auditgym import Env
+command = ["sudo", "-n", "-u", "auditgym-eval", "/usr/local/bin/auditgym-eval-serve"]
+with Env(mode="eval", server_command=command) as env:
+    observation, info = env.reset(seed, config)   # seed и config выдаёт оркестратор жюри, не политика
+```
+
+Тот же оценщик в контейнере: `docker run -i --rm --network none -v /etc/auditgym:/run/auditgym:ro -v /var/lib/auditgym:/out auditgym python -m auditgym serve --secret-file /run/auditgym/secret --results /out/results.jsonl` — каналы этого процесса отдаются политике; сама политика при этом не должна иметь доступа к Docker (доступ к Docker равен root). Рецепт с контейнером проверен: тест `tests/env/test_docker_recipe.py` запускает `Env(mode="eval", server_command=["docker", "run", "-i", ...])` с секретом из смонтированного файла, прогоняет эпизод и проверяет подпись журнала `verify-journal` (тест пропускается, если нет `docker` или образа `auditgym`; другой тег — в `AUDITGYM_DOCKER_IMAGE`). Рецепт с `sudo` проверен тестом в упрощённом виде (`server_command` без смены пользователя, `tests/env/test_secret.py`); под отдельным пользователем `auditgym-eval` мы его не запускали.
+
+**Журнал оценщика подписан.** Если задан секрет (или отдельный ключ `AUDITGYM_JOURNAL_KEY_FILE` / `AUDITGYM_JOURNAL_KEY`), каждая строка журнала получает `seq`, `prev` (подпись предыдущей строки) и `mac` — HMAC-SHA256 строки на ключе, выведенном из секрета (сам секрет в журнал не попадает; зато каждая строка несёт `"secret": "set"` или `"none"` — был ли секрет задан, подпись это покрывает, `verify-journal` печатает счёт по флагам; у строки два счётчика шагов: `inspection_steps` — до `submit`, `steps_total` — вместе с ним). Цепочка продолжается через сессии, дописывающие один файл. Проверка:
+
+```
+python3 -m auditgym verify-journal /var/lib/auditgym/results.jsonl --secret-file /etc/auditgym/secret
+```
+
+Код 0 — все подписи и звенья верны; 1 — провал: названа первая плохая строка (изменена, вставлена, переставлена, удалена или дописана без ключа), либо ключ задан (`--secret-file`, `AUDITGYM_JOURNAL_KEY*` или секрет в окружении), а журнал пустой или без подписи, либо эпизодных строк (`finished` и `abandoned`) меньше `--expect-episodes N`; 2 — проверять нечего (ключ не задан и журнал без подписи, подписанный журнал без ключа, нечитаемый файл; команда так и пишет). Подпись сама не ловит строки, отрезанные с конца файла (цепочка короче остаётся цепочкой): харнесс, который знает, сколько эпизодов прогнал, передаёт `--expect-episodes N`, и обрезанный хвост даёт код 1. Не ловит она и два оценщика, пишущих в один файл одновременно (давайте каждому свой файл). Подпись не прячет журнал: под тем же пользователем политика его прочитает и узнает награды, поэтому в закрытом прогоне журнал лежит у пользователя оценщика (рецепт выше). Строка `"event": "abandoned"` — эпизод, брошенный через `reset` после хотя бы одного шага, с потраченными шагами. Эпизод, оборванный закрытием канала, `close` или концом ввода, пишется как усечение (`"ended_by": "close"`, 100 шагов осмотра, награда как у молчания; если вышли и 60 с — шаги, сделанные на самом деле); предел 60 с проверяется и на `reset`/`close`. `reset()` посреди эпизода разрешён и в `eval` одинаково для эпизода по seed и для загруженного (`Env.from_files`): брошенный прогон остаётся строкой `abandoned`, новый начинается с полным бюджетом; нетронутый (без шагов) эпизод строки не оставляет. Поле `episode_run` нумерует строки одного `episode_id` в сессии: харнесс сверяет, что на каждый его `reset` в журнале ровно одна строка с этим `episode_id` и `"episode_run": 1`.
+
+**Эталон для oracle под секретом.** `generate(seed, config)` без секрета строит другой эпизод, и oracle, взявший truth оттуда, получит −1. Выгрузите эпизод тем же кодом и тем же секретом, что у оценщика, и запускайте политики из каталога:
+
+```
+python3 -m auditgym export --secret-file /etc/auditgym/secret --seed <N> --config '{"errors": {"fx_error": 2}}' --out closed/ep_01   # или --config-file PATH
+```
+
+```python
+from auditgym import Env
+from auditgym.storage import load_episode
+from policies.runner import make_policy, run_episode
+
+truth = load_episode("closed/ep_01")["private"]["truth"]      # только на стороне оценщика
+for name in ("random_explorer", "reconcile", "flag_all", "oracle"):
+    with Env.from_files("closed/ep_01") as env:                # секрет для from_files не нужен
+        print(name, run_episode(env, make_policy(name, truth=truth))["reward"])   # oracle: 1.0
+```
+
+Каталог в формате `episodes/train/*` (`public/` и `private/`), загружается через `Env.from_files`; без секрета в окружении он совпадает с `generate(seed, config)`. Секрет команда не печатает и не пишет в файлы, но `private/` содержит truth и seed: храните его на стороне оценщика, как и сам секрет.
+
+Секрет мы намеренно не создаём сами: случайный секрет по умолчанию сломал бы детерминизм (CASE §54: повтор seed должен давать тот же эпизод), а открытые train и dev эпизоды обязаны собираться без него. Поэтому по умолчанию секрета нет, и `python3 -m auditgym check` печатает строку «AUDITGYM_SECRET: задан / не задан» и откуда он взят — из файла или значением (значение не печатается). Для закрытого прогона секрет нужен вместе с длинными скрытыми seed (не короче 128 бит, предел 256 бит). Решение и его цена — `docs/DECISIONS.md`, раздел H.
