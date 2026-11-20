@@ -229,6 +229,12 @@ class AnswerRulesAreConstantTest(unittest.TestCase):
                  for tokens in rule["evidence"]["one_of"] for token in tokens}
         self.assertEqual(roles, set(RULES["evidence_roles"]))
 
+    def test_general_rules_say_a_repeated_affected_id_is_an_fp_not_an_invalid_answer(self):
+        text = " ".join(RULES["general"])
+        self.assertIn("повторён внутри affected_ids", text)
+        self.assertNotIn("−1", text)
+        self.assertNotIn("неверн", text)
+
     def test_every_evidence_set_fits_the_limit_and_the_caller_cannot_alter_the_constants(self):
         from auditgym.answer_rules import answer_rules
         from auditgym.limits import MAX_EVIDENCE_IDS
