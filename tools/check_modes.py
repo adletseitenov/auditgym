@@ -26,6 +26,7 @@ FULL_ONLY = (
     "tests.solver.test_solver.MetamorphicTest",   # = python -m tools.metamorph
     "tests.gen.test_inject.LeakTest",        # surface statistics on hundreds of episodes
     "tests.gen.test_inject.GridTest",        # = python -m tools.fuzz
+    "tests.judge.test_mutants",              # = python -m tools.mutants
 )
 # (label, module arguments). Each runs as `python -m <args>` and must exit 0.
 EXTRA_TOOLS = (
@@ -33,6 +34,7 @@ EXTRA_TOOLS = (
     ("leak scan", "tools.leakscan"),
     ("metamorphic pairs", "tools.metamorph"),
     ("reward attacks", "tools.attack"),
+    ("judge mutants", "tools.mutants"),
 )
 
 
