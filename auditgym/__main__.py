@@ -16,6 +16,9 @@ import sys
 
 USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR"
 
+NO_CHECKOUT = ("check runs from the root of a clone of the repository (it needs tools/ and tests/, "
+               "which pip does not install): cd <repo> && python -m auditgym check")
+
 
 def main(argv: list[str]) -> int:
     if argv[:1] in (["-h"], ["--help"], ["help"]):
@@ -26,7 +29,14 @@ def main(argv: list[str]) -> int:
         if flags not in ([], ["--full"]):
             print(USAGE, file=sys.stderr)
             return 2
-        from tools.check_modes import run
+        try:
+            from tools.check_modes import run
+        except ModuleNotFoundError as error:
+            if (error.name or "").partition(".")[0] != "tools":
+                raise
+            # An installed package (pip install .) has no tools/ and tests/: check is a repository command.
+            print(NO_CHECKOUT, file=sys.stderr)
+            return 2
 
         return run(full=bool(flags))
     if argv[:1] == ["serve"]:
