@@ -1,0 +1,47 @@
+# The one-command check on every push, the way the jury runs it:
+#  - plain Python 3.11 (the case's version) and 3.12: `python -m auditgym check`, then the shipped
+#    episodes and trajectories must rebuild byte for byte;
+#  - the Docker image, built from the pinned digest and run with `--network none`: the fast check
+#    (the image's default command) and the full one.
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: python -m auditgym check
+        run: python -m auditgym check
+      - name: shipped episodes rebuild byte for byte
+        run: |
+          python -m tools.episodes --out episodes
+          git diff --exit-code --stat -- episodes
+      - name: shipped trajectories rebuild byte for byte
+        run: |
+          python -m tools.trajectories --out trajectories.jsonl --oracle-out runs/trajectories.oracle.jsonl
+          git diff --exit-code --stat -- trajectories.jsonl
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -t auditgym .
+      - name: docker run --network none (default command, fast check)
+        run: docker run --rm --network none auditgym
+      - name: docker run --network none, full check
+        run: docker run --rm --network none auditgym python -m auditgym check --full
