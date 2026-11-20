@@ -165,6 +165,26 @@ AUDITGYM_SECRET='<длинная случайная строка>' python3 -m au
 docker run --rm --network none -e AUDITGYM_SECRET='<строка>' auditgym
 ```
 
+**Эталон для oracle под секретом.** `generate(seed, config)` без секрета строит другой эпизод, и oracle, взявший truth оттуда, получит −1. Выгрузите эпизод тем же кодом и тем же секретом, что у оценщика, и запускайте политики из каталога:
+
+```
+export AUDITGYM_SECRET='<строка>'
+python3 -m auditgym export --seed <N> --config '{"errors": {"fx_error": 2}}' --out closed/ep_01   # или --config-file PATH
+```
+
+```python
+from auditgym import Env
+from auditgym.storage import load_episode
+from policies.runner import make_policy, run_episode
+
+truth = load_episode("closed/ep_01")["private"]["truth"]      # только на стороне оценщика
+for name in ("random_explorer", "reconcile", "flag_all", "oracle"):
+    with Env.from_files("closed/ep_01") as env:                # секрет для from_files не нужен
+        print(name, run_episode(env, make_policy(name, truth=truth))["reward"])   # oracle: 1.0
+```
+
+Каталог в формате `episodes/train/*` (`public/` и `private/`), загружается через `Env.from_files`; без секрета в окружении он совпадает с `generate(seed, config)`. Секрет команда не печатает и не пишет в файлы, но `private/` содержит truth и seed: храните его на стороне оценщика, как и сам секрет.
+
 Секрет мы намеренно не создаём сами: случайный секрет по умолчанию сломал бы детерминизм (CASE §54: повтор seed должен давать тот же эпизод), а открытые train и dev эпизоды обязаны собираться без него. Поэтому по умолчанию секрета нет, и `python3 -m auditgym check` печатает строку «AUDITGYM_SECRET: задан / не задан» (значение не печатается). Для закрытого прогона секрет нужен вместе с длинными скрытыми seed (не короче 128 бит, предел 256 бит). Решение и его цена — `docs/DECISIONS.md`, раздел H.
 
 ## Ограничения

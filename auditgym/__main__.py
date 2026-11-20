@@ -3,6 +3,8 @@
     python -m auditgym check           fast: lint, the score table and the unit tests, under two minutes
     python -m auditgym check --full    everything: all tests, fuzz, leak scan, metamorphic pairs, attacks
     python -m auditgym serve [--mode train|eval] [--results PATH]    the evaluator process
+    python -m auditgym export --seed N [--config JSON | --config-file PATH] --out DIR
+                                       write an episode directory under $AUDITGYM_SECRET (the oracle's reference)
 
 `AUDITGYM_STRICT=1 python -m auditgym check` also fails on any planned score check that is still a
 TODO, on a `pending:` check and on a missing check module (the default only lists them); `--full` is
@@ -12,7 +14,7 @@ from __future__ import annotations
 
 import sys
 
-USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH]"
+USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR"
 
 
 def main(argv: list[str]) -> int:
@@ -31,6 +33,10 @@ def main(argv: list[str]) -> int:
         from .serve import main as serve_main
 
         return serve_main(argv[1:])
+    if argv[:1] == ["export"]:
+        from .export import main as export_main
+
+        return export_main(argv[1:])
     print(USAGE, file=sys.stderr)
     return 2
 
