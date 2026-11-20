@@ -7,6 +7,6 @@ FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b5
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY . /app
-# Default: the fast check (about a minute and a half on two cores). The full one:
+# Default: the fast check (timings: README, section "Проверка одной командой"). The full one:
 #   docker run --rm --network none auditgym python -m auditgym check --full
 CMD ["python", "-m", "auditgym", "check"]

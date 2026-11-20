@@ -1,5 +1,5 @@
-# Thin aliases. The official single command is: python3 -m auditgym check (fast, about 100 s);
-# `make check-full` runs everything.
+# Thin aliases. The official single command is: python3 -m auditgym check (fast mode);
+# `make check-full` runs everything. How long it takes: README, section "Проверка одной командой".
 PY ?= python3
 SEEDS ?= 1000
 IMAGE ?= auditgym
