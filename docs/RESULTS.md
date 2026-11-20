@@ -33,15 +33,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 31 |
-| solver_policy | 80 |
-| reconcile | 76 |
-| random_explorer | 43 |
-| silence | 28 |
-| flag_all | 82 |
-| flag_all_cutoff | 85 |
-| flag_all_duplicates | 100 |
-| heuristic | 84 |
+| oracle | 9 |
+| solver_policy | 18 |
+| reconcile | 16 |
+| random_explorer | 11 |
+| silence | 9 |
+| flag_all | 17 |
+| flag_all_cutoff | 17 |
+| flag_all_duplicates | 17 |
+| heuristic | 17 |
 
 ## Dev (episodes/dev)
 
@@ -61,15 +61,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 32 |
-| solver_policy | 74 |
-| reconcile | 75 |
-| random_explorer | 48 |
-| silence | 28 |
-| flag_all | 80 |
-| flag_all_cutoff | 55 |
-| flag_all_duplicates | 86 |
-| heuristic | 84 |
+| oracle | 9 |
+| solver_policy | 17 |
+| reconcile | 15 |
+| random_explorer | 10 |
+| silence | 8 |
+| flag_all | 16 |
+| flag_all_cutoff | 16 |
+| flag_all_duplicates | 16 |
+| heuristic | 16 |
 
 ## Генерированный набор (200 эпизодов)
 
@@ -89,15 +89,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 102 |
-| solver_policy | 149 |
-| reconcile | 157 |
-| random_explorer | 151 |
-| silence | 126 |
-| flag_all | 206 |
-| flag_all_cutoff | 187 |
-| flag_all_duplicates | 182 |
-| heuristic | 195 |
+| oracle | 35 |
+| solver_policy | 44 |
+| reconcile | 44 |
+| random_explorer | 37 |
+| silence | 35 |
+| flag_all | 44 |
+| flag_all_cutoff | 43 |
+| flag_all_duplicates | 44 |
+| heuristic | 43 |
 
 ## Полнота по типам ошибок
 
@@ -146,7 +146,7 @@
 ## Генератор
 
 - Эпизодов с повторной попыткой (attempt > 0): 0 из 200 (0.0 %), всего повторов 0.
-- Время генерации: среднее 86.0 мс, максимум 179.0 мс.
+- Время генерации: среднее 33.3 мс, максимум 56.9 мс.
 
 ## Проверки порядка
 
@@ -156,4 +156,4 @@
 - Лучший вариант flag_all минус silence на книгах с ошибками: train +0.059, dev +0.052, generated +0.033. Молчание там на нижней границе −1, поэтому любое случайное попадание атаки чуть выше него; на чистых книгах атака получает −1, молчание +1.
 - Режим eval: политика видит награду 0.0 и пустой info, журнал оценщика равен награде train — да.
 
-Время прогона отчёта: 485.3 с.
+Время прогона отчёта: 128.2 с.
