@@ -1,6 +1,6 @@
 {
  "schema_version": "1",
- "episode_id": "ep_f6ce4de47cae",
+ "episode_id": "ep_9aebe5de7509",
  "issues": [
   {
    "issue_id": "t1",
@@ -28,7 +28,7 @@
     "pg224vx2sp",
     "z1xnj5mvee"
    ],
-   "expected_amount_minor": 60268233,
+   "expected_amount_minor": 53876071,
    "currency": "KZT",
    "evidence_sets": [
     [
@@ -46,7 +46,7 @@
    "affected_ids": [
     "z1xnj5mvee"
    ],
-   "expected_amount_minor": 8825026,
+   "expected_amount_minor": 7889001,
    "currency": "KZT",
    "evidence_sets": [
     [

@@ -1,6 +1,6 @@
 {
  "schema_version": "1",
- "episode_id": "ep_703bd4436a34",
+ "episode_id": "ep_4b606ca8e65b",
  "issues": [
   {
    "issue_id": "t1",
@@ -8,7 +8,7 @@
    "affected_ids": [
     "tvyxeyh5m4"
    ],
-   "expected_amount_minor": 11718703,
+   "expected_amount_minor": 10214261,
    "currency": "KZT",
    "evidence_sets": [
     [
@@ -24,7 +24,7 @@
    "affected_ids": [
     "9wfjr4mpr0"
    ],
-   "expected_amount_minor": 19469401,
+   "expected_amount_minor": 20197964,
    "currency": "KZT",
    "evidence_sets": [
     [

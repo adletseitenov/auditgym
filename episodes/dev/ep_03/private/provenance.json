@@ -39,7 +39,7 @@
   {
    "operator": "allocation_gap",
    "params": {
-    "closing_before_minor": 2029834080
+    "closing_before_minor": 1918347300
    },
    "issue_id": "t1",
    "before": [
@@ -55,10 +55,10 @@
     },
     {
      "row_id": "ej4e7p1vsh",
-     "timestamp": "2026-10-23T06:54:22+05:00",
+     "timestamp": "2026-10-31T05:05:22+05:00",
      "account": "receivable",
      "debit_minor": 0,
-     "credit_minor": 2029834080,
+     "credit_minor": 1918347300,
      "currency": "KZT",
      "entity_id": "q646bdeaw8",
      "invoice_id": "8ejybsvd7c",
@@ -78,10 +78,10 @@
     },
     {
      "row_id": "ej4e7p1vsh",
-     "timestamp": "2026-10-23T06:54:22+05:00",
+     "timestamp": "2026-10-31T05:05:22+05:00",
      "account": "receivable",
      "debit_minor": 0,
-     "credit_minor": 1422319136,
+     "credit_minor": 1341648522,
      "currency": "KZT",
      "entity_id": "q646bdeaw8",
      "invoice_id": "8ejybsvd7c",
@@ -89,10 +89,10 @@
     },
     {
      "row_id": "ffkhtyh4dd",
-     "timestamp": "2026-10-23T06:54:22+05:00",
+     "timestamp": "2026-10-31T05:05:22+05:00",
      "account": "unallocated",
      "debit_minor": 0,
-     "credit_minor": 607514944,
+     "credit_minor": 576698778,
      "currency": "KZT",
      "entity_id": "q646bdeaw8",
      "invoice_id": null,

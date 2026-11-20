@@ -1,6 +1,6 @@
 {
  "schema_version": "1",
- "episode_id": "ep_f937bf7856f3",
+ "episode_id": "ep_96bd5d2eba3b",
  "issues": [
   {
    "issue_id": "t1",
@@ -8,7 +8,7 @@
    "affected_ids": [
     "tq85w531cy"
    ],
-   "expected_amount_minor": 43109722,
+   "expected_amount_minor": 37884395,
    "currency": "KZT",
    "evidence_sets": [
     [
@@ -29,7 +29,7 @@
    "affected_ids": [
     "6vyzv63tyh"
    ],
-   "expected_amount_minor": 55186461,
+   "expected_amount_minor": 47273728,
    "currency": "KZT",
    "evidence_sets": [
     [
@@ -50,7 +50,7 @@
    "affected_ids": [
     "s1zzv8cyca"
    ],
-   "expected_amount_minor": 9983544,
+   "expected_amount_minor": 13739778,
    "currency": "KZT",
    "evidence_sets": [
     [

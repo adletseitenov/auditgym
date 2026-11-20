@@ -1,6 +1,6 @@
 {
  "schema_version": "1",
- "episode_id": "ep_e6e64340a1ac",
+ "episode_id": "ep_9e6c7b3e452e",
  "issues": [
   {
    "issue_id": "t1",
@@ -9,7 +9,7 @@
     "d5vxe3e1r8",
     "qzd2n4dqxt"
    ],
-   "expected_amount_minor": 607514944,
+   "expected_amount_minor": 576698778,
    "currency": "KZT",
    "evidence_sets": [
     [
