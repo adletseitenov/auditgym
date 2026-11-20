@@ -1,6 +1,7 @@
 """Decoys against shortcuts (docs/DESIGN.md 3.1): resent unposted copies (A) and invoices of the period
 for a neighbouring period's service (B). They come at the expected rate, only with distractors,
-never reach the truth, are checked by verify, and defeat the shortcuts measured by tools/tricks.py."""
+never reach the truth as A (B is an ordinary target of every operator but period_cutoff), are
+checked by verify, and defeat the shortcuts measured by tools/tricks.py."""
 import copy
 import datetime as dt
 import unittest
@@ -112,22 +113,39 @@ class FrequencyTest(unittest.TestCase):
 
 
 class TruthTest(unittest.TestCase):
-    def test_no_decoy_in_the_truth(self):
+    def test_resent_copies_never_reach_the_truth_and_shifted_invoices_are_ordinary_targets(self):
+        """A resent copy (A) and a duplicate of its source never appear in the truth. An invoice for a
+        neighbouring period's service (B) carries errors about as often as any posted invoice of the
+        period: excluding it would make it a guaranteed clean document (a shortcut of its own)."""
         configs = [{}, {"interaction": "I1"}, {"interaction": "I2"}, levels.load("max"), levels.load("hard")]
-        seen = Counter()
+        seen, types = Counter(), Counter()
         for config in configs:
             for seed in range(90_000, 90_040):
                 episode = generate(seed, config)
-                copies, sources, shifted = public_decoys(episode["public"])
-                seen["copies"] += len(copies)
-                seen["shifted"] += len(shifted)
+                public = episode["public"]
+                copies, sources, shifted = public_decoys(public)
+                start, end = (parse_time(public["policy"][k]) for k in ("period_start", "period_end"))
+                posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
+                regular = {inv["doc_id"] for inv in public["invoices"] if inv["invoice_id"] in posted
+                           and start <= parse_time(inv["issued_at"]) < end} - shifted
+                hit = set()
                 for issue in episode["private"]["truth"]["issues"]:
                     affected = set(issue["affected_ids"])
-                    self.assertFalse(affected & (copies | shifted), (seed, issue["type"]))
+                    self.assertFalse(affected & copies, (seed, issue["type"]))
                     if issue["type"] == "duplicate_invoice":
                         self.assertFalse(affected & sources, seed)
+                    self.assertFalse(issue["type"] == "period_cutoff" and affected & shifted, seed)
+                    types.update(issue["type"] for _ in affected & shifted)
+                    hit |= affected
+                seen.update(copies=len(copies), shifted=len(shifted), shifted_hit=len(shifted & hit),
+                            regular=len(regular), regular_hit=len(regular & hit))
         self.assertGreater(seen["copies"], 100)
         self.assertGreater(seen["shifted"], 150)
+        shifted_share = seen["shifted_hit"] / seen["shifted"]
+        regular_share = seen["regular_hit"] / seen["regular"]
+        self.assertGreater(seen["shifted_hit"], 20)
+        self.assertLess(abs(shifted_share - regular_share), 0.06, (shifted_share, regular_share))
+        self.assertGreaterEqual(len(types), 2, types)
 
 
 class VerifyTest(unittest.TestCase):

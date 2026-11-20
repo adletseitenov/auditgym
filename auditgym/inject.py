@@ -12,9 +12,10 @@ An injection is described by a dict in internal keys:
 inject_errors adds "before"/"after" (the documents and rows the step changed, internal form);
 generate.py turns it into a truth issue and a provenance step in public ids.
 
-Decoys of the story (world.py: resent copies, invoices for a neighbouring period's service, and
-payments referring to them) are never targets, and a source of a resent copy is never copied again
-(duplicate_invoice, I2): the truth never contains a decoy (docs/DESIGN.md).
+Decoys of the story (world.py, docs/DESIGN.md 3.1): a resent copy (A) is never a target and its
+source is never copied again (duplicate_invoice, I2), so the copy never reaches the truth. An invoice
+for a neighbouring period's service (B) is an ordinary target of every operator, like any posted
+invoice of the period: it is never a period_cutoff, but it may carry any other error.
 
 Rules decided here (docs/DECISIONS.md B and the orchestrator's rulings):
 - duplicate_invoice: the copy is a new invoice with the original's customer, currency, items and
@@ -92,10 +93,11 @@ def _posted_inside(world: dict, invoice: dict) -> bool:
     return invoice["posted_at"] is not None and in_period(world, invoice["issued_at"])
 
 
-def _decoy(invoice: dict) -> bool:
-    """A decoy of the story (world.py: a resent copy or an invoice for a neighbouring period's service)
-    is never the target of an operator, so no decoy is part of the truth."""
-    return bool(invoice.get("decoy"))
+def _resent_copy(invoice: dict) -> bool:
+    """A resent copy (world.py decoy A): never posted, so never a target, and its source is never copied
+    again. A decoy B invoice (a neighbouring period's service) is an ordinary target of every operator:
+    excluding it would make it a guaranteed clean document."""
+    return invoice.get("decoy") == "resent_copy"
 
 
 def _order(rng: Rng, keys: list[str]) -> list[str]:
@@ -142,7 +144,7 @@ def _duplicate_evidence(a: str, b: str) -> list[list[str]]:
 
 def duplicate_invoice(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, dict]:
     candidates = [key for key in order if key.startswith("I") and key not in used
-                  and _posted_inside(world, _invoice(world, key)) and not _decoy(_invoice(world, key))
+                  and _posted_inside(world, _invoice(world, key)) and not _resent_copy(_invoice(world, key))
                   and not _invoice(world, key).get("has_copy")
                   and not any(p["amount_minor"] < 0 for p in payments_of(world, key))]
     if not candidates:
@@ -175,7 +177,7 @@ def _outside_unposted(world: dict, invoice: dict) -> bool:
 def period_cutoff(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, dict]:
     for key in order:
         if (not key.startswith("I") or key in used or not _outside_unposted(world, _invoice(world, key))
-                or _decoy(_invoice(world, key))):
+                or _resent_copy(_invoice(world, key))):
             continue
         world = _copy_world(world)
         invoice = _invoice(world, key)
@@ -238,13 +240,13 @@ def fx_error(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, 
             continue
         if key.startswith("I"):
             record = _invoice(world, key)
-            if record["currency"] == base or not _posted_inside(world, record) or _decoy(record):
+            if record["currency"] == base or not _posted_inside(world, record):
                 continue
             amount, moment = record["total_minor"], record["issued_at"]
         else:
             record = _payment(world, key)
             if (record["currency"] == base or record["posted_at"] is None or record["invoice_refs"] is None
-                    or record["amount_minor"] <= 0 or any(_decoy(_invoice(world, ref)) for ref in record["invoice_refs"])):
+                    or record["amount_minor"] <= 0):
                 continue
             amount, moment = record["amount_minor"], record["timestamp"]
         chosen = wrong_rate(rng, world, amount, record["currency"], moment)
@@ -290,7 +292,7 @@ def allocation_gap(rng: Rng, world: dict, order: list[str], used: set) -> tuple[
                 or refs[0] in used or payment["rate_override"] is not None):
             continue
         invoice = _invoice(world, refs[0])
-        if (not _posted_inside(world, invoice) or _decoy(invoice) or payment["amount_minor"] > invoice["total_minor"]
+        if (not _posted_inside(world, invoice) or payment["amount_minor"] > invoice["total_minor"]
                 or [p["key"] for p in payments_of(world, invoice["key"])] != [key]):
             continue
         parts = parts or payment_parts(world)
@@ -324,8 +326,7 @@ def interaction_i1(rng: Rng, world: dict, order: list[str], used: set) -> list[t
         if key in used or not key.startswith("I"):
             continue
         invoice = _invoice(world, key)
-        if (invoice["currency"] == base or not _posted_inside(world, invoice) or _decoy(invoice)
-                or payments_of(world, key)):
+        if invoice["currency"] == base or not _posted_inside(world, invoice) or payments_of(world, key):
             continue
         low = max(invoice["issued_at"] + PAY_AFTER, end - dt.timedelta(hours=48))
         if low >= latest:
@@ -371,7 +372,7 @@ def interaction_i2(rng: Rng, world: dict, order: list[str], used: set) -> list[t
         if key in used or not key.startswith("I"):
             continue
         original = _invoice(world, key)
-        if (not _posted_inside(world, original) or _decoy(original) or original.get("has_copy")
+        if (not _posted_inside(world, original) or _resent_copy(original) or original.get("has_copy")
                 or any(p["amount_minor"] < 0 for p in payments_of(world, key))):
             continue
         first = _copy_world(world)
