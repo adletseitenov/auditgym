@@ -76,7 +76,8 @@ CASES = [
      "too_many_evidence_ids"),
     ("the limit counts unique ids: 25 entries, 10 different (R5)",
      msg(finding(evidence_ids=[str(i % 10) for i in range(25)])), None),
-    ("a repeated affected id is malformed", msg(finding(affected_ids=["a", "b", "a"])), "duplicate_affected_id"),
+    ("a repeated affected id is well-formed (an FP of that finding, N)",
+     msg(finding(affected_ids=["a", "b", "a"])), None),
     ("empty affected and evidence", msg(finding(affected_ids=[], evidence_ids=[])), None),
     ("currency not a string", msg(finding(currency=840)), "currency_not_string"),
     ("explanation 1000 code points", msg(finding(explanation="ж" * 1000)), None),
@@ -106,6 +107,10 @@ class StructureTableTest(unittest.TestCase):
 
 
 class NormalizationTest(unittest.TestCase):
+    def test_repeated_affected_id_is_kept_sorted(self):
+        [item] = parse_findings(msg(finding(affected_ids=["b", "a", "b"])), EP)
+        self.assertEqual(item["affected_ids"], ["a", "b", "b"])
+
     def test_currency_is_trimmed_and_upper_and_type_is_lower(self):
         [item] = parse_findings(msg(finding(currency=" usd\n", type=" FX_Error ")), EP)
         self.assertEqual((item["currency"], item["type"]), ("USD", "fx_error"))
@@ -198,6 +203,78 @@ class MessageSizeTest(unittest.TestCase):
         for _ in range(10_000):
             shallow = [shallow]
         parse_findings(msg(GOOD, pad=shallow), EP)
+
+
+class RepeatedAffectedIdIsOneFalsePositiveTest(unittest.TestCase):
+    """N: a repeated id in affected_ids makes that finding an FP, the rest is scored as usual."""
+
+    @staticmethod
+    def with_repeat(item):
+        return dict(item, affected_ids=item["affected_ids"] + item["affected_ids"][:1])
+
+    def test_three_correct_plus_one_repeated_equals_three_correct_plus_one_fp(self):
+        from fractions import Fraction
+
+        from auditgym.judge import judge
+        from tests.judge import helpers
+
+        ep = helpers.episode(4)
+        good = helpers.oracle(ep)
+        steps = 7
+        f1 = Fraction(2 * 3, 2 * 3 + 1 + 1)  # tp 3, fp 1, fn 1 = 3/4
+        want = float(min(max(2 * f1 - 1 - Fraction(2, 1000) * steps, Fraction(-1)), Fraction(1)))
+        repeated = judge(ep, helpers.submit(ep, good[:3] + [self.with_repeat(good[3])]), steps)
+        plain_fp = judge(ep, helpers.submit(ep, good[:3] + [helpers.false_accusation(0)]), steps)
+        self.assertIsNone(repeated["structure_error"])
+        self.assertEqual((repeated["tp"], repeated["fp"], repeated["fn"]), (3, 1, 1))
+        self.assertEqual(repeated, plain_fp)
+        self.assertEqual(repeated["reward"], want)
+        self.assertGreater(repeated["reward"], -1.0)
+
+    def test_it_never_becomes_a_tp_after_deduplication(self):
+        from auditgym.judge import judge
+        from tests.judge import helpers
+
+        ep = helpers.episode(4)
+        good = helpers.oracle(ep)
+        correct = judge(ep, helpers.submit(ep, good), 0)
+        repeated = judge(ep, helpers.submit(ep, [self.with_repeat(i) for i in good]), 0)
+        self.assertEqual((correct["tp"], correct["fp"], correct["fn"]), (4, 0, 0))
+        self.assertEqual((repeated["tp"], repeated["fp"], repeated["fn"]), (0, 4, 4))
+        self.assertEqual(repeated["reward"], -1.0)
+
+    def test_alone_on_a_clean_book_it_is_one_fp(self):
+        from auditgym.judge import judge
+        from tests.judge import helpers
+
+        ep = helpers.episode(0)
+        steps = 5
+        repeated = judge(ep, helpers.submit(ep, [dict(helpers.false_accusation(0), affected_ids=["f00", "f00"])]), steps)
+        plain_fp = judge(ep, helpers.submit(ep, [helpers.false_accusation(0)]), steps)
+        self.assertEqual(repeated, plain_fp)
+        self.assertEqual((repeated["tp"], repeated["fp"], repeated["fn"]), (0, 1, 0))
+        self.assertEqual(repeated["reward"], -1.0)  # F1 = 0 on a clean book: 2*0 - 1 - 0.002*steps, clipped
+
+    def test_it_still_takes_a_place_in_the_findings_limit(self):
+        from auditgym.judge import judge
+        from tests.judge import helpers
+
+        ep = helpers.episode(1)
+        good = helpers.oracle(ep)
+        bad = self.with_repeat(good[0])
+        fits = judge(ep, helpers.submit(ep, good + [bad] * 29), 0)
+        over = judge(ep, helpers.submit(ep, good + [bad] * 30), 0)
+        self.assertIsNone(fits["structure_error"])
+        self.assertEqual((fits["tp"], fits["fp"]), (1, 29))
+        self.assertEqual(over["structure_error"], "too_many_findings")
+
+    def test_other_structure_rules_still_apply_next_to_a_repeat(self):
+        for bad, code in ((dict(GOOD, claimed_amount_minor=-1), "negative_amount"),
+                          (dict(GOOD, explanation="x" * 1001), "explanation_too_long"),
+                          (dict(GOOD, affected_ids=["a", "a", 1]), "id_not_string")):
+            with self.subTest(code), self.assertRaises(StructureError) as caught:
+                parse_findings(msg(finding(affected_ids=["a", "a"]), bad), EP)
+            self.assertEqual(caught.exception.code, code)
 
 
 if __name__ == "__main__":

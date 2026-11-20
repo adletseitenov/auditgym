@@ -23,6 +23,9 @@ a reasonable oracle built slightly differently would otherwise get -1):
 - A value that is not JSON-compatible (a dict key that is not a string, a set, bytes, an
   object) is an error. Tuples are accepted where a JSON array is (they serialize as one) but
   the `findings`, `affected_ids` and `evidence_ids` fields must be real lists.
+- A repeated id inside `affected_ids` is NOT a structure error: the normalized list keeps the repeat
+  (sorted), the matcher never matches such a finding, so it is an FP of that finding alone and the
+  rest of the answer is scored as usual. Repeats in `evidence_ids` collapse.
 - `affected_ids` and `evidence_ids` may be empty: such a finding is well-formed but never
   matches, because every truth issue has at least one affected id and a non-empty evidence set.
 - Absurdly large non-negative integers are well-formed amounts (they simply never match);
@@ -146,12 +149,14 @@ def message_size(payload: object) -> int:
     return total
 
 
-def _id_list(value: object, limit: int | None) -> list[str]:
+def _id_list(value: object, limit: int | None, keep_repeats: bool = False) -> list[str]:
     if not isinstance(value, list):
         raise StructureError("ids_not_list")
     for item in value:
         if not isinstance(item, str):
             raise StructureError("id_not_string")
+    if keep_repeats:  # affected_ids: a repeat is kept (sorted) so that the matcher can refuse the finding
+        return sorted(value)
     unique = sorted(set(value))
     if limit is not None and len(unique) > limit:  # the limit counts different ids (audit R5)
         raise StructureError("too_many_evidence_ids")
@@ -179,9 +184,9 @@ def _finding(raw: object) -> dict:
         kind = kind.strip().translate(_ASCII_LOWER)
     if not isinstance(kind, str) or kind not in TYPES:
         raise StructureError("unknown_type")
-    affected = _id_list(raw["affected_ids"], None)
-    if len(affected) != len(raw["affected_ids"]):  # the same object named twice is malformed
-        raise StructureError("duplicate_affected_id")
+    # A repeated id stays in the list: the finding is well-formed, but the matcher never matches it
+    # (an FP of this finding alone, docs/DECISIONS.md, N), and it still counts toward the limit.
+    affected = _id_list(raw["affected_ids"], None, keep_repeats=True)
     amount = _amount(raw["claimed_amount_minor"])
     currency = raw["currency"]
     if not isinstance(currency, str):

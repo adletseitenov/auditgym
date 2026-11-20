@@ -12,7 +12,8 @@ in issue_id order, so the result is deterministic. TP/FP/FN never depend on the 
 findings, issues, records or ids, even if a truth ever had two issues with the same
 (type, set of affected ids) (`truth_key`; verify should forbid it). Only `pairs` (which of two
 identical findings scored) follows submission order: the first one keeps the issue, the
-repeat is an FP.
+repeat is an FP. A finding whose `affected_ids` repeats an id matches no issue (an FP), even
+though its set of ids would equal a truth set.
 
 The predicates are module-level functions called through the module namespace so that the
 mutation tests (tests/judge/test_mutations.py) can switch each one off.
@@ -49,7 +50,10 @@ def same_type(finding: dict, issue: dict) -> bool:
 
 
 def same_affected_ids(finding: dict, issue: dict) -> bool:
-    return set(finding["affected_ids"]) == set(issue["affected_ids"])
+    ids = finding["affected_ids"]
+    if len(set(ids)) != len(ids):  # a repeated id names one object twice: never a match, always an FP
+        return False
+    return set(ids) == set(issue["affected_ids"])
 
 
 def same_currency(finding: dict, issue: dict) -> bool:
