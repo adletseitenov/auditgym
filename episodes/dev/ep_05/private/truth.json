@@ -1,20 +1,20 @@
 {
  "schema_version": "1",
- "episode_id": "ep_d3d4773ad469",
+ "episode_id": "ep_c673c30099e8",
  "issues": [
   {
    "issue_id": "t1",
    "type": "fx_error",
    "affected_ids": [
-    "9z95k8dtjd"
+    "e3vqmhkeh9"
    ],
-   "expected_amount_minor": 65513994,
+   "expected_amount_minor": 701298,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "9z95k8dtjd",
-     "vrzehs9z0p",
-     "2026-10-20|USD|KZT"
+     "e3vqmhkeh9",
+     "b533paz49k",
+     "2026-10-23|USD|KZT"
     ]
    ]
   },
@@ -22,18 +22,18 @@
    "issue_id": "t2",
    "type": "allocation_gap",
    "affected_ids": [
-    "18j884d82w",
-    "j142x24wb0"
+    "6sxpyrvqw6",
+    "f4hyc98htc"
    ],
-   "expected_amount_minor": 214719357,
+   "expected_amount_minor": 69120000,
    "currency": "KZT",
    "evidence_sets": [
     [
-     "18j884d82w",
-     "j142x24wb0",
-     "2dyyh1xd6q",
-     "evppcdqyfx",
-     "h3caq36gk0"
+     "6sxpyrvqw6",
+     "f4hyc98htc",
+     "4x3r6knpk7",
+     "g4187rdxgy",
+     "rxt14atz74"
     ]
    ]
   }

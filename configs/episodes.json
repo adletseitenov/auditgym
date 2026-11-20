@@ -29,10 +29,10 @@
   {"seed": 1110, "note": "large mixed book over two months, three currencies",
    "variants": [{"errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 3, "period_cutoff": 3},
                  "currencies": ["USD", "EUR", "RUB"], "period": {"start": "2026-09-01", "months": 2},
-                 "size": {"invoices": [120, 160], "background_pairs": [150, 250]}},
+                 "size": {"invoices": [96, 100], "background_pairs": [150, 250]}},
                 {"errors": {"duplicate_invoice": 4, "period_cutoff": 4}, "currencies": ["USD", "EUR", "RUB"],
                  "period": {"start": "2026-09-01", "months": 2},
-                 "size": {"invoices": [120, 160], "background_pairs": [150, 250]}}]}
+                 "size": {"invoices": [96, 100], "background_pairs": [150, 250]}}]}
  ],
  "dev": [
   {"seed": 2201, "note": "duplicate_invoice alone, base currency EUR",
@@ -50,9 +50,9 @@
                  "timezone": "-03:00"}]},
   {"seed": 2205, "note": "fx_error with allocation_gap, small books",
    "variants": [{"errors": {"fx_error": 1, "allocation_gap": 1}, "currencies": ["USD"],
-                 "size": {"invoices": [16, 24], "background_pairs": [30, 60]}},
+                 "size": {"invoices": [16, 24], "background_pairs": [100, 160]}},
                 {"errors": {"duplicate_invoice": 1, "period_cutoff": 1}, "currencies": ["USD"],
-                 "size": {"invoices": [16, 24], "background_pairs": [30, 60]}}]},
+                 "size": {"invoices": [16, 24], "background_pairs": [100, 160]}}]},
   {"seed": 2206, "note": "interaction I1",
    "variants": [{"interaction": "I1", "errors": {"period_cutoff": 1}, "currencies": ["EUR"], "timezone": "+09:00"},
                 {"errors": {"duplicate_invoice": 2, "period_cutoff": 1}, "currencies": ["EUR"], "timezone": "+09:00"}]},
@@ -66,8 +66,8 @@
                  "size": {"invoices": [20, 30], "background_pairs": [50, 80]}}]},
   {"seed": 2210, "note": "all four types twice, larger books",
    "variants": [{"errors": {"duplicate_invoice": 2, "allocation_gap": 2, "fx_error": 2, "period_cutoff": 2},
-                 "currencies": ["USD", "EUR"], "size": {"invoices": [90, 130], "background_pairs": [150, 300]}},
+                 "currencies": ["USD", "EUR"], "size": {"invoices": [64, 96], "background_pairs": [150, 300]}},
                 {"errors": {"duplicate_invoice": 3, "period_cutoff": 3}, "currencies": ["USD", "EUR"],
-                 "size": {"invoices": [90, 130], "background_pairs": [150, 300]}}]}
+                 "size": {"invoices": [64, 96], "background_pairs": [150, 300]}}]}
  ]
 }
