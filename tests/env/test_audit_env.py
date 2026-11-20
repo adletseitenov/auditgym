@@ -413,8 +413,8 @@ class JournalTest(unittest.TestCase):
         self.assertEqual((first["terminated"], first["truncated"]), (True, False))
         self.assertEqual((second["terminated"], second["truncated"]), (False, True))
         self.assertEqual(set(first), {"episode_id", "mode", "event", "episode_run", "terminated", "truncated",
-                                      "inspection_steps", "reward", "precision", "recall", "f1", "tp", "fp", "fn",
-                                      "structure_error"})
+                                      "inspection_steps", "steps_total", "secret", "reward", "precision", "recall",
+                                      "f1", "tp", "fp", "fn", "structure_error"})
 
     def test_judge_exception_is_minus_one_and_logged_never_a_win(self):
         for mode in ("eval", "train"):
