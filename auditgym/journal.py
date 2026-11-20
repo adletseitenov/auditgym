@@ -126,6 +126,21 @@ def verify_lines(lines: list[str], key: bytes | None) -> tuple[str, int | None, 
                         f"(lines cut from the end of the file cannot be detected); {secret_summary(parsed)}")
 
 
+def unprotected_eval_rows(lines: list[str]) -> int:
+    """How many lines of mode `eval` were written without the evaluator secret (`"secret": "none"`)
+    or are not signed. Such a closed run is not protected: the episode is reproducible from the seed
+    by open code, so a policy can find a seed and append a line with the reward it wants."""
+    count = 0
+    for text in lines:
+        try:
+            row = json.loads(text)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(row, dict) and row.get("mode") == "eval" and (row.get("secret") == "none" or "mac" not in row):
+            count += 1
+    return count
+
+
 def episode_rows(lines: list[str]) -> int:
     """How many lines record an episode that ended or was abandoned: `finished` (or a journal row of
     the time before `event` existed) and `abandoned`. Lines that are not JSON objects do not count."""
@@ -142,7 +157,7 @@ def episode_rows(lines: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     """python -m auditgym verify-journal PATH [--secret-file F] [--expect-episodes N]: exit 0 valid,
-    1 failed (a bad line; with a key, an unsigned or empty journal; fewer than N episode lines),
+    1 failed (a bad line; a line of mode eval written without the evaluator secret or unsigned; with a key, an unsigned or empty journal; fewer than N episode lines),
     2 nothing to verify (no key and an unsigned journal, a signed one without a key, unreadable file)."""
     import argparse
     import sys
@@ -178,6 +193,11 @@ def main(argv: list[str]) -> int:
         # The verifier holds the key, so it expects a signed journal: an empty or unsigned file is a
         # journal that was stripped or never written under it, which is a failure and not "nothing to check".
         print("verify-journal: FAILED: a key is configured but the journal is empty or unsigned")
+        return 1
+    unprotected = unprotected_eval_rows(lines)
+    if unprotected:
+        print(f"verify-journal: FAILED: eval rows without evaluator secret: {unprotected}; "
+              "the closed run is not protected (see README «Закрытая проверка»)")
         return 1
     if arguments.expect_episodes is not None:
         found = episode_rows(lines)
