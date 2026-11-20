@@ -62,7 +62,7 @@ class ResetTest(unittest.TestCase):
     def test_task_lists_types_schema_limits_tolerances(self):
         observation, _ = Evaluator(clock=FakeClock()).load(TINY)
         task = observation["task"]
-        self.assertEqual(task["error_types"], ["duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff"])
+        self.assertEqual(task["error_types"], ["duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff", "wrong_customer"])
         self.assertEqual(task["limits"]["max_findings"], 30)
         self.assertEqual(task["limits"]["max_evidence_ids"], 10)
         self.assertEqual(task["limits"]["max_explanation_chars"], 1000)

@@ -11,7 +11,7 @@ What is checked:
 - clean postings: a document is posted iff it is dated in the period, after its own date, by the
   document's entity, at the policy amount; payments close receivables by the published payment
   rule (auditgym/books.py); fx_difference only on foreign payments. A document a posting issue is
-  about (period_cutoff, fx_error, allocation_gap) is checked the same way except for the one
+  about (period_cutoff, fx_error, allocation_gap, wrong_customer) is checked the same way except for the one
   deviation its issue declares: a cutoff document's period and date, an fx_error's amount (equal
   on both sides of an invoice; the cash row of a payment, whose receivable closings still follow
   the rule), an allocation gap's split between receivable and unallocated (their sum still
@@ -38,7 +38,7 @@ FX_MIN_MINOR = 100
 FX_MIN_PER_MILLE = 5
 MIN_RATE_DIGITS = 6
 CUTOFF_MAX_DAYS = 4
-POSTING_TYPES = ("period_cutoff", "fx_error", "allocation_gap")  # issues about how a document is posted
+POSTING_TYPES = ("period_cutoff", "fx_error", "allocation_gap", "wrong_customer")  # issues about how a document is posted
 
 
 def _is_int(value: object) -> bool:
@@ -110,7 +110,7 @@ class Books:
 
 # ============================================================================ predicates
 def predicate_issues(public: dict) -> tuple[list[dict], list[str]]:
-    """The four published definitions over open records: (issues, undefined cases).
+    """The published definitions over open records: (issues, undefined cases).
 
     issue = {"type", "affected_ids" (sorted), "amount", "currency"}."""
     books = Books(public)
@@ -180,6 +180,12 @@ def predicate_issues(public: dict) -> tuple[list[dict], list[str]]:
             issues.append({"type": "fx_error", "affected_ids": [payment["doc_id"]], "amount": abs(cash - correct),
                            "currency": books.base})
 
+    for invoice in books.invoice_list:  # wrong_customer: the receivable debit is on another entity
+        debits = [r for r in books.own.get(invoice["invoice_id"], [])
+                  if r["account"] == acc["receivable"] and r["debit_minor"] > 0]
+        if len(debits) == 1 and debits[0]["entity_id"] != invoice["entity_id"]:
+            issues.append({"type": "wrong_customer", "affected_ids": [invoice["doc_id"]],
+                           "amount": debits[0]["debit_minor"], "currency": books.base})
     for invoice in books.invoice_list:
         if books.own.get(invoice["invoice_id"]) and not books.inside(invoice["issued_at"]):
             issues.append({"type": "period_cutoff", "affected_ids": [invoice["doc_id"]],
@@ -397,7 +403,14 @@ def _check_postings(books: Books, name: str, deviations) -> list[str]:
         if ("period_cutoff" not in declared
                 and any(parse_time(r["timestamp"]) < parse_time(invoice["issued_at"]) for r in rows)):
             problems.append(f"{name}: invoice {doc} is posted before its date")
-        if any(r["entity_id"] != invoice["entity_id"] for r in rows):
+        if "wrong_customer" in declared:
+            # Only the receivable debit moves, to another customer; the revenue credit stays on the invoice's own.
+            debit = [r for r in rows if r["account"] == acc["receivable"]]
+            customers = {inv["entity_id"] for inv in books.invoice_list}
+            if (len(debit) != 1 or debit[0]["entity_id"] == invoice["entity_id"] or debit[0]["entity_id"] not in customers
+                    or any(r["entity_id"] != invoice["entity_id"] for r in rows if r not in debit)):
+                problems.append(f"{name}: invoice {doc} is not posted for another customer on the receivable debit only")
+        elif any(r["entity_id"] != invoice["entity_id"] for r in rows):
             problems.append(f"{name}: invoice {doc} is posted for another entity")
 
     closings = expected_closings(books)
@@ -555,6 +568,10 @@ def _evidence_problem(books: Books, issue: dict) -> str | None:
         ok = len(unallocated) == len(closing) == len(debit) == 1
         return None if ok and sets == [sorted(affected + unallocated + debit + closing)] \
             else "allocation_gap needs [payment, invoice, unallocated row, invoice receivable debit, payment receivable credit]"
+    if kind == "wrong_customer":
+        debit = [r["row_id"] for r in own_rows(docs[0]) if r["account"] == acc["receivable"] and r["debit_minor"] > 0]
+        return None if len(debit) == 1 and sets == [sorted(affected + debit)] \
+            else "wrong_customer needs [invoice, receivable debit row]"
     doc = docs[0]
     key = rate_key(doc) if kind == "fx_error" else None
     if kind == "fx_error" and key not in books.rates:
@@ -594,6 +611,10 @@ def _check_rules(books: Books, issue: dict, operator: str) -> str | None:
             return "the invoice of an allocation_gap must be dated and posted in the period"
         if [p["payment_id"] for p in books.paid_by.get(invoice["invoice_id"], [])] != [payment["payment_id"]]:
             return "the invoice of an allocation_gap has other payments or refunds"
+    elif kind == "wrong_customer":
+        doc = docs[0]
+        if "line_items" not in doc or not books.inside(doc["issued_at"]) or not books.own.get(doc["invoice_id"]):
+            return "a wrong_customer target is an invoice dated and posted in the period"
     elif kind == "period_cutoff":
         doc = docs[0]
         if "line_items" not in doc:

@@ -130,6 +130,9 @@
     "duplicate_signature": {
       "type": "string"
     },
+    "receivable_entity": {
+      "type": "string"
+    },
     "amount_tolerance_minor": {
       "type": "object",
       "properties": {
@@ -148,13 +151,18 @@
         "period_cutoff": {
           "type": "integer",
           "minimum": 0
+        },
+        "wrong_customer": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
         "duplicate_invoice",
         "allocation_gap",
         "fx_error",
-        "period_cutoff"
+        "period_cutoff",
+        "wrong_customer"
       ],
       "additionalProperties": false
     },
@@ -179,6 +187,7 @@
     "refund",
     "payment_rule",
     "duplicate_signature",
+    "receivable_entity",
     "amount_tolerance_minor",
     "evidence_superset_allowed"
   ],

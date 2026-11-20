@@ -38,7 +38,7 @@ import math
 from .limits import MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS as MAX_EXPLANATION_CODE_POINTS  # noqa: F401
 from .limits import MAX_FINDINGS, MAX_MESSAGE_BYTES  # noqa: F401  (one constant per limit)
 
-TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
+TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff", "wrong_customer")
 FIELDS = ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids", "explanation")
 
 _ASCII_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")

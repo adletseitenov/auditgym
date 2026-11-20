@@ -29,7 +29,8 @@
               "duplicate_invoice",
               "allocation_gap",
               "fx_error",
-              "period_cutoff"
+              "period_cutoff",
+              "wrong_customer"
             ]
           },
           "affected_ids": {

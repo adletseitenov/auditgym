@@ -16,7 +16,8 @@ order; `paid` is what earlier posted single-reference payments paid, in the docu
   in full and the excess, at the payment date's policy rate, credited to unallocated;
 - no reference: advance, the whole policy value on unallocated.
 Cash is the policy value of the payment (or the wrong rate of an fx_error); an allocation_gap
-moves `gap_minor` from the receivable credit to unallocated; the rest of every foreign payment is
+moves `gap_minor` from the receivable credit to unallocated; a wrong_customer posts the
+receivable debit of an invoice to another customer's `ledger_entity`; the rest of every foreign payment is
 its own fx_difference row. Closings never depend on the posted cash or on a gap, so two errors on
 one payment do not interact.
 """
@@ -66,7 +67,8 @@ def invoice_rows(world: dict, invoice: dict) -> list[dict]:
     if invoice["posted_at"] is None:
         return []
     amount, at, key = booked(world, invoice), invoice["posted_at"], invoice["key"]
-    return [_row(f"R:{key}:dr", at, "receivable", amount, 0, world, invoice["entity"], key),
+    debtor = invoice.get("ledger_entity") or invoice["entity"]  # wrong_customer: the debit sits on another customer
+    return [_row(f"R:{key}:dr", at, "receivable", amount, 0, world, debtor, key),
             _row(f"R:{key}:cr", at, "revenue", 0, amount, world, invoice["entity"], key)]
 
 

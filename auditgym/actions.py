@@ -26,7 +26,7 @@ def default_results_path() -> str:
 
 ACTIONS = ("list_records", "get_record", "get_document", "calculator", "submit")
 TABLES = ("ledger", "invoices", "payments", "fx")
-ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
+ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff", "wrong_customer")
 
 # Fixed texts: an error never carries exception text, ids, paths or values.
 ERRORS = {
@@ -65,7 +65,7 @@ POLICY_KEYS = ("ledger_currency", "base_currency", "timezone", "period_start", "
 # Documented additions: rules the open policy states for the agent (docs/AUDIT.md D6). A new rule
 # key of the generator must be added here, or the agent never sees it: the test
 # tests/env/test_evaluator.py::PolicyWhitelistTest fails until it is.
-POLICY_KEYS_ADDED = ("period_interval", "payment_rule", "duplicate_signature")
+POLICY_KEYS_ADDED = ("period_interval", "payment_rule", "duplicate_signature", "receivable_entity")
 
 
 class ActionError(Exception):
@@ -237,8 +237,8 @@ FINDINGS_SCHEMA = {
 }
 
 TASK_TEXT = (
-    "Проверьте книгу компании за отчётный период и найдите ошибки четырёх типов: "
-    "duplicate_invoice, allocation_gap, fx_error, period_cutoff. Ошибок может не быть. "
+    "Проверьте книгу компании за отчётный период и найдите ошибки пяти типов: "
+    "duplicate_invoice, allocation_gap, fx_error, period_cutoff, wrong_customer. Ошибок может не быть. "
     "Записи только для чтения. Действия: list_records(table, cursor, limit), "
     "get_record(table, id), get_document(doc_id), calculator(expression), submit(findings). "
     "Таблицы: ledger, invoices, payments, fx; ID курса — \"дата|из|в\". "

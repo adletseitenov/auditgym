@@ -16,6 +16,10 @@ from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FINDINGS, MAX
 
 CONFIG_VERSION = "1"
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
+# Added later: kept out of ERROR_TYPES so defaults and the config digest of every old config stay
+# the same; the key is in a normalized config only when its count is positive.
+EXTRA_ERROR_TYPES = ("wrong_customer",)
+ALL_ERROR_TYPES = ERROR_TYPES + EXTRA_ERROR_TYPES
 INTERACTIONS = ("none", "I1", "I2")
 CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY")
 CURRENCY_EXPONENTS = {"KZT": 2, "USD": 2, "EUR": 2, "RUB": 2, "CNY": 2}
@@ -147,11 +151,12 @@ def normalize_config(config: object) -> dict:
 
     if "errors" in config:
         errors = config["errors"]
-        if not _str_keys(errors) or any(key not in ERROR_TYPES for key in errors):
+        if not _str_keys(errors) or any(key not in ALL_ERROR_TYPES for key in errors):
             raise ConfigError("bad_errors", "errors keys must be error types")
         if any(not _is_int(value) or value < 0 for value in errors.values()):
             raise ConfigError("bad_errors", "error counts must be non-negative integers")
         out["errors"] = {name: errors.get(name, 0) for name in ERROR_TYPES}
+        out["errors"].update({name: errors[name] for name in EXTRA_ERROR_TYPES if errors.get(name, 0)})
         if not size_given["invoices"]:  # the default company grows to hold the requested errors
             low = max(DEFAULT_INVOICES[0], INVOICES_PER_ERROR * _issue_count(out["errors"], interaction))
             out["size"]["invoices"] = [min(low, MAX_INVOICES), min(max(DEFAULT_INVOICES[1], low), MAX_INVOICES)]

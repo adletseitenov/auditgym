@@ -107,6 +107,11 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 30
+        },
+        "wrong_customer": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
         }
       },
       "required": [],

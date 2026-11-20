@@ -38,11 +38,13 @@ PAYMENT_RULE = ("a payment with one reference moves the invoice's receivable by 
                 "goes to unallocated; cash is the payment at its date's rate and the rest of every foreign payment "
                 "is its own fx_difference row")
 DUPLICATE_SIGNATURE = "entity, currency, total, line items incl. service period"
+RECEIVABLE_ENTITY = ("the receivable debit row of a posted invoice carries the invoice's entity_id; "
+                     "wrong_customer holds when it carries another entity_id (amount = that row's debit_minor)")
 # policy.json is built from this whitelist only: no key or value may come from the truth or the config
 # of errors (docs/AUDIT.md Q2/S4).
 POLICY_KEYS = ("ledger_currency", "base_currency", "timezone", "period_start", "period_end", "period_interval",
                "period_basis", "fx_rate_date", "fx_formula", "rounding", "currency_exponents", "accounts",
-               "document_date", "refund", "payment_rule", "duplicate_signature", "amount_tolerance_minor",
+               "document_date", "refund", "payment_rule", "duplicate_signature", "receivable_entity", "amount_tolerance_minor",
                "evidence_superset_allowed")
 
 
@@ -59,7 +61,9 @@ def build_policy(world: dict) -> dict:
         "refund": "payment with negative amount_minor and one invoice ref",
         "payment_rule": PAYMENT_RULE,
         "duplicate_signature": DUPLICATE_SIGNATURE,
-        "amount_tolerance_minor": {"duplicate_invoice": 0, "allocation_gap": 0, "fx_error": 1, "period_cutoff": 0},
+        "receivable_entity": RECEIVABLE_ENTITY,
+        "amount_tolerance_minor": {"duplicate_invoice": 0, "allocation_gap": 0, "fx_error": 1, "period_cutoff": 0,
+                                     "wrong_customer": 0},
         "evidence_superset_allowed": True,
     }
     return {key: values[key] for key in POLICY_KEYS}

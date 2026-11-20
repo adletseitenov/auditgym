@@ -1,7 +1,7 @@
 """Independent solver: findings from the open records only (docs/SPEC.md "Определения ошибок",
 overridden by docs/DECISIONS.md where they differ).
 
-solve(public) evaluates the four published predicates over the final open records and returns
+solve(public) evaluates the five published predicates over the final open records and returns
 findings in the shape of docs/CONTRACTS.md section 6. It never reads `private` and does not
 import the generator or the error operators.
 
@@ -22,6 +22,9 @@ Readings chosen where the definitions leave a case open:
   never an fx_error, nor is a payment posted without a cash row (nothing converted it). Only
   conversion rows count: the receivable debit and revenue credit of an invoice, the cash of a
   payment. Evidence: the doc_id, the conversion rows and the fx key of the document's date.
+- wrong_customer fires for a posted invoice whose single receivable debit row carries an entity_id
+  other than the invoice's own (policy["receivable_entity"]); an invoice with no such row or with
+  several is left unreported. Amount: that row's debit. Evidence: the doc_id and that row.
 - period_cutoff reports the absolute document amount, so a refund never yields a negative claim.
 
 Robustness: a record that lacks a piece a predicate needs (a rate for its date, a parseable
@@ -328,6 +331,27 @@ def _cutoffs(books: _Books) -> list[dict]:
             + _each(books.payments, lambda pay: cutoff(payment_doc(pay))))
 
 
+def _wrong_customers(books: _Books) -> list[dict]:
+    receivable = books.accounts["receivable"]
+
+    def wrong(invoice: dict) -> dict | None:
+        debits = [row for row in books.invoice_group.get(invoice["invoice_id"], [])
+                  if row["account"] == receivable and row["debit_minor"] > 0]
+        if len(debits) != 1 or not isinstance(invoice["doc_id"], str):
+            return None
+        owner, debtor = invoice["entity_id"], debits[0].get("entity_id")
+        if not isinstance(owner, str) or not isinstance(debtor, str) or owner == debtor:
+            return None
+        return {
+            "type": "wrong_customer", "affected_ids": [invoice["doc_id"]],
+            "claimed_amount_minor": debits[0]["debit_minor"], "currency": books.base,
+            "evidence_ids": [invoice["doc_id"], debits[0]["row_id"]],
+            "explanation": "The receivable debit of the invoice is posted to another customer than the invoice's.",
+        }
+
+    return _each(books.invoices, wrong)
+
+
 def _sort_key(finding: dict) -> tuple:
     return (finding["type"], finding["affected_ids"], finding["claimed_amount_minor"], finding["currency"],
             finding["evidence_ids"])
@@ -338,7 +362,7 @@ def solve(public: dict) -> list[dict]:
         books = _Books(public)
     except _MALFORMED:
         return []  # no usable policy: nothing can be decided from these records
-    findings = _duplicates(books) + _allocation_gaps(books) + _fx_errors(books) + _cutoffs(books)
+    findings = _duplicates(books) + _allocation_gaps(books) + _fx_errors(books) + _cutoffs(books) + _wrong_customers(books)
     # A finding must be well-formed: string ids, a non-negative int amount, at most 10 evidence ids.
     findings = [f for f in findings if all(isinstance(i, str) for i in f["affected_ids"] + f["evidence_ids"])
                 and isinstance(f["currency"], str) and _is_int(f["claimed_amount_minor"])

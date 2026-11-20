@@ -27,11 +27,12 @@
               "duplicate_invoice",
               "allocation_gap",
               "fx_error",
-              "period_cutoff"
+              "period_cutoff",
+              "wrong_customer"
             ]
           },
-          "minItems": 4,
-          "maxItems": 4
+          "minItems": 5,
+          "maxItems": 5
         },
         "findings_schema": {
           "type": "object"

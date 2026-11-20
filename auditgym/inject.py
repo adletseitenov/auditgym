@@ -32,6 +32,9 @@ Rules decided here (docs/DECISIONS.md B and the orchestrator's rulings):
   share of the payment (world.share_of, the same draw as an overpayment's excess) at the payment's
   rate moves from its receivable credit to one unallocated row. Evidence: both documents, the
   unallocated row, the invoice's receivable debit and the payment's receivable credit.
+- wrong_customer: a posted invoice dated in the period, not used by another error; its receivable
+  debit row (and only that row) is posted to another customer's entity, the document stays right.
+  The amount is the debit row's base amount. Evidence: the invoice and its receivable debit row.
 """
 from __future__ import annotations
 
@@ -39,14 +42,14 @@ import copy
 import datetime as dt
 from decimal import Decimal
 
-from .books import build_books, payment_parts, rate_on, to_base
+from .books import booked, build_books, payment_parts, rate_on, to_base
 from .money import convert, fx_key, round_rate
 from .rng import Rng
 from .world import (EDGE_GAP, PAY_AFTER, TERMS_DAYS, doc_zone, in_period, moment_between, new_invoice,
                     new_payment, outside_moment, outside_posting, paid_like_clean, paid_outside, posting_lag,
                     share_of)
 
-OPERATOR_ORDER = ("duplicate_invoice", "period_cutoff", "fx_error", "allocation_gap")
+OPERATOR_ORDER = ("duplicate_invoice", "period_cutoff", "fx_error", "allocation_gap", "wrong_customer")
 FX_MIN_MINOR = 100
 FX_MIN_PER_MILLE = 5  # 0.5 %
 WRONG_DATE_DAYS = 5
@@ -292,8 +295,27 @@ def allocation_gap(rng: Rng, world: dict, order: list[str], used: set) -> tuple[
     raise NoTarget("allocation_gap")
 
 
+# ------------------------------------------------------------------ wrong_customer
+def wrong_customer(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, dict]:
+    for key in order:
+        if not key.startswith("I") or key in used or not _posted_inside(world, _invoice(world, key)):
+            continue
+        others = sorted(c for c in world["customers"] if c != _invoice(world, key)["entity"])
+        if not others:
+            continue
+        world = _copy_world(world)
+        invoice = _invoice(world, key)
+        invoice["ledger_entity"] = rng.choice(others)
+        used.add(key)
+        doc = doc_key(key)
+        return world, {"type": "wrong_customer", "affected": [doc], "amount_minor": booked(world, invoice),
+                       "currency": world["base_currency"], "evidence": [[doc, f"R:{key}:dr"]],
+                       "params": {"wrong_entity_id": invoice["ledger_entity"], "invoice_entity_id": invoice["entity"]}}
+    raise NoTarget("wrong_customer")
+
+
 OPERATORS = {"duplicate_invoice": duplicate_invoice, "period_cutoff": period_cutoff,
-             "fx_error": fx_error, "allocation_gap": allocation_gap}
+             "fx_error": fx_error, "allocation_gap": allocation_gap, "wrong_customer": wrong_customer}
 
 
 # ------------------------------------------------------------------ interaction scenarios

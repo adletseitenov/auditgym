@@ -192,7 +192,7 @@ def new_invoice(world: dict, key: str, entity: str, currency: str, issued: dt.da
     """An unposted invoice; the caller sets `posted_at` (it needs a stream)."""
     return {"key": key, "entity": entity, "currency": currency, "issued_at": issued,
             "due_at": issued + dt.timedelta(days=terms), "total_minor": sum(i["amount_minor"] for i in items),
-            "line_items": items, "posted_at": None, "rate_override": None}
+            "line_items": items, "posted_at": None, "rate_override": None, "ledger_entity": None}
 
 
 def new_payment(key: str, entity: str, currency: str, moment: dt.datetime, amount: int,

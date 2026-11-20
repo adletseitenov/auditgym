@@ -119,7 +119,7 @@ def reset_contract() -> Optional[str]:
     if set(observation) != OBS_KEYS["reset"] or info != {}:
         return f"first observation keys {sorted(observation)}, info {info}"
     task = observation["task"]
-    if observation["steps_remaining"] != 100 or not task.get("text") or len(task.get("error_types", [])) != 4:
+    if observation["steps_remaining"] != 100 or not task.get("text") or len(task.get("error_types", [])) != 5:
         return "task text, error types or budget missing"
     limits = task.get("limits", {})
     if (limits.get("max_findings"), limits.get("max_evidence_ids"), limits.get("max_explanation_chars"),
