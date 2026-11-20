@@ -1,13 +1,18 @@
-"""Tests written for the holes that `python3 -m tools.mutate` found: each one kills a mutation that
+"""Tests written for the holes that `python3 -m tools.mutate_gen` found: each one kills a mutation that
 the rest of the suite let survive (the mutation id is named in the test). All of them pass on the
 unmutated code. Hand-built worlds and edited episodes, no random targets.
 """
 import copy
 import datetime as dt
+import hashlib
+import json
+import re
 import unittest
 from decimal import Decimal
 
-from auditgym import books, inject
+from unittest import mock
+
+from auditgym import books, generate as generate_module, inject
 from auditgym.generate import generate
 from auditgym.rng import Rng
 from auditgym.verify import Books, _check_rules, predicate_issues, verify
@@ -323,6 +328,41 @@ class RuleBoundaryTest(unittest.TestCase):
         self.assertEqual(_check_rules(books_, issue, ""), "a cutoff date is more than four days outside the period")
         books_ = self.books_with(self.invoice("2026-09-27T00:00:01+05:00", "KZT", 1000))
         self.assertIsNone(_check_rules(books_, issue, ""))
+
+
+class GenerateHolesTest(unittest.TestCase):
+    def test_episode_id_is_twelve_hex_of_the_open_records_hash(self):
+        """G06: the id is documented as a hash of the open records."""
+        public = generate(3, CONFIG)["public"]
+        body = json.dumps({name: public[name] for name in ("ledger", "invoices", "payments", "fx")},
+                          ensure_ascii=False, sort_keys=True)
+        expected = "ep_" + hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        self.assertEqual(public["manifest"]["episode_id"], expected)
+        self.assertRegex(public["manifest"]["episode_id"], r"^ep_[0-9a-f]{12}$")
+
+    def test_provenance_params_name_public_ids(self):
+        """G04: original_doc_id is translated from the internal key to the public document id."""
+        found = 0
+        for seed in range(6):
+            ep = generate(seed, {"errors": {"duplicate_invoice": 1}, "interaction": "I2"})
+            docs = {d["doc_id"] for d in ep["public"]["invoices"] + ep["public"]["payments"]}
+            for step in ep["private"]["provenance"]["steps"]:
+                if "original_doc_id" in step["params"]:
+                    found += 1
+                    self.assertIn(step["params"]["original_doc_id"], docs)
+        self.assertGreater(found, 0)
+
+    def test_ledger_of_exactly_the_maximum_size_is_accepted(self):
+        """G01: the limit is inclusive; one row less than the ledger has is too few."""
+        reference = generate(3, CONFIG)
+        rows = len(reference["public"]["ledger"])
+        with mock.patch.object(generate_module, "MAX_LEDGER_ROWS", rows):
+            same = generate(3, CONFIG)
+        self.assertEqual(same["private"]["provenance"]["attempt"], reference["private"]["provenance"]["attempt"])
+        self.assertEqual(same["public"], reference["public"])
+        with mock.patch.object(generate_module, "MAX_LEDGER_ROWS", rows - 1):
+            smaller = generate(3, CONFIG)
+        self.assertGreater(smaller["private"]["provenance"]["attempt"], reference["private"]["provenance"]["attempt"])
 
 
 if __name__ == "__main__":

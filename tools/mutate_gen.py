@@ -1,4 +1,4 @@
-"""Hand-written mutation run: python3.11 -m tools.mutate [--jobs N] [--only ID ...] [--json PATH].
+"""Hand-written mutation run of the generator and data checks (books, inject, generate, verify): python3.11 -m tools.mutate_gen [--jobs N] [--only ID ...] [--json PATH].
 
 Every mutation is one small edit of the core (a boundary, a limit, a rounding mode, a dropped
 condition, a flipped and/or, ...). The edit is applied to a COPY of the repository in a temporary
@@ -11,7 +11,7 @@ A survivor without a reason is a hole in the tests: the command exits with 1 and
 mutation marked equivalent that is killed is reported too (the reason is wrong or stale).
 
 Not part of the fast `python3 -m auditgym check`: a full run takes about 10 to 20 minutes.
-Standard library only. The unmutated suites are run first; if they are not green nothing is reported.
+Mutants of the judge (matcher, reward, findings) live in tools/mutants.py. Standard library only. The unmutated suites are run first; if they are not green nothing is reported.
 """
 from __future__ import annotations
 
@@ -30,8 +30,6 @@ ROOT = Path(__file__).resolve().parent.parent
 COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "runs", "*.pyc")
 
 # Test commands (module arguments of `python -m unittest -f`), cheapest and most likely to fail first.
-JUDGE = (("discover", "-s", "tests/judge", "-t", "."), ("tests.test_limits",),
-         ("discover", "-s", "tests/env", "-t", "."))
 BOOKS = (("tests.gen.test_mutation_holes", "tests.gen.test_verify_deviations", "tests.gen.test_golden", "tests.gen.test_inject",
           "tests.gen.test_generate", "tests.gen.test_checks_gen", "tests.gen.test_config_storage"),
          ("discover", "-s", "tests/judge", "-t", "."), ("discover", "-s", "tests/solver", "-t", "."),
@@ -50,83 +48,10 @@ class Mutation:
 
 
 def _m(id, file, old, new, what, equivalent=""):
-    suites = JUDGE if file in ("matcher.py", "reward.py", "findings.py") else BOOKS
-    return Mutation(id, f"auditgym/{file}", old, new, what, suites, equivalent)
+    return Mutation(id, f"auditgym/{file}", old, new, what, BOOKS, equivalent)
 
 
 MUTATIONS: list[Mutation] = [
-    # --- reward.py: metrics, clip, step cost
-    _m("R01", "reward.py", "0.002 * steps", "0.003 * steps", "step penalty 0.002 -> 0.003 (float)"),
-    _m("R02", "reward.py", "STEP_COST = Fraction(2, 1000)", "STEP_COST = Fraction(2, 100)",
-       "step penalty 0.002 -> 0.02 (exact reference)"),
-    _m("R03", "reward.py", "return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))",
-       "return min(1.0, 2 * f1 - 1 - 0.002 * steps)", "lower clip -1 removed"),
-    _m("R04", "reward.py", "return max(-1.0, min(1.0, 2 * f1 - 1 - 0.002 * steps))",
-       "return max(-1.0, 2 * f1 - 1 - 0.002 * steps)", "upper clip +1 removed",
-       equivalent="2*f1 - 1 <= 1 for f1 in [0, 1] and the step cost is non-negative, so the upper clip never binds"),
-    _m("R05", "reward.py", "f1 = 1.0 if tp + fp + fn == 0 else", "f1 = 0.0 if tp + fp + fn == 0 else",
-       "empty truth and empty findings give F1 0 instead of 1"),
-    _m("R06", "reward.py", "precision = tp / (tp + fp) if tp + fp else 0.0",
-       "precision = tp / (tp + fp) if tp + fp else 1.0", "zero denominator of precision gives 1"),
-    _m("R07", "reward.py", "if type(value) is not int or value < 0:", "if type(value) is not int or value <= 0:",
-       "a zero count is rejected"),
-    _m("R08", "reward.py", "if not 0 <= exact <= 1:", "if not 0 <= exact < 1:", "F1 = 1 is rejected"),
-    _m("R09", "reward.py", "f1 = Fraction(2 * tp, 2 * tp + fp + fn)", "f1 = Fraction(2 * tp, 2 * tp + fp + fn + 1)",
-       "exact F1 denominator +1"),
-    # --- matcher.py: predicates and one-to-one matching
-    _m("M01", "matcher.py", 'return abs(finding["claimed_amount_minor"] - issue["expected_amount_minor"]) <= allowed',
-       'return abs(finding["claimed_amount_minor"] - issue["expected_amount_minor"]) < allowed',
-       "tolerance boundary <= -> <"),
-    _m("M02", "matcher.py", 'return abs(finding["claimed_amount_minor"] - issue["expected_amount_minor"]) <= allowed',
-       'return abs(finding["claimed_amount_minor"] - issue["expected_amount_minor"]) <= allowed + 1',
-       "tolerance + 1 minor unit"),
-    _m("M03", "matcher.py", "or (superset_allowed and allowed <= cited)", "or (superset_allowed or allowed <= cited)",
-       "and -> or in the superset rule"),
-    _m("M04", "matcher.py", "        if not allowed:\n            continue", "        if False:\n            continue",
-       "an empty evidence set is no longer skipped"),
-    _m("M05", "matcher.py", 'policy.get("evidence_superset_allowed", True) is not False',
-       'policy.get("evidence_superset_allowed", False) is not False', "default of evidence_superset_allowed flipped"),
-    _m("M06", "matcher.py", "if type(value) is not int or value < 0:", "if type(value) is not int or value < -1:",
-       "a tolerance of -1 is accepted"),
-    _m("M07", "matcher.py", 'return all(evidence_id in known for evidence_id in finding["evidence_ids"])',
-       'return any(evidence_id in known for evidence_id in finding["evidence_ids"])', "all -> any in evidence_exists"),
-    _m("M08", "matcher.py", 'return set(finding["affected_ids"]) == set(issue["affected_ids"])',
-       'return set(finding["affected_ids"]) <= set(issue["affected_ids"])', "affected ids: equality -> subset"),
-    _m("M09", "matcher.py", 'ids.update(doc["doc_id"] for doc in public.get("payments", ()))', "pass",
-       "payment ids are not known evidence"),
-    _m("M10", "matcher.py", "or augment(owner[issue_id], visited)", "or False",
-       "no augmenting paths: greedy instead of maximum matching"),
-    _m("M11", "matcher.py", '"fp": len(findings) - tp,', '"fp": max(len(findings) - tp - 1, 0),', "FP off by one"),
-    _m("M12", "matcher.py", "key=lambda issue: issue[\"issue_id\"])", "key=lambda issue: 0)",
-       "issues are no longer tried in issue_id order",
-       equivalent="sorted() is stable and the matching size is maximum for any order; only `pairs` of "
-                  "interchangeable issues could differ, and tests compare tp/fp/fn"),
-    # --- findings.py: structure checks and limits
-    _m("F01", "findings.py", 'if not isinstance(payload["episode_id"], str) or payload["episode_id"] != episode_id:',
-       'if not isinstance(payload["episode_id"], str):', "episode_id is not compared"),
-    _m("F02", "findings.py", "if len(findings) > MAX_FINDINGS:", "if len(findings) >= MAX_FINDINGS:",
-       "findings limit boundary > -> >="),
-    _m("F03", "findings.py", "if limit is not None and len(unique) > limit:",
-       "if limit is not None and len(unique) >= limit:", "evidence id limit boundary > -> >="),
-    _m("F04", "findings.py", "if len(explanation) > MAX_EXPLANATION_CODE_POINTS:",
-       "if len(explanation) >= MAX_EXPLANATION_CODE_POINTS:", "explanation limit boundary > -> >="),
-    _m("F05", "findings.py", "if message_size(payload) > MAX_MESSAGE_BYTES:", "if message_size(payload) >= MAX_MESSAGE_BYTES:",
-       "message size boundary > -> >="),
-    _m("F06", "findings.py", 'if value < 0:\n        raise StructureError("negative_amount")',
-       'if value < -1:\n        raise StructureError("negative_amount")', "an amount of -1 is accepted"),
-    _m("F07", "findings.py", 'if len(affected) != len(raw["affected_ids"]):', "if False:",
-       "a repeated affected id is accepted"),
-    _m("F08", "findings.py", "type(value) is float and value.is_integer()", "type(value) is float and True",
-       "a non-integral float amount is truncated"),
-    _m("F09", "findings.py", 'kind = kind.strip().translate(_ASCII_LOWER)', 'kind = kind.strip()',
-       "type is case sensitive"),
-    _m("F10", "findings.py", '"currency": currency.strip().translate(_ASCII_UPPER)', '"currency": currency.strip()',
-       "currency is case sensitive"),
-    _m("F11", "findings.py", "            total += 2 + max(len(item) - 1, 0)\n            if total > MAX_MESSAGE_BYTES:",
-       "            total += 1 + max(len(item) - 1, 0)\n            if total > MAX_MESSAGE_BYTES:",
-       "size of a JSON array: one byte short"),
-    _m("F12", "findings.py", 'if field != "explanation" and field not in raw:', 'if field not in raw:',
-       "explanation becomes required"),
     # --- money.py and books.py: rounding and postings
     _m("B01", "money.py", "return int(scaled.quantize(Decimal(1), rounding=ROUND_HALF_EVEN))\n\n\ndef closed_share",
        "return int(scaled.quantize(Decimal(1), rounding=__import__('decimal').ROUND_HALF_UP))\n\n\ndef closed_share",
@@ -173,6 +98,21 @@ MUTATIONS: list[Mutation] = [
     _m("I09", "inject.py", 'or [p["key"] for p in payments_of(world, invoice["key"])] != [key]):',
        "):", "allocation_gap on an invoice with other payments"),
     _m("I10", "inject.py", "WRONG_DATE_DAYS = 5", "WRONG_DATE_DAYS = 6", "wrong-date window 5 -> 6 days"),
+    # --- generate.py: episode assembly and policy
+    _m("G01", "generate.py", "if len(ledger) > MAX_LEDGER_ROWS:", "if len(ledger) >= MAX_LEDGER_ROWS:",
+       "ledger size boundary > -> >="),
+    _m("G02", "generate.py", '"fx_error": 1, "period_cutoff": 0}', '"fx_error": 2, "period_cutoff": 0}',
+       "published fx tolerance 1 -> 2"),
+    _m("G03", "generate.py", '"evidence_superset_allowed": True,', '"evidence_superset_allowed": False,',
+       "published evidence_superset_allowed flipped"),
+    _m("G04", "generate.py", 'if name.endswith("_id") and isinstance(value, str)',
+       'if name.endswith("_idx") and isinstance(value, str)', "an internal id in provenance params is not translated"),
+    _m("G05", "generate.py", "    problems = verify(episode)\n    if problems:", "    problems = []\n    if problems:",
+       "generate() no longer verifies its own episode"),
+    _m("G06", "generate.py", "hexdigest()[:12]", "hexdigest()[:11]", "episode id one character shorter"),
+    _m("G07", "generate.py", "return docs + rows + sorted(key[3:] for key in group if key.startswith(\"FX:\"))",
+       "return rows + docs + sorted(key[3:] for key in group if key.startswith(\"FX:\"))",
+       "evidence order: rows before documents"),
     # --- verify.py: books, evidence, truth
     _m("V01", "verify.py", "if sum(r[\"debit_minor\"] for r in books.ledger) != sum(r[\"credit_minor\"] for r in books.ledger):",
        "if False:", "whole-book debit = credit check skipped",
@@ -276,7 +216,7 @@ def baseline(scratch: Path, timeout: int) -> None:
     """The unmutated copy must be green on every suite, otherwise 'killed' means nothing."""
     directory = _prepare(scratch / "baseline")
     try:
-        for suites in (JUDGE, BOOKS):
+        for suites in (BOOKS,):
             green, why = _run_suites(directory, suites, timeout)
             if not green:
                 raise SystemExit(f"the unmutated code fails its tests ({why}); fix that first")
@@ -285,7 +225,7 @@ def baseline(scratch: Path, timeout: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m tools.mutate", description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(prog="python3 -m tools.mutate_gen", description=__doc__.split("\n\n")[0])
     parser.add_argument("--jobs", type=int, default=6, help="mutations run in parallel (default 6)")
     parser.add_argument("--timeout", type=int, default=900, help="seconds per mutation (default 900)")
     parser.add_argument("--only", nargs="*", default=[], help="run only these mutation ids")
