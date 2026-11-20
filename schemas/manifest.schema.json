@@ -21,7 +21,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "period_start": {

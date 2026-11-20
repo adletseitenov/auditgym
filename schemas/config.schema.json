@@ -46,7 +46,9 @@
           "USD",
           "EUR",
           "RUB",
-          "CNY"
+          "CNY",
+          "JPY",
+          "KWD"
         ]
       },
       "minItems": 0,
@@ -59,7 +61,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "timezone": {

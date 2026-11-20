@@ -53,7 +53,7 @@ episode = {
  "fx_rate_date": "document_date_in_company_timezone",
  "fx_formula": "round(amount_minor * 10^(exp_base - exp_src) * rate)",
  "rounding": "half_even",
- "currency_exponents": {"KZT": 2, "USD": 2, "EUR": 2},
+ "currency_exponents": {"KZT": 2, "USD": 2, "EUR": 2},   // JPY 0, KWD 3 when used (DECISIONS M)
  "accounts": {"cash": "cash", "receivable": "receivable", "revenue": "revenue",
               "unallocated": "unallocated", "fx_difference": "fx_difference", "expense": "expense"},
  "document_date": {"invoice": "issued_at", "payment": "timestamp"},
@@ -140,7 +140,7 @@ episode = {
 - `errors` — число ошибок каждого типа (0 и больше). `{}` или все нули — чистая компания.
 - `interaction`: `"none"`, `"I1"` (частичный платёж в иностранной валюте у границы периода: `allocation_gap` + `fx_error`), `"I2"` (копия счёта, датированная вне периода: `duplicate_invoice` + `period_cutoff`). Сценарий добавляет свои две записи эталона сверх `errors`.
 - `surface_seed: null` — берётся из `seed`. Другое значение даёт тот же эпизод с другими ID и порядком.
-- Проверки: всего ошибок ≤ 30; не больше одной ошибки на 8 счетов (по нижней границе `size.invoices`); проводок ≤ 2 000; страниц на полное чтение ≤ 60; валюты из списка `KZT, USD, EUR, RUB, CNY`; неизвестный ключ — ошибка. Нарушение → `ConfigError` с коротким кодом, эпизод не создаётся.
+- Проверки: всего ошибок ≤ 30; не больше одной ошибки на 8 счетов (по нижней границе `size.invoices`); проводок ≤ 2 000; страниц на полное чтение ≤ 60; валюты из списка `KZT, USD, EUR, RUB, CNY, JPY, KWD` (разрядность 2, 2, 2, 2, 2, 0, 3; порядок списка не меняется: по нему выбирается валюта по умолчанию); неизвестный ключ — ошибка. Нарушение → `ConfigError` с коротким кодом, эпизод не создаётся.
 
 ## 5. Протокол среды
 

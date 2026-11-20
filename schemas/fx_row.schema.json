@@ -15,7 +15,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "target_currency": {
@@ -25,7 +27,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "rate": {

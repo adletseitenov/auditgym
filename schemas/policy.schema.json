@@ -17,7 +17,9 @@
         "USD",
         "EUR",
         "RUB",
-        "CNY"
+        "CNY",
+        "JPY",
+        "KWD"
       ]
     },
     "timezone": {
