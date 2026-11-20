@@ -197,8 +197,14 @@ def table_name(value: object) -> str | None:
 def parse_limit(value: object) -> int:
     """`limit` as an int in [1, PAGE_SIZE]: null is the default, `"50"` and `50.0` are 50, larger
     values are clipped; anything else (0, negative, true, 1.5, "ten") is `bad_arguments`."""
+    return parse_limit_clamped(value)[0]
+
+
+def parse_limit_clamped(value: object) -> tuple[int, bool]:
+    """(limit, clamped): like `parse_limit`, and whether a valid limit above PAGE_SIZE was cut to it.
+    The list_records answer says so with `"limit_clamped": true`."""
     if value is None:
-        return PAGE_SIZE
+        return PAGE_SIZE, False
     if isinstance(value, bool):
         raise ActionError("bad_arguments")
     if isinstance(value, str):
@@ -214,7 +220,7 @@ def parse_limit(value: object) -> int:
         raise ActionError("bad_arguments")
     if value < 1:
         raise ActionError("bad_arguments")
-    return min(value, PAGE_SIZE)
+    return min(value, PAGE_SIZE), value > PAGE_SIZE
 
 
 def is_first_page(cursor: object) -> bool:
@@ -287,7 +293,8 @@ TASK_TEXT = (
     "Записи только для чтения. Действия: list_records(table, cursor, limit), "
     "get_record(table, id), get_document(doc_id), calculator(expression), submit(findings). "
     "Таблицы: ledger, invoices, payments, fx; ID курса — \"дата|из|в\". "
-    "Страница — до 50 записей, next_cursor = null на последней. Каждое действие, в том числе "
+    "Страница — до 50 записей, next_cursor = null на последней; limit от 1 до 50, больше — обрезается "
+    "до 50 (ответ тогда содержит limit_clamped: true). Каждое действие, в том числе "
     "с ошибкой, расходует шаг; submit завершает эпизод. "
     f"Бюджет — {MAX_STEPS} шагов, и submit входит в него: последним шагом должен быть submit, "
     f"не позже {MAX_STEPS}-го. Если {MAX_STEPS} шагов прошли без submit, эпизод обрезается "

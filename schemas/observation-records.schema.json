@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Observation: records",
-  "description": "A page of one table; each record validates against ledger_row, invoice, payment or fx_row by `table`. next_cursor is null on the last page.",
+  "description": "A page of one table; each record validates against ledger_row, invoice, payment or fx_row by `table`. next_cursor is null on the last page. `limit_clamped: true` appears only when a limit above 50 was cut to 50.",
   "type": "object",
   "properties": {
     "type": {
@@ -37,6 +37,10 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 100
+    },
+    "limit_clamped": {
+      "type": "boolean",
+      "description": "Present (true) only when the request's limit was above the page size (50) and was cut to it."
     }
   },
   "required": [

@@ -174,7 +174,7 @@ observation, info = env.reset(seed=7, options={})   # options — синоним
 {"action": "calculator", "expression": "125000 * 465.37"}
 {"action": "submit", "findings": {"episode_id": "…", "findings": [...]}}
 ```
-Таблицы: `ledger`, `invoices`, `payments`, `fx`. Парсер также принимает имя действия в ключах `tool`, `name`, `type` и аргументы во вложенном `args`, `arguments`, `params`, `input` или `parameters` (вложенные важнее плоских). `limit` больше 50 обрезается до 50, по умолчанию 50. `get_record` для `fx` принимает составной ключ.
+Таблицы: `ledger`, `invoices`, `payments`, `fx`. Парсер также принимает имя действия в ключах `tool`, `name`, `type` и аргументы во вложенном `args`, `arguments`, `params`, `input` или `parameters` (вложенные важнее плоских). `limit` от 1 до 50, по умолчанию 50; больше 50 обрезается до 50, и ответ `records` тогда несёт `"limit_clamped": true` (поля нет, если обрезки не было); текст задачи говорит об этом. `get_record` для `fx` принимает составной ключ.
 
 Форма запроса нестрогая, смысл строгий (`docs/AUDIT.md` C1–C3, C9):
 - действие — словарь или строка с JSON-объектом; имя действия и таблицы — без учёта регистра и пробелов по краям; у таблицы допускаются расширение файла и единственное число (`Ledger`, `ledger.csv`, `invoice`);

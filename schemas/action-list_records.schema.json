@@ -28,7 +28,8 @@
     "limit": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 50
+      "maximum": 50,
+      "description": "1 to 50; a larger value is accepted and cut to 50 (the answer then carries limit_clamped: true)."
     }
   },
   "required": [

@@ -445,7 +445,7 @@ class Evaluator:
 
     def _do_list_records(self, arguments: dict) -> dict:
         table = self._table(arguments)
-        limit = actions.parse_limit(arguments.get("limit"))
+        limit, clamped = actions.parse_limit_clamped(arguments.get("limit"))
         cursor = arguments.get("cursor")
         if actions.is_first_page(cursor):
             offset = 0
@@ -457,8 +457,11 @@ class Evaluator:
         end = min(offset + limit, len(records))
         next_cursor = None if end >= len(records) else _cursor_token(
             self._episode["public"]["manifest"]["episode_id"], table, end)
-        return {"type": "records", "table": table,
-                "records": copy.deepcopy(records[offset:end]), "next_cursor": next_cursor}
+        observation = {"type": "records", "table": table,
+                       "records": copy.deepcopy(records[offset:end]), "next_cursor": next_cursor}
+        if clamped:
+            observation["limit_clamped"] = True  # only when a limit above the page size was cut
+        return observation
 
     def _do_get_record(self, arguments: dict) -> dict:
         table = self._table(arguments)

@@ -73,5 +73,34 @@ class StepsCountersTest(unittest.TestCase):
         self.assertEqual(verify_lines([json.dumps(row, sort_keys=True)], key)[0], "bad")
 
 
+class LimitClampTest(unittest.TestCase):
+    def page(self, **arguments):
+        evaluator = Evaluator(clock=FakeClock())
+        evaluator.reset(5, {})
+        observation, *_ = evaluator.step({"action": "list_records", "table": "ledger", **arguments})
+        return observation
+
+    def test_task_text_states_the_range_and_the_clamp(self):
+        text = task_text()
+        self.assertIn("limit от 1 до 50, больше — обрезается до 50", text)
+        self.assertIn("limit_clamped", text)
+
+    def test_limit_above_50_is_cut_and_flagged(self):
+        for limit in (51, 1000, "999", 51.0):
+            observation = self.page(limit=limit)
+            self.assertEqual(len(observation["records"]), 50, limit)
+            self.assertIs(observation["limit_clamped"], True, limit)
+            self.assertEqual(validate(observation, load_schema("observation-records")), [], limit)
+
+    def test_no_flag_without_a_clamp(self):
+        for arguments in ({}, {"limit": 50}, {"limit": 1}, {"limit": None}):
+            observation = self.page(**arguments)
+            self.assertNotIn("limit_clamped", observation, arguments)
+            self.assertEqual(validate(observation, load_schema("observation-records")), [], arguments)
+
+    def test_the_clamp_does_not_change_the_page(self):
+        self.assertEqual(self.page(limit=500)["records"], self.page(limit=50)["records"])
+
+
 if __name__ == "__main__":
     unittest.main()
