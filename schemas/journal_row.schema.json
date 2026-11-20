@@ -58,6 +58,12 @@
       "minimum": 0,
       "maximum": 100
     },
+    "steps_total": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Every step taken, the submit included; inspection_steps counts the actions before the submit only. Absent in journals written before this field existed."
+    },
     "reward": {
       "type": [
         "number",

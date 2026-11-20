@@ -358,7 +358,7 @@ class Evaluator:
                 # findings is an invalid structure instead, so it must not be scored as silence.
                 payload = {}
         result = _judge(self._episode, payload, inspection_steps)
-        self._write_result(result, inspection_steps, truncated, ended_by)
+        self._write_result(result, inspection_steps, truncated, ended_by, steps_total=self._steps)
         # A truncated episode has no steps left, whichever limit ended it (audit C10).
         observation = {"type": "final", "steps_remaining": 0 if truncated else self._remaining()}
         if self._mode == "eval":
@@ -376,10 +376,13 @@ class Evaluator:
             print(f"auditgym evaluator: shaped reward raised {type(exc).__name__}", file=sys.stderr)
             return -1.0
 
-    def _write_result(self, result: dict, inspection_steps: int, truncated: bool, ended_by=None) -> None:
+    def _write_result(self, result: dict, inspection_steps: int, truncated: bool, ended_by=None,
+                      steps_total: int | None = None) -> None:
         line = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "event": "finished", "terminated": not truncated, "truncated": truncated,
-                "inspection_steps": inspection_steps}
+                "inspection_steps": inspection_steps,
+                # every step taken, the submit included (inspection_steps stops before it)
+                "steps_total": inspection_steps if steps_total is None else steps_total}
         if ended_by is not None:
             line["ended_by"] = ended_by
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
@@ -391,7 +394,7 @@ class Evaluator:
         steps it spent, and how many episodes this session has abandoned so far."""
         line = {"episode_id": episode["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "event": "abandoned", "terminated": False, "truncated": False,
-                "inspection_steps": steps, "abandoned_in_session": self._resets_abandoned}
+                "inspection_steps": steps, "steps_total": steps, "abandoned_in_session": self._resets_abandoned}
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = None
         self._write_line(line)
