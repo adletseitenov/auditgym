@@ -254,7 +254,7 @@ class RulingTest(unittest.TestCase):
         for seed in range(30):
             public = generate(seed, {"errors": {}, "currencies": ["USD"]})["public"]
             policy = public["policy"]
-            self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period")
+            self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
             first, last = "2026-10-01", "2026-10-31"
             posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
             loose = Counter()

@@ -389,7 +389,7 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(policy["period_interval"], "[start, end)")
         self.assertIn("booked", policy["payment_rule"])
         self.assertNotIn("\n", policy["payment_rule"])
-        self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period")
+        self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
 
     def test_payment_rule_text_orders_by_document_date_as_the_books_do(self):
         """Audit B1: the rule said "earlier posted payments", the books order by document date. Read

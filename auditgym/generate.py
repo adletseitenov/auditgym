@@ -39,7 +39,9 @@ PAYMENT_RULE = ("a payment with one reference moves the invoice's receivable by 
                 "payment date's rate on unallocated; a payment of several invoices closes each in full; an advance "
                 "goes to unallocated; cash is the payment at its date's rate and the rest of every foreign payment "
                 "is its own fx_difference row")
-DUPLICATE_SIGNATURE = "entity, currency, total, line items incl. service period"
+DUPLICATE_SIGNATURE = ("entity, currency, total, line items incl. service period; service_start/service_end "
+                       "only identify duplicates and never affect period_cutoff, which uses the document date "
+                       "alone (period_basis)")
 # policy.json is built from this whitelist only: no key or value may come from the truth or the config
 # of errors (docs/AUDIT.md Q2/S4).
 POLICY_KEYS = ("ledger_currency", "base_currency", "timezone", "period_start", "period_end", "period_interval",
