@@ -30,12 +30,17 @@ class Rng:
         return int.from_bytes(block[:8], "big")
 
     def below(self, n: int) -> int:
-        """Uniform integer in [0, n), without modulo bias."""
+        """Uniform integer in [0, n), without modulo bias. Up to 2**64 one u64 per try (the values
+        every existing stream draws); above it, as many u64 blocks as n needs, so no n hangs."""
         if n <= 0:
             raise ValueError("n must be positive")
-        limit = (1 << 64) - ((1 << 64) % n)
+        blocks = 1 if n <= 1 << 64 else -(-(n - 1).bit_length() // 64)
+        span = 1 << (64 * blocks)
+        limit = span - (span % n)
         while True:
-            value = self.u64()
+            value = 0
+            for _ in range(blocks):
+                value = (value << 64) | self.u64()
             if value < limit:
                 return value % n
 

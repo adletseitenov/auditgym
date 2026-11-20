@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import localcontext
 
 from . import SCHEMA_VERSION, __version__
 from .books import build_books
 from .config import CONFIG_VERSION, ConfigError, config_digest, normalize_config
-from .limits import MAX_LEDGER_ROWS
+from .limits import MAX_LEDGER_ROWS, MAX_SEED_BITS
 from .inject import NoTarget, inject_errors
+from .money import DECIMAL_CONTEXT
 from .rng import Rng
 from .surface import assign_ids, public_record, public_tables
-from .verify import verify
+from .verify import POLICY_KEYS, verify
 from .world import build_world
 
 MAX_ATTEMPTS = 32
@@ -42,12 +44,8 @@ PAYMENT_RULE = ("a payment with one reference moves the invoice's receivable by 
 DUPLICATE_SIGNATURE = ("entity, currency, total, line items incl. service period; service_start/service_end "
                        "only identify duplicates and never affect period_cutoff, which uses the document date "
                        "alone (period_basis)")
-# policy.json is built from this whitelist only: no key or value may come from the truth or the config
-# of errors (docs/AUDIT.md Q2/S4).
-POLICY_KEYS = ("ledger_currency", "base_currency", "timezone", "period_start", "period_end", "period_interval",
-               "period_basis", "fx_rate_date", "fx_formula", "rounding", "currency_exponents", "accounts",
-               "document_date", "refund", "payment_rule", "duplicate_signature", "amount_tolerance_minor",
-               "evidence_superset_allowed")
+# policy.json is built from the whitelist verify.POLICY_KEYS only (verify checks it on every episode): no
+# key or value may come from the truth or the config of errors (docs/AUDIT.md Q2/S4).
 
 
 def build_policy(world: dict) -> dict:
@@ -165,16 +163,19 @@ def _assemble(seed: int, config: dict, digest: str, attempt: int, retries: list[
 def generate(seed: int, config: dict | None = None, secret: str = "") -> dict:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ConfigError("bad_seed", "seed must be an integer")
+    if seed.bit_length() > MAX_SEED_BITS:  # the evaluator's limit, so a direct call cannot take any length
+        raise ConfigError("bad_seed", f"seed must fit into {MAX_SEED_BITS} bits")
     if not isinstance(secret, str):
         raise ConfigError("bad_secret", "secret must be a string")
     config = normalize_config(config)
     digest = config_digest(config)
     retries: list[dict] = []
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            return _assemble(seed, config, digest, attempt, retries, secret)
-        except _Rejected as rejected:
-            retries.append({"attempt": attempt, "reason": str(rejected)[:200]})
-        except Exception as error:  # never escapes as anything but ConfigError; fuzz reports "internal"
-            retries.append({"attempt": attempt, "reason": f"internal: {type(error).__name__}"})
+    with localcontext(DECIMAL_CONTEXT):  # the caller's Decimal context must not move a rate
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                return _assemble(seed, config, digest, attempt, retries, secret)
+            except _Rejected as rejected:
+                retries.append({"attempt": attempt, "reason": str(rejected)[:200]})
+            except Exception as error:  # never escapes as anything but ConfigError; fuzz reports "internal"
+                retries.append({"attempt": attempt, "reason": f"internal: {type(error).__name__}"})
     raise ConfigError("no_episode", f"no valid episode within {MAX_ATTEMPTS} attempts")

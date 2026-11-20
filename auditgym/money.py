@@ -5,9 +5,15 @@ Money is an int in minor units, rates are Decimal. Nothing here reads the clock.
 from __future__ import annotations
 
 import datetime as dt
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 
 RATE_SIGNIFICANT_DIGITS = 7  # policy promise: at least 6 significant digits in every rate
+
+# The Decimal context generate() and verify() run in, every field given explicitly: the caller's
+# thread context (decimal.getcontext(), which any library may change) must not move a rate or a
+# conversion. Use as `with decimal.localcontext(DECIMAL_CONTEXT):`.
+DECIMAL_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999, capitals=1, clamp=0,
+                          flags=[], traps=[InvalidOperation, DivisionByZero, Overflow])
 
 
 def parse_offset(offset: str) -> dt.timezone:

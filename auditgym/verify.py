@@ -25,12 +25,15 @@ What is checked:
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 
+from . import SCHEMA_VERSION
 from .limits import MAX_EVIDENCE_IDS as MAX_EVIDENCE
 from .limits import MAX_LEDGER_ROWS
-from .money import closed_share, convert, fx_key, local_date, parse_offset, parse_time, significant_digits
+from .money import (DECIMAL_CONTEXT, closed_share, convert, fx_key, local_date, parse_offset, parse_time,
+                    significant_digits)
 
 LEDGER_FIELDS = ["row_id", "timestamp", "account", "debit_minor", "credit_minor", "currency",
                  "entity_id", "invoice_id", "payment_id"]
@@ -40,6 +43,13 @@ FX_MIN_PER_MILLE = 5
 MIN_RATE_DIGITS = 6
 CUTOFF_MAX_DAYS = 4
 POSTING_TYPES = ("period_cutoff", "fx_error", "allocation_gap")  # issues about how a document is posted
+# The published policy keys (docs/CONTRACTS.md 2.2); generate.build_policy builds policy.json from these only.
+POLICY_KEYS = ("ledger_currency", "base_currency", "timezone", "period_start", "period_end", "period_interval",
+               "period_basis", "fx_rate_date", "fx_formula", "rounding", "currency_exponents", "accounts",
+               "document_date", "refund", "payment_rule", "duplicate_signature", "amount_tolerance_minor",
+               "evidence_superset_allowed")
+MANIFEST_FROM_POLICY = ("base_currency", "timezone", "period_start", "period_end", "rounding")
+RATE_TEXT = re.compile(r"[0-9]+(\.[0-9]+)?")  # a plain decimal string: no sign, exponent or spaces
 
 
 def _is_int(value: object) -> bool:
@@ -308,6 +318,9 @@ def _check_fx(public: dict, books: Books) -> list[str]:
         if row["target_currency"] != books.base or row["source_currency"] not in books.exponents \
                 or row["source_currency"] == books.base:
             problems.append(f"fx: rate {row['date']}|{row['source_currency']} is not foreign -> base")
+            continue
+        if not isinstance(row["rate"], str) or not RATE_TEXT.fullmatch(row["rate"]):
+            problems.append(f"fx: rate {row['date']}|{row['source_currency']} is not a plain decimal string")
             continue
         try:
             positive = Decimal(row["rate"]) > 0
@@ -702,10 +715,25 @@ def _check_generator_rules(public: dict) -> list[str]:
     return ["rules: more than two invoices share a signature"] if any(n > 2 for n in counts.values()) else []
 
 
+def _check_manifest(public: dict, private: dict) -> list[str]:
+    """The manifest repeats the policy; policy.json has exactly the published keys; one schema version."""
+    manifest, policy = public["manifest"], public["policy"]
+    problems = []
+    if not isinstance(policy, dict) or sorted(policy) != sorted(POLICY_KEYS):
+        problems.append("policy: keys differ from the published whitelist")
+    for key in MANIFEST_FROM_POLICY:
+        if manifest.get(key) != policy.get(key):
+            problems.append(f"manifest: {key} differs from the policy")
+    if not manifest.get("schema_version") == private["truth"].get("schema_version") == SCHEMA_VERSION:
+        problems.append(f"manifest: schema_version of the manifest and the truth must be {SCHEMA_VERSION!r}")
+    return problems
+
+
 def verify(episode: dict) -> list[str]:
     try:
-        return _verify(episode)
-    except (KeyError, TypeError, ValueError, AttributeError, IndexError, InvalidOperation) as error:
+        with localcontext(DECIMAL_CONTEXT):  # the caller's Decimal context must not move a conversion
+            return _verify(episode)
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError, ArithmeticError) as error:
         return [f"malformed episode: {type(error).__name__}"]
 
 
@@ -714,7 +742,8 @@ def _verify(episode: dict) -> list[str]:
     issues = private["truth"]["issues"]
     pre_public = dict(public, ledger=private["pre_ledger"], invoices=private["pre_invoices"],
                       payments=private["pre_payments"])
-    problems = _check_fx(public, Books(public))
+    problems = _check_manifest(public, private)
+    problems += _check_fx(public, Books(public))
     problems += check_books(pre_public, "pre", set(), counts=False)
     if not problems:
         found, undefined = predicate_issues(pre_public)

@@ -71,8 +71,10 @@ def _range(value: object, name: str) -> list[int]:
 
 
 def valid_offset(text: object) -> bool:
-    """A fixed offset from -12:00 to +14:00 with minutes 00, 30 or 45."""
-    if not isinstance(text, str) or not _OFFSET.fullmatch(text):
+    """A fixed offset from -12:00 to +14:00 with minutes 00, 30 or 45. "-00:00" is refused: it is the
+    same offset as "+00:00" (RFC 3339 gives it the meaning "unknown local offset"), and two
+    spellings of one config would give two worlds."""
+    if not isinstance(text, str) or not _OFFSET.fullmatch(text) or text == "-00:00":
         return False
     minutes = int(text[1:3]) * 60 + int(text[4:6])
     return minutes <= (14 * 60 if text[0] == "+" else 12 * 60)

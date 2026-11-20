@@ -3,7 +3,8 @@
 For every episode: generate() returns (or raises ConfigError only), verify() is empty, and the
 independent solver (auditgym.solver.solve on the open records) equals the truth: same type and
 affected-id set, amount within the policy tolerance, same currency, and the finding's evidence
-contains a full truth evidence set. Prints failures by reason with the smallest failing seed, the
+contains a full truth evidence set; no attempt before the accepted one crashed (`internal:`) or was
+rejected by verify (`verify:`), only "no target" retries are normal. Prints failures by reason with the smallest failing seed, the
 distribution of retry attempts with their reasons, and time per episode. Exit code 1 on any failure.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import time
 from collections import Counter, defaultdict
 
 TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
+BAD_RETRIES = ("internal:", "verify:")  # retry reasons that count as failures
 OFFSETS = ("-11:00", "-09:30", "+00:00", "+05:00", "+05:45", "+14:00", "-03:00", "+05:30", "-12:00", "+12:45")
 CURRENCY_SETS = ((), ("USD",), ("USD", "EUR"), ("CNY", "RUB", "EUR"))
 PERIODS = ({"start": "2026-10-01", "months": 1}, {"start": "2026-12-01", "months": 2},
@@ -121,6 +123,11 @@ def run(seeds: int, types: tuple[str, ...] = (), out=sys.stdout) -> dict:
             if episode is not None:
                 provenance = episode["private"]["provenance"]
                 attempts[provenance["attempt"]] += 1
+                # A retry is only for a story without a target. An attempt that crashed or that verify
+                # rejected is a generator bug even when a later attempt succeeds.
+                for retry in provenance["retries"]:
+                    if retry["reason"].startswith(BAD_RETRIES):
+                        failures[f"retry: {retry['reason'][:62]}"].append((seed, name))
                 retry_reasons.update(r["reason"].split(":")[0] + (":" + r["reason"].split(":")[1][:50]
                                      if ":" in r["reason"] else "") for r in provenance["retries"])
     episodes = len(times)
