@@ -16,6 +16,7 @@ from auditgym.secret import JOURNAL_KEY_ENV, JOURNAL_KEY_FILE_ENV, SECRET_ENV, S
 from tools.schema_lite import load_schema, validate
 
 KEY = b"journal-test-key"
+SECRET = "evaluator-test-secret"
 CLEAN_ENV = {SECRET_ENV: "", SECRET_FILE_ENV: "", JOURNAL_KEY_ENV: "", JOURNAL_KEY_FILE_ENV: ""}
 
 
@@ -41,13 +42,13 @@ class SignedJournalTest(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.path = pathlib.Path(scratch.name) / "results.jsonl"
         # Two sessions append to one file: the second continues the chain of the first.
-        first = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret="")
+        first = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret=SECRET)
         play(first, 1)
         first.reset(2, {})
         first.step({"action": "calculator", "expression": "1"})
         first.reset(3, {})  # abandons episode 2 after one step: an 'abandoned' line is signed too
         first.step({"action": "submit", "findings": {"episode_id": "x", "findings": []}})
-        second = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret="")
+        second = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret=SECRET)
         play(second, 4, steps=2)
         self.lines = self.path.read_text(encoding="utf-8").splitlines()
 
@@ -120,7 +121,7 @@ class ShapedRewardStaysOutOfEvalTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "results.jsonl"
-            evaluator = Evaluator(mode="eval", results_path=path, shaped_reward=True, journal_key=KEY, secret="")
+            evaluator = Evaluator(mode="eval", results_path=path, shaped_reward=True, journal_key=KEY, secret=SECRET)
             observation, _ = evaluator.reset(3, {})
             result = evaluator.step({"action": "submit", "findings": {
                 "episode_id": observation["manifest"]["episode_id"], "findings": []}})
@@ -141,8 +142,55 @@ class UnsignedJournalTest(unittest.TestCase):
             row = json.loads(path.read_text(encoding="utf-8"))
             self.assertFalse({"seq", "prev", "mac"} & set(row))
             code, text = verify_cli(path, {})
-        self.assertEqual(code, 2)
+            self.assertEqual(code, 1)  # eval without the evaluator secret: the closed run is not protected
+            self.assertIn("eval rows without evaluator secret: 1", text)
+            path.write_text(json.dumps({**row, "mode": "train"}) + "\n", encoding="utf-8")
+            code, text = verify_cli(path, {})
+        self.assertEqual(code, 2)  # a train-only journal without a key: nothing to verify, as before
         self.assertIn("not signed", text)
+
+
+class EvalWithoutSecretTest(unittest.TestCase):
+    """Eval rows written without the evaluator secret leave the closed run open to a seed search and a
+    forged line: verify-journal fails (1) instead of saying nothing (2)."""
+
+    def run_on(self, text, environ, *extra):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            path.write_text(text, encoding="utf-8")
+            return verify_cli(path, environ, *extra)
+
+    def eval_line(self, **evaluator_args):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, CLEAN_ENV):
+            path = pathlib.Path(directory) / "results.jsonl"
+            play(Evaluator(mode="eval", results_path=path, **evaluator_args), 1)
+            return path.read_text(encoding="utf-8")
+
+    def test_an_eval_row_with_secret_none_fails_even_when_signed(self):
+        text = self.eval_line(journal_key=KEY, secret="")
+        self.assertEqual(json.loads(text)["secret"], "none")
+        code, out = self.run_on(text, {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 1, out)
+        self.assertIn("eval rows without evaluator secret: 1", out)
+        self.assertIn("Закрытая проверка", out)
+
+    def test_an_eval_row_with_the_secret_and_a_valid_signature_passes(self):
+        text = self.eval_line(journal_key=KEY, secret=SECRET)
+        code, out = self.run_on(text, {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 0, out)
+
+    def test_a_train_journal_without_a_key_is_nothing_to_verify(self):
+        text = json.dumps({**json.loads(self.eval_line(secret="")), "mode": "train"}) + "\n"
+        code, out = self.run_on(text, {})
+        self.assertEqual(code, 2, out)
+        self.assertIn("nothing to verify", out)
+
+    def test_a_forged_appended_line_in_an_unsecreted_eval_journal_fails(self):
+        text = self.eval_line(secret="")
+        forged = {**json.loads(text), "reward": 1.0, "episode_run": 2}
+        code, out = self.run_on(text + json.dumps(forged) + "\n", {})
+        self.assertEqual(code, 1, out)
+        self.assertIn("eval rows without evaluator secret: 2", out)
 
 
 class KeyedVerifierTest(unittest.TestCase):
@@ -168,7 +216,8 @@ class KeyedVerifierTest(unittest.TestCase):
         code, text = self.run_on(unsigned, {JOURNAL_KEY_ENV: KEY.decode()})
         self.assertEqual(code, 1)
         self.assertIn("unsigned", text)
-        self.assertEqual(self.run_on(unsigned, {})[0], 2)
+        train = json.dumps({**json.loads(unsigned), "mode": "train"}) + "\n"
+        self.assertEqual(self.run_on(train, {})[0], 2)
 
     def test_a_secret_file_counts_as_a_key(self):
         with tempfile.TemporaryDirectory() as directory:
