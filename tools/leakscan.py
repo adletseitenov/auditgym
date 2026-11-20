@@ -267,8 +267,13 @@ def check_shape(reply: dict | None, kind: str, mode: str) -> list[str]:
     if not isinstance(reply, dict):
         return ["reply is not a JSON object"]
     observation = reply.get("observation")
-    if not isinstance(observation, dict) or set(observation) != OBS_KEYS.get(observation.get("type"), set()):
-        return [f"observation keys {sorted(observation) if isinstance(observation, dict) else observation}"]
+    if not isinstance(observation, dict):
+        return [f"observation keys {observation}"]
+    keys = set(observation)
+    if observation.get("type") == "records" and observation.get("limit_clamped") is True:
+        keys.discard("limit_clamped")  # the documented flag of a list_records limit above the page size
+    if keys != OBS_KEYS.get(observation.get("type"), set()):
+        return [f"observation keys {sorted(observation)}"]
     problems = []
     if observation["type"] == "error":
         error = observation["error"]
