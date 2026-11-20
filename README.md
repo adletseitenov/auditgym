@@ -9,10 +9,10 @@ docker build -t auditgym . && docker run --rm --network none auditgym
 python3 -m auditgym check          # то же без Docker: Python ≥ 3.11, зависимостей нет
 ```
 
-Команда запускает юнит-тесты, линтер детерминизма и таблицу `tools/score.py` (наше зеркало критериев кейса §10; это не оценка жюри) и печатает по фазам время и итог. Хвост вывода:
+Команда запускает юнит-тесты, линтер детерминизма и таблицу `tools/score.py` (наше зеркало критериев кейса §10; это не оценка жюри) и печатает по фазам время и итог; число тестов `N` печатает сама команда (строка `unit tests:`), в README оно не фиксируется. Хвост вывода:
 
 ```
-unit tests: 589 run (fast mode; --full also runs 9 more groups)
+unit tests: N run (fast mode; --full also runs 9 more groups)
 ...
 ИТОГО                                           100.0/100
 ...
