@@ -9,6 +9,7 @@ import os
 import re
 import stat
 
+from .answer_rules import answer_rules
 from .limits import (MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
                      MAX_STEPS, PAGE_SIZE)
 
@@ -302,7 +303,8 @@ TASK_TEXT = (
     "в inspection_steps идут только действия, сделанные на самом деле. В награду входит inspection_steps — число действий до submit; "
     "сам submit в него не считается (в журнале есть и steps_total — все шаги с submit). Ответ — findings по схеме, "
     "episode_id из manifest; submit принимает findings как объект {episode_id, findings}, "
-    "а голый список findings принимается как findings текущего эпизода; ложные выводы снижают награду."
+    "а голый список findings принимается как findings текущего эпизода; ложные выводы снижают награду. "
+    "Правила ответа по типам (affected_ids, сумма, валюта, допустимые наборы доказательств) — в task.answer_rules."
 )
 
 
@@ -332,4 +334,5 @@ def build_task(policy: dict) -> dict:
         "tolerances": {"amount_tolerance_minor": dict(tolerances) if isinstance(tolerances, dict) else {},
                        "evidence_superset_allowed": policy.get("evidence_superset_allowed", True)},
         "accounts": dict(policy.get("accounts") or {}),
+        "answer_rules": answer_rules(),
     }

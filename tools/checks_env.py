@@ -127,6 +127,10 @@ def reset_contract() -> Optional[str]:
         return f"limits are {limits}"
     if "amount_tolerance_minor" not in task.get("tolerances", {}) or "findings_schema" not in task:
         return "tolerances or findings schema missing"
+    rules = task.get("answer_rules")
+    if (not isinstance(rules, dict) or set(rules.get("types", {})) != set(task["error_types"])
+            or not all(rules["types"][name].get("evidence", {}).get("one_of") for name in rules["types"])):
+        return "answer rules missing or without evidence sets for every error type"
     return None
 
 

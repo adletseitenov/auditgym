@@ -109,6 +109,8 @@ episode = {
 | `fx_error` | документ | модуль разницы, базовая валюта | счёт: `[[doc, row_Дт, ключ_курса], [doc, row_Кт, ключ_курса]]`; платёж: `[[doc, row_денег, ключ_курса]]`; ключ курса — `"дата|ИСТ|ЦЕЛЬ"` по дате документа в поясе компании |
 | `period_cutoff` | документ | сумма документа, валюта документа | `[[doc, row_Дт], [doc, row_Кт]]` |
 
+`period_cutoff` в эталоне генератора бывает только у счетов (у платежа нет строки Дт дебиторки с `payment_id = null`). Агент видит эти наборы в `task.answer_rules` (§5.5).
+
 Точные предикаты — в `docs/SPEC.md`, раздел «Определения ошибок».
 
 ### 3.2 provenance.json
@@ -194,7 +196,7 @@ observation, info = env.reset(seed=7, options={})   # options — синоним
 {"type": "error", "error": {"code": "unknown_id", "message": "Unknown id."}, "steps_remaining": 95}
 {"type": "final", "steps_remaining": 94}
 ```
-`next_cursor` равен `null` на последней странице. `task` содержит: текст задачи (в нём же: `inspection_steps` не считает `submit`, граница `limit`, формы `submit` — объект `{episode_id, findings}` и голый список как findings текущего эпизода), перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски. Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
+`next_cursor` равен `null` на последней странице. `task` содержит: текст задачи (в нём же: `inspection_steps` не считает `submit`, граница `limit`, формы `submit` — объект `{episode_id, findings}` и голый список как findings текущего эпизода), перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски и `answer_rules` — постоянный блок правил ответа (§5.5). Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
 
 Коды ошибок (тексты фиксированные): `unknown_action`, `unknown_table`, `unknown_id`, `bad_cursor`, `bad_arguments`, `bad_expression`, `episode_over`, `not_reset`. Любая ошибка, кроме двух последних, расходует шаг.
 
@@ -205,6 +207,9 @@ observation, info = env.reset(seed=7, options={})   # options — синоним
 - `eval`: политике возвращается `reward = 0.0`, `info = {}`; настоящая награда и разбор пишутся в журнал оценщика (§5.1; одна JSON-строка на эпизод). `reset` посреди эпизода разрешён и изолирует новый эпизод, но брошенный эпизод остаётся в журнале строкой `abandoned` с его шагами: перезапуск не прячет потраченный бюджет.
 - Неверная структура выводов → `terminated = true`, награда `-1.0`.
 - `step` после конца → ошибка `episode_over`, `reward 0.0`, состояние не меняется и шаг не тратится; флаги и `steps_remaining` — как в финальном ответе: после `submit` `terminated = true`, `truncated = false`, после усечения (по шагам или по времени) всякий следующий шаг отвечает `terminated = false`, `truncated = true`, `steps_remaining = 0`. `step` до `reset` → ошибка `not_reset` (протокольная: `reward 0.0`, `terminated = false`, `truncated = false`, шаг не тратится).
+
+### 5.5 Правила ответа (`task.answer_rules`)
+Постоянный блок первого наблюдения, одинаковый во всех эпизодах и без данных эпизода (тест `tests/judge/test_answer_rules.py`); источник — `auditgym/answer_rules.py`. Без него правильно найденная ошибка была бы FP из-за недоступного факта (ключ курса у `fx_error`, строка дебиторки у `allocation_gap`). Ключи: `general` (список строк: что проверяет судья, superset, лимиты), `evidence_roles` (роль → как найти запись в открытых таблицах), `types` (для каждого из четырёх типов: `affected_ids`, `claimed_amount_minor`, `currency`, `evidence.one_of` — допустимые наборы как списки токенов `роль(субъект)`, `evidence.subjects`). Допуск не повторяется числом: правило отсылает к `policy.amount_tolerance_minor`. Наборы `one_of` совпадают с `evidence_sets` эталона (§3.1) на всех эпизодах; тест строит их из правил и открытых записей и сравнивает с эталоном. Схема — `schemas/observation-reset.schema.json`; `SCHEMA_VERSION` не меняется: файлы эпизода те же.
 
 ## 6. Выводы агента
 

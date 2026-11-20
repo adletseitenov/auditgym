@@ -10,7 +10,8 @@ from auditgym.evaluator import Evaluator, EvaluatorError
 from tests.env.helpers import CLEAN, TABLES, TINY, FakeClock, full_walk, generated, strict_json, tiny
 
 RESET_KEYS = {"type", "task", "manifest", "policy", "steps_remaining"}
-TASK_KEYS = {"text", "error_types", "findings_schema", "limits", "tolerances", "accounts"}
+TASK_KEYS = {"text", "error_types", "findings_schema", "limits", "tolerances", "accounts",
+             "answer_rules"}
 KEYS = {
     "records": {"type", "table", "records", "next_cursor", "steps_remaining"},
     "record": {"type", "table", "record", "steps_remaining"},

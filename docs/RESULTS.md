@@ -37,7 +37,7 @@
 | solver_policy | 13 |
 | reconcile | 12 |
 | random_explorer | 8 |
-| silence | 7 |
+| silence | 6 |
 | flag_all | 13 |
 | flag_all_cutoff | 13 |
 | flag_all_duplicates | 13 |
@@ -61,15 +61,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 7 |
-| solver_policy | 13 |
+| oracle | 6 |
+| solver_policy | 12 |
 | reconcile | 12 |
-| random_explorer | 8 |
-| silence | 7 |
-| flag_all | 13 |
+| random_explorer | 9 |
+| silence | 6 |
+| flag_all | 12 |
 | flag_all_cutoff | 12 |
-| flag_all_duplicates | 13 |
-| heuristic | 13 |
+| flag_all_duplicates | 12 |
+| heuristic | 12 |
 
 ## Генерированный набор (200 эпизодов)
 
@@ -89,15 +89,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 29 |
-| solver_policy | 36 |
-| reconcile | 36 |
-| random_explorer | 31 |
-| silence | 30 |
+| oracle | 25 |
+| solver_policy | 32 |
+| reconcile | 31 |
+| random_explorer | 27 |
+| silence | 26 |
 | flag_all | 37 |
-| flag_all_cutoff | 37 |
-| flag_all_duplicates | 37 |
-| heuristic | 37 |
+| flag_all_cutoff | 38 |
+| flag_all_duplicates | 33 |
+| heuristic | 33 |
 
 ## Полнота по типам ошибок
 
@@ -146,7 +146,7 @@
 ## Генератор
 
 - Эпизодов с повторной попыткой (attempt > 0): 0 из 200 (0.0 %), всего повторов 0.
-- Время генерации: среднее 26.4 мс, максимум 47.1 мс.
+- Время генерации: среднее 24.0 мс, максимум 49.5 мс.
 
 ## Проверки порядка
 
@@ -156,4 +156,4 @@
 - Лучший вариант flag_all минус silence на книгах с ошибками: train +0.059, dev +0.044, generated +0.034. Молчание там на нижней границе −1, поэтому любое случайное попадание атаки чуть выше него; на чистых книгах атака получает −1, молчание +1.
 - Режим eval: политика видит награду 0.0 и пустой info, журнал оценщика равен награде train — да.
 
-Время прогона отчёта: 104.7 с.
+Время прогона отчёта: 96.6 с.
