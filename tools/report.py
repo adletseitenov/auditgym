@@ -285,6 +285,23 @@ def build_report(n: int, episodes_dir=None) -> str:
             cells.append(f"{found}/{total} ({_fmt(found / total, 2)})" if total else "нет в наборах")
         out.append(f"| {name} | " + " | ".join(cells) + " |")
 
+    from tools import levels as levels_tool
+
+    level_stats = levels_tool.level_stats()
+    out += ["", "## Уровни сложности", "",
+            "Конфигурации — `configs/levels.json`, загрузка `auditgym.levels.load(имя)`; "
+            f"{levels_tool.LEVEL_SEEDS} seed на уровень, политики идут через процесс среды в режиме train "
+            "(`python -m tools.levels levels`). Страницы — число вызовов list_records для полного чтения всех "
+            f"четырёх таблиц (среднее и диапазон); бюджет — {levels_tool.MAX_STEPS} шагов.", ""]
+    out += levels_tool.levels_markdown(stats=level_stats) + [""]
+    out += [f"Обрезано по лимиту шагов на всех уровнях: {sum(r['truncated'] for d in level_stats.values() for rows in d['policies'].values() for r in rows)}. "
+            f"Потолок полного чтения по лимитам конфигурации — {levels_tool.MAX_PAGES} страниц, то есть не больше "
+            f"{levels_tool.MAX_PAGES + 1} шагов с submit: ни один допустимый конфиг не доводит решатель до "
+            "обрезки на 100 шагах. Давление бюджета есть только через штраф 0.002 за шаг (см. docs/DESIGN.md).", ""]
+    out += ["Сколько страниц книги нужно решателю до окончательного ответа (проводки идут в порядке row_id, "
+            "строки одного документа разбросаны по всем страницам; `python -m tools.levels prefix`):", "",
+            levels_tool.prefix_text(), ""]
+
     seconds, attempts = generation["seconds"], generation["attempts"]
     retried = sum(a > 0 for a in attempts)
     out += ["", "## Генератор", "",

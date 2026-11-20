@@ -1,0 +1,30 @@
+{
+ "about": "Difficulty levels for Env().reset(seed, config); load them with auditgym.levels.load(name). Only documented config keys within documented limits (config.py, limits.py). Measured by tools/levels.py; table in docs/RESULTS.md.",
+ "config_version": "1",
+ "levels": {
+  "easy": {
+   "note": "two error types, small books, one foreign currency, one month",
+   "config": {"errors": {"duplicate_invoice": 1, "period_cutoff": 1}, "currencies": ["USD"],
+              "size": {"invoices": [24, 32], "background_pairs": [30, 60]}}
+  },
+  "medium": {
+   "note": "all four types twice, default-sized books, one foreign currency",
+   "config": {"errors": {"duplicate_invoice": 2, "allocation_gap": 2, "fx_error": 2, "period_cutoff": 2},
+              "currencies": ["USD"], "size": {"invoices": [64, 100], "background_pairs": [150, 300]}}
+  },
+  "hard": {
+   "note": "all four types three times plus interaction I1, two currencies, two months, large books",
+   "config": {"errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 3, "period_cutoff": 3},
+              "interaction": "I1", "currencies": ["USD", "EUR"], "timezone": "+12:45",
+              "period": {"start": "2026-09-01", "months": 2},
+              "size": {"invoices": [140, 180], "background_pairs": [250, 400]}}
+  },
+  "max": {
+   "note": "the largest books the limits allow: three currencies, three months, 14 issues; full read needs the most pages",
+   "config": {"errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 4, "period_cutoff": 3},
+              "interaction": "I2", "currencies": ["USD", "EUR", "RUB"], "timezone": "-03:00",
+              "period": {"start": "2026-07-01", "months": 3},
+              "size": {"invoices": [200, 200], "background_pairs": [460, 460]}}
+  }
+ }
+}

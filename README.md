@@ -54,6 +54,11 @@ CHECK: PASSED
 | Воспроизводимость, смена ID и порядка | `auditgym/rng.py`, `surface.py`, `tools/transform.py` | `tests/test_rng.py`, `python3 -m tools.metamorph`, линтер `tools/lint_determinism.py` |
 | Проверка без сети, платных API и GPU; одна команда | `Dockerfile`, `auditgym/__main__.py`, `tools/check_modes.py` | `docker run --rm --network none auditgym`; строка score «one command runs everything offline» |
 
+## Уровни сложности
+
+`configs/levels.json` — четыре готовых уровня (`easy`, `medium`, `hard`, `max`); получить: `from auditgym.levels import load; env.reset(seed, load("hard"))`. Размер, страницы на полное чтение (от 7 до 49), шаги и возврат политик по уровням — `docs/RESULTS.md`, раздел «Уровни сложности» (`python -m tools.levels levels`).
+Честно: бюджет 100 шагов не становится ограничением ни на одном допустимом конфиге (полное чтение — не больше 60 страниц по `MAX_PAGES`, на практике до 51), обрезано 0 эпизодов; рост сложности виден в штрафе 0.002 за шаг и в числе ошибок и проводок. Разбор — `docs/DESIGN.md`, раздел 10.
+
 ## Быстрый старт для политики
 
 Политика — объект с `reset(observation)` и `act(observation) -> action`. Среда запускает процесс-оценщик сама; эталон живёт только в его памяти.
