@@ -185,7 +185,7 @@ def _finding(raw: object) -> dict:
     if not isinstance(kind, str) or kind not in TYPES:
         raise StructureError("unknown_type")
     # A repeated id stays in the list: the finding is well-formed, but the matcher never matches it
-    # (an FP of this finding alone, docs/DECISIONS.md, N), and it still counts toward the limit.
+    # (an FP of this finding alone, docs/DECISIONS.md, O), and it still counts toward the limit.
     affected = _id_list(raw["affected_ids"], None, keep_repeats=True)
     amount = _amount(raw["claimed_amount_minor"])
     currency = raw["currency"]

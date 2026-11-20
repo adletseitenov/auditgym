@@ -1,7 +1,7 @@
 """A deliberately simple reconciliation, the kind of script an auditor writes in ten minutes.
 
-It reads all invoices, payments and the whole ledger (never the fx table), sorts them by id so the
-order of rows in the files does not matter, and applies two rules:
+It reads all invoices, payments and the whole ledger (never the fx table), sorts them by content (never by id) so
+the order of rows and the names of ids do not matter, and applies two rules:
 - two invoices of the same customer with the same total are a duplicate (no check of currency,
   line items or whether both are posted);
 - an invoice whose issue date (the date part of `issued_at`) is outside the manifest period is a
