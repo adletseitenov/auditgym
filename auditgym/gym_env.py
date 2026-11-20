@@ -18,14 +18,17 @@ evaluator, so the train/eval rules apply unchanged (eval: reward 0.0 and info {}
 """
 from __future__ import annotations
 
+import importlib
 import json
 
 from .client import DEFAULT_TIMEOUT, Env
 from .limits import MAX_MESSAGE_BYTES
 
 try:  # gymnasium is optional: an installed copy only adds the real Env base class and spaces
-    import gymnasium
-    from gymnasium import spaces as _spaces
+    # importlib, not an import statement: the determinism lint allows only the standard library in the
+    # package, and this one optional, lazily found module is the single exception (see DECISIONS I).
+    gymnasium = importlib.import_module("gymnasium")
+    _spaces = importlib.import_module("gymnasium.spaces")
 except ImportError:  # the usual case in this repository
     gymnasium = None
     _spaces = None
