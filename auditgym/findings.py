@@ -180,6 +180,8 @@ def _finding(raw: object) -> dict:
     if not isinstance(kind, str) or kind not in TYPES:
         raise StructureError("unknown_type")
     affected = _id_list(raw["affected_ids"], None)
+    if len(affected) != len(raw["affected_ids"]):  # the same object named twice is malformed
+        raise StructureError("duplicate_affected_id")
     amount = _amount(raw["claimed_amount_minor"])
     currency = raw["currency"]
     if not isinstance(currency, str):

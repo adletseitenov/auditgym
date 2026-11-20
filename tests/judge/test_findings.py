@@ -76,6 +76,7 @@ CASES = [
      "too_many_evidence_ids"),
     ("the limit counts unique ids: 25 entries, 10 different (R5)",
      msg(finding(evidence_ids=[str(i % 10) for i in range(25)])), None),
+    ("a repeated affected id is malformed", msg(finding(affected_ids=["a", "b", "a"])), "duplicate_affected_id"),
     ("empty affected and evidence", msg(finding(affected_ids=[], evidence_ids=[])), None),
     ("currency not a string", msg(finding(currency=840)), "currency_not_string"),
     ("explanation 1000 code points", msg(finding(explanation="ж" * 1000)), None),
@@ -119,7 +120,7 @@ class NormalizationTest(unittest.TestCase):
         self.assertEqual(item["explanation"], "")
 
     def test_ids_sorted_unique_and_currency_upper(self):
-        [item] = parse_findings(msg(finding(affected_ids=["b", "a", "b"], evidence_ids=["b", "a", "a"])), EP)
+        [item] = parse_findings(msg(finding(affected_ids=["b", "a"], evidence_ids=["b", "a", "a"])), EP)
         self.assertEqual(item["affected_ids"], ["a", "b"])
         self.assertEqual(item["evidence_ids"], ["a", "b"])
         self.assertEqual(item["currency"], "USD")
