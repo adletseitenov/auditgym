@@ -1,6 +1,7 @@
 """Audit fixes for the environment (docs/AUDIT.md C1-C10, R1, R9, R10, L3, L4, C5, Q2) and the
 survivors of the mutation run (Q1: N1-N9, A2). Each test pins a behaviour that was wrong, or
 that no test noticed when it was changed."""
+import contextlib
 import io
 import json
 import os
@@ -419,9 +420,12 @@ class JournalTest(unittest.TestCase):
     def test_judge_exception_is_minus_one_and_logged_never_a_win(self):
         for mode in ("eval", "train"):
             evaluator, path = self.journal(mode)
-            with mock.patch("auditgym.judge.judge", side_effect=RuntimeError("boom")):
+            stderr = io.StringIO()  # the evaluator logs the class of the judge error; expected here
+            with mock.patch("auditgym.judge.judge", side_effect=RuntimeError("boom")), \
+                    contextlib.redirect_stderr(stderr):
                 observation, reward, terminated, truncated, info = evaluator.step(
                     {"action": "submit", "findings": CORRECT_TINY})
+            self.assertEqual(stderr.getvalue(), "auditgym evaluator: judge raised RuntimeError\n")
             line = json.loads(path.read_text())
             self.assertEqual(line["structure_error"], "judge_exception")
             self.assertEqual((line["reward"], line["tp"], line["fn"]), (-1.0, 0, 1))
@@ -434,9 +438,12 @@ class JournalTest(unittest.TestCase):
     def test_judge_exception_on_truncation_and_on_a_broken_truth(self):
         evaluator, path = self.journal()
         evaluator._episode["private"] = {}  # even a broken episode cannot give a free win
-        _, reward, terminated, _, _ = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            _, reward, terminated, _, _ = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         self.assertTrue(terminated)
         self.assertEqual(json.loads(path.read_text())["reward"], -1.0)
+        self.assertEqual(stderr.getvalue(), "auditgym evaluator: judge raised KeyError\n")
 
     def test_results_file_is_private(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -459,8 +466,11 @@ class JournalTest(unittest.TestCase):
         os_path = str(path)
         os.remove(os_path)
         os.mkdir(os_path)  # the journal cannot be appended to any more
-        observation, reward, terminated, _, _ = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            observation, reward, terminated, _, _ = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         self.assertEqual((observation["type"], terminated), ("final", True))
+        self.assertEqual(stderr.getvalue(), "auditgym evaluator: cannot write the results file\n")
 
     def test_default_journal_path_in_eval_mode(self):
         self.assertEqual(actions.DEFAULT_RESULTS_PATH, "runs/results.jsonl")

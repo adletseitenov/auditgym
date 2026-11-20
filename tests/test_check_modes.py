@@ -43,7 +43,8 @@ class ModesTest(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
                 mock.patch.object(check_modes, "case_ranges_line", lambda: True), \
-                mock.patch.object(score, "main", fake_score), contextlib.redirect_stdout(out):
+                mock.patch.object(score, "main", fake_score), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(check_modes.run(False), 0)
         self.assertEqual(out.getvalue().count("determinism lint:"), 1)
         self.assertEqual(calls, [0])
@@ -71,7 +72,8 @@ class ModesTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {SECRET_ENV: "hunter2-value"}), \
                 mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
                 mock.patch.object(check_modes, "case_ranges_line", lambda: True), \
-                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out):
+                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
             check_modes.run(False)
         self.assertEqual(out.getvalue().count(SECRET_ENV + ":"), 1)
         self.assertNotIn("hunter2-value", out.getvalue())
@@ -87,7 +89,8 @@ class ModesTest(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
                 mock.patch.object(case_ranges, "run", lambda seeds: bad), \
-                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out):
+                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(check_modes.run(False), 1)
         self.assertIn("case ranges: FAIL (1 of 1: level x)", out.getvalue())
 
