@@ -1,4 +1,4 @@
-"""Prints the limits of a configuration and how many invoices N errors need (README, «Конфигурация»).
+"""Prints the limits of a configuration and how many invoices N errors need (docs/USAGE.md, «Конфигурация»).
 
     python3 -m tools.config_table
 
