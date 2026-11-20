@@ -9,9 +9,8 @@ terminated, truncated; «В наблюдениях обучающих траек
 With no arguments it records random_explorer, reconcile, flag_all, solver_policy and the oracle
 (`policies/`) on the shipped train and dev episodes (`episodes/train`, `episodes/dev`) into
 `trajectories.jsonl` (`make trajectories`); the oracle goes to `trajectories.oracle.jsonl`. The
-output directory is created when it does not exist. The successful policy (solver_policy, which reads
-only what the environment shows) plays all 20 episodes; the failing readers (reconcile, flag_all) play
-the books of DEFAULT_PICK only, so the file stays about 5 MB.
+output directory is created when it does not exist. Every policy but the oracle (its own file) plays
+all 20 episodes, so the file is about 13 MB; POLICY_PICK can still restrict a policy to some books.
 
 Each line has the case fields plus `policy` (the name of the policy that played the episode) and
 `split` (train or dev: the directory the episode came from; `--split` names it for episodes from
@@ -62,12 +61,10 @@ SPLITS = ("train", "dev")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_EPISODES = (ROOT / "episodes" / "train", ROOT / "episodes" / "dev")
 # Every reading policy pages every table, about 0.2 MB per episode, so 20 episodes of one policy are
-# 4 MB and several would not fit the size we keep for the file (about 5 MB). The honest solver plays all
-# 20 books; random_explorer is cheap (0.6 MB for all 20) and plays all too; the failing readers
-# (reconcile, flag_all) play two dev books, one with errors and one clean (the smallest of each kind), and the
-# oracle (its own private file) plays everything. `--all-episodes` records every policy on every episode.
-POLICY_PICK = {"reconcile": {"dev": ("ep_05", "ep_09")},
-               "flag_all": {"dev": ("ep_05", "ep_09")}}
+# 4 MB. All four baselines play all 20 books (about 13 MB for the file; the oracle has its own private
+# file and plays everything too). POLICY_PICK maps a policy name to {split: (episode names)} to restrict
+# it to some books; it is empty on purpose, and `--all-episodes` (the default now) stays as a no-op flag.
+POLICY_PICK: dict = {}
 DEFAULT_OUT = "trajectories.jsonl"
 
 
@@ -469,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy", action="append", default=[], help="module:Class with act(observation)")
     parser.add_argument("--oracle-out", default=None)
     parser.add_argument("--all-episodes", action="store_true",
-                        help="with the default directories: every policy on every episode, not POLICY_PICK")
+                        help="with the default directories: every policy on every episode (the default; POLICY_PICK is empty)")
     parser.add_argument("--split", choices=SPLITS, default="train",
                         help="split label for episodes that are not in a train/ or dev/ directory (and for --seeds)")
     parser.add_argument("--mode", choices=("train", "eval"), default="train")

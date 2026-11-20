@@ -328,7 +328,14 @@ class TrajectoriesTest(Checker):
         self.assertTrue(all(row["metrics"]["f1"] == 1.0 for row in final))
         self.assertTrue(all(row["reward"] > 0.9 for row in final))
         self.assertTrue(all("split" in row and row["split"] in ("train", "dev") for row in rows))
-        self.assertLess((ROOT / "trajectories.jsonl").stat().st_size, 5_300_000)
+        self.assertLess((ROOT / "trajectories.jsonl").stat().st_size, 15_000_000)
+
+    def test_every_baseline_plays_all_twenty_books(self):
+        rows = [json.loads(line) for line in (ROOT / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()]
+        for policy in ("random_explorer", "reconcile", "flag_all", "solver_policy"):
+            final = [row for row in rows if row["policy"] == policy and (row["terminated"] or row["truncated"])]
+            self.assertEqual(len({row["episode_id"] for row in final}), 20, policy)
+            self.assertEqual(len(final), 20, policy)
 
     def test_the_row_schema_wants_policy_and_closed_metrics(self):
         row = {"episode_id": "e", "policy": "p", "split": "dev", "step": 0, "action": None, "observation": {}, "reward": 0.0,

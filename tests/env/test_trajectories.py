@@ -186,7 +186,7 @@ class TrajectoriesTest(unittest.TestCase):
                 for name in names:
                     self.assertTrue((trajectories.ROOT / "episodes" / split / name / "public").is_dir(), name)
         self.assertIn("solver_policy", trajectories.DEFAULT_POLICIES)
-        self.assertNotIn("solver_policy", trajectories.POLICY_PICK)  # the honest solver plays every book
+        self.assertEqual(trajectories.POLICY_PICK, {})  # every policy plays every book
         self.assertEqual(trajectories.DEFAULT_OUT, "trajectories.jsonl")
 
     def test_command_line_without_arguments_runs_in_another_directory(self):
