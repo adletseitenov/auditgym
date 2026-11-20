@@ -10,8 +10,12 @@ What is checked:
 - the fx table: every date of the period plus the margin, at least 6 significant digits;
 - clean postings: a document is posted iff it is dated in the period, after its own date, by the
   document's entity, at the policy amount; payments close receivables by the published payment
-  rule (auditgym/books.py); fx_difference only on foreign payments. Documents an issue is about
-  are exempt here and checked by the issue checks instead;
+  rule (auditgym/books.py); fx_difference only on foreign payments. A document a posting issue is
+  about (period_cutoff, fx_error, allocation_gap) is checked the same way except for the one
+  deviation its issue declares: a cutoff document's period and date, an fx_error's amount (equal
+  on both sides of an invoice; the cash row of a payment, whose receivable closings still follow
+  the rule), an allocation gap's split between receivable and unallocated (their sum still
+  follows the rule). The issue checks verify the deviation itself;
 - before injection no error predicate fires; after injection the predicates fire exactly on
   the truth (type, affected ids, amount, currency), and every evidence set is sufficient;
 - the pre-injection snapshot plus the recorded steps gives the open records;
@@ -363,28 +367,35 @@ def expected_closings(books: Books) -> dict[str, dict]:
     return out
 
 
-def _check_postings(books: Books, name: str, exempt: set[str]) -> list[str]:
+def _check_postings(books: Books, name: str, deviations) -> list[str]:
     """Every document dated in the period is posted once, after its own date, by its entity, at the
-    policy amount, and nothing dated outside it is posted. Documents in `exempt` are skipped."""
+    policy amount, and nothing dated outside it is posted. `deviations` maps a doc_id to the posting
+    issue types declared on it (an empty set or dict: none); only those deviations are allowed."""
     problems = []
     acc = books.accounts
+    allowed = deviations if isinstance(deviations, dict) else {}
     for invoice in books.invoice_list:
         doc = invoice["doc_id"]
-        if doc in exempt:
-            continue
+        declared = allowed.get(doc, set())
         rows = books.own.get(invoice["invoice_id"], [])
         inside = books.inside(invoice["issued_at"])
         if not rows:
             if inside:
                 problems.append(f"{name}: invoice {doc} is in the period but not posted")
             continue
-        if not inside:
+        if not inside and "period_cutoff" not in declared:
             problems.append(f"{name}: invoice {doc} is outside the period but posted")
         expected = books.policy_amount(invoice["total_minor"], invoice["currency"], invoice["issued_at"])
         shape = sorted((r["account"], r["debit_minor"], r["credit_minor"]) for r in rows)
-        if shape != sorted([(acc["receivable"], expected, 0), (acc["revenue"], 0, expected)]):
+        if "fx_error" in declared:
+            # The rate is wrong, the posting is not: one pair, the same amount on both sides.
+            amount = rows[0]["debit_minor"] or rows[0]["credit_minor"]
+            if amount <= 0 or shape != sorted([(acc["receivable"], amount, 0), (acc["revenue"], 0, amount)]):
+                problems.append(f"{name}: invoice {doc} is not posted once as one equal pair")
+        elif shape != sorted([(acc["receivable"], expected, 0), (acc["revenue"], 0, expected)]):
             problems.append(f"{name}: invoice {doc} is not posted once at the policy amount")
-        if any(parse_time(r["timestamp"]) < parse_time(invoice["issued_at"]) for r in rows):
+        if ("period_cutoff" not in declared
+                and any(parse_time(r["timestamp"]) < parse_time(invoice["issued_at"]) for r in rows)):
             problems.append(f"{name}: invoice {doc} is posted before its date")
         if any(r["entity_id"] != invoice["entity_id"] for r in rows):
             problems.append(f"{name}: invoice {doc} is posted for another entity")
@@ -392,17 +403,17 @@ def _check_postings(books: Books, name: str, exempt: set[str]) -> list[str]:
     closings = expected_closings(books)
     for payment in books.payment_list:
         doc, pid, refs = payment["doc_id"], payment["payment_id"], payment["invoice_refs"]
-        if doc in exempt:
-            continue
+        declared = allowed.get(doc, set())
         rows = books.by_payment.get(pid, [])
         inside = books.inside(payment["timestamp"])
         if not rows:
             if inside:
                 problems.append(f"{name}: payment {doc} is in the period but not posted")
             continue
-        if not inside:
+        if not inside and "period_cutoff" not in declared:
             problems.append(f"{name}: payment {doc} is outside the period but posted")
-        if any(parse_time(r["timestamp"]) < parse_time(payment["timestamp"]) for r in rows):
+        if ("period_cutoff" not in declared
+                and any(parse_time(r["timestamp"]) < parse_time(payment["timestamp"]) for r in rows)):
             problems.append(f"{name}: payment {doc} is posted before its date")
         entities = {books.invoices[ref]["entity_id"] for ref in refs or [] if ref in books.invoices}
         if (entities and {r["entity_id"] for r in rows} != entities) or len({r["entity_id"] for r in rows}) != 1:
@@ -417,18 +428,28 @@ def _check_postings(books: Books, name: str, exempt: set[str]) -> list[str]:
             problems.append(f"{name}: payment {doc} posts to an account a payment does not use")
         cash = by_account[acc["cash"]]
         expected_cash = books.policy_amount(payment["amount_minor"], payment["currency"], payment["timestamp"])
-        if len(cash) != 1 or cash[0]["debit_minor"] - cash[0]["credit_minor"] != expected_cash:
+        if len(cash) != 1 or ("fx_error" not in declared
+                              and cash[0]["debit_minor"] - cash[0]["credit_minor"] != expected_cash):
             problems.append(f"{name}: payment {doc} cash differs from the policy amount")
         expected = closings[pid]
         if expected["problem"]:
             problems.append(f"{name}: payment {doc}: {expected['problem']}")
         receivable = by_account[acc["receivable"]]
         actual = {r["invoice_id"]: r["credit_minor"] - r["debit_minor"] for r in receivable}
-        if len(actual) != len(receivable) or actual != expected["closes"]:
-            problems.append(f"{name}: payment {doc} does not close its invoices by the payment rule")
         unallocated = sum(r["credit_minor"] - r["debit_minor"] for r in by_account[acc["unallocated"]])
-        if len(by_account[acc["unallocated"]]) > 1 or unallocated != expected["unallocated"]:
-            problems.append(f"{name}: payment {doc} has an unallocated amount the payment rule does not give")
+        if "allocation_gap" in declared:
+            # Part of the closing sits on unallocated instead: one row, a positive gap, and the
+            # receivable plus unallocated still add up to what the rule gives.
+            gap = unallocated - expected["unallocated"]
+            if (len(actual) != len(receivable) or set(actual) != set(expected["closes"])
+                    or len(by_account[acc["unallocated"]]) != 1 or gap <= 0
+                    or sum(actual.values()) + unallocated != sum(expected["closes"].values()) + expected["unallocated"]):
+                problems.append(f"{name}: payment {doc} splits its closing other than by the payment rule and one gap")
+        else:
+            if len(actual) != len(receivable) or actual != expected["closes"]:
+                problems.append(f"{name}: payment {doc} does not close its invoices by the payment rule")
+            if len(by_account[acc["unallocated"]]) > 1 or unallocated != expected["unallocated"]:
+                problems.append(f"{name}: payment {doc} has an unallocated amount the payment rule does not give")
         fx_rows = by_account[acc["fx_difference"]]
         if len(fx_rows) > 1 or (fx_rows and payment["currency"] == books.base):
             problems.append(f"{name}: payment {doc} has an fx_difference row it cannot have")
@@ -441,12 +462,12 @@ def _check_postings(books: Books, name: str, exempt: set[str]) -> list[str]:
     return problems
 
 
-def check_books(public: dict, name: str, exempt: set[str], counts: bool = True) -> list[str]:
+def check_books(public: dict, name: str, deviations, counts: bool = True) -> list[str]:
     books = Books(public)
     problems = _check_documents(books, name) + _check_ledger(books, name)
     if problems:
         return problems
-    problems += _check_postings(books, name, exempt)
+    problems += _check_postings(books, name, deviations)
     if counts:
         manifest = public["manifest"]["counts"]
         for table in ("ledger", "invoices", "payments", "fx"):
@@ -678,8 +699,12 @@ def _verify(episode: dict) -> list[str]:
         found, undefined = predicate_issues(pre_public)
         problems += [f"pre: the {i['type']} definition already holds on {i['affected_ids']}" for i in found]
         problems += [f"pre: undefined case: {case}" for case in undefined]
-    exempt = {doc for issue in issues if issue["type"] in POSTING_TYPES for doc in issue["affected_ids"]}
-    books_problems = check_books(public, "ledger", exempt)
+    deviations: dict[str, set[str]] = defaultdict(set)
+    for issue in issues:
+        if issue["type"] in POSTING_TYPES:
+            for doc in issue["affected_ids"]:
+                deviations[doc].add(issue["type"])
+    books_problems = check_books(public, "ledger", dict(deviations))
     problems += books_problems
     problems += _check_replay(public, private)
     if not books_problems:
