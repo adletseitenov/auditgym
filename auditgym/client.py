@@ -171,9 +171,9 @@ class Env:
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None, *,
                    timeout: float | None = DEFAULT_TIMEOUT, shaped_reward: bool = False,
-                   secret_file=None) -> "Env":
+                   secret_file=None, server_command=None) -> "Env":
         env = cls(mode=mode, results_path=results_path, timeout=timeout, shaped_reward=shaped_reward,
-                  secret_file=secret_file, _files=True)
+                  secret_file=secret_file, server_command=server_command, _files=True)
         try:
             try:
                 path = os.fspath(pathlib.Path(directory).resolve())

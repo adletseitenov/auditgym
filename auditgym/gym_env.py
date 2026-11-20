@@ -14,7 +14,9 @@ observation is the evaluator's observation dict serialized with sorted keys and 
 action may be that kind of JSON string or a dict, which is passed on as it is. A string that is not
 JSON is sent as it is: the evaluator answers with a bounded error and spends a step, as for any
 unknown action. The wrapper adds nothing to `reward`, `info` or the episode: it is the same
-evaluator, so the train/eval rules apply unchanged (eval: reward 0.0 and info {}).
+evaluator, so the train/eval rules apply unchanged (eval: reward 0.0 and info {}). `secret_file` and
+`server_command` go to `Env` as they are: a closed (eval) run names its secret explicitly, the
+environment variable alone is refused (`EnvError("bad_secret_file")`).
 """
 from __future__ import annotations
 
@@ -88,23 +90,27 @@ class AuditGymEnv(_Base):
     render_mode = None
 
     def __init__(self, mode: str = "train", results_path=None, *, shaped_reward: bool = False,
-                 timeout: float | None = DEFAULT_TIMEOUT, episode_dir=None) -> None:
+                 timeout: float | None = DEFAULT_TIMEOUT, episode_dir=None, secret_file=None,
+                 server_command=None) -> None:
         if gymnasium is not None:
             super().__init__()
         self.observation_space = _text_space()
         self.action_space = _text_space()
         if episode_dir is None:
-            self._env = Env(mode=mode, results_path=results_path, timeout=timeout, shaped_reward=shaped_reward)
+            self._env = Env(mode=mode, results_path=results_path, timeout=timeout, shaped_reward=shaped_reward,
+                            secret_file=secret_file, server_command=server_command)
         else:
             self._env = Env.from_files(episode_dir, mode=mode, results_path=results_path, timeout=timeout,
-                                       shaped_reward=shaped_reward)
+                                       shaped_reward=shaped_reward, secret_file=secret_file,
+                                       server_command=server_command)
 
     @classmethod
     def from_files(cls, directory, mode: str = "train", results_path=None, *, shaped_reward: bool = False,
-                   timeout: float | None = DEFAULT_TIMEOUT) -> "AuditGymEnv":
+                   timeout: float | None = DEFAULT_TIMEOUT, secret_file=None,
+                   server_command=None) -> "AuditGymEnv":
         """An environment over an episode directory (`episodes/train/ep_01`); `reset()` restarts it."""
         return cls(mode=mode, results_path=results_path, shaped_reward=shaped_reward, timeout=timeout,
-                   episode_dir=directory)
+                   episode_dir=directory, secret_file=secret_file, server_command=server_command)
 
     def reset(self, seed=None, options=None):
         if gymnasium is not None:

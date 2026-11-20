@@ -1,13 +1,16 @@
 """The Gymnasium wrapper: works without gymnasium; check_env runs only when it is installed."""
 import json
+import os
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from auditgym import gym_env
 from auditgym.client import EnvError
 from auditgym.gym_env import ENV_ID, AuditGymEnv
+from auditgym.secret import SECRET_ENV, SECRET_FILE_ENV
 from auditgym.storage import load_episode
 from policies.runner import make_policy
 
@@ -91,6 +94,35 @@ class WrapperTest(unittest.TestCase):
             finally:
                 env.close()
         self.assertEqual((reward, terminated, info), (0.0, True, {}))
+
+    def test_eval_with_a_secret_file_plays_the_episode_generated_under_that_secret(self):
+        from auditgym.generate import generate
+
+        config = {"errors": {"duplicate_invoice": 1}}
+        with tempfile.TemporaryDirectory() as scratch:
+            secret = pathlib.Path(scratch) / "secret"
+            secret.write_text("jury-only-value\n", encoding="utf-8")
+            results = scratch + "/r.jsonl"
+            env = AuditGymEnv(mode="eval", results_path=results, secret_file=secret)
+            try:
+                observation, _ = env.reset(seed=4, options=config)
+            finally:
+                env.close()
+            loaded = AuditGymEnv.from_files(EPISODE, mode="eval", results_path=results, secret_file=secret)
+            try:
+                self.assertEqual(json.loads(loaded.reset()[0])["type"], "reset")
+            finally:
+                loaded.close()
+            with mock.patch.dict(os.environ, {SECRET_ENV: "", SECRET_FILE_ENV: str(secret)}):
+                for build in (lambda: AuditGymEnv(mode="eval", results_path=results),
+                              lambda: AuditGymEnv.from_files(EPISODE, mode="eval", results_path=results)):
+                    with self.assertRaises(EnvError) as caught:
+                        build()
+                    self.assertEqual(caught.exception.code, "bad_secret_file")
+        with_secret = generate(4, config, secret="jury-only-value")["public"]["manifest"]["episode_id"]
+        without = generate(4, config)["public"]["manifest"]["episode_id"]
+        self.assertEqual(json.loads(observation)["manifest"]["episode_id"], with_secret)
+        self.assertNotEqual(with_secret, without)
 
     def test_registration_is_idempotent_and_only_with_gymnasium(self):
         gym_env.register()
