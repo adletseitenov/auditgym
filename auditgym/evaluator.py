@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 
 from . import actions
@@ -93,6 +94,19 @@ def open_results_file(path) -> None:
 SECRET_ENV = "AUDITGYM_SECRET"
 
 
+def _seed_from_text(text: str) -> int:
+    """A seed given as a string of ASCII digits ("42", spaces at the ends allowed) is that number.
+    No sign, no separators, no other digits (str.isdigit would accept Arabic-Indic ones); anything
+    else, and a number of more than MAX_SEED_BITS bits, is bad_config."""
+    text = text.strip(" \t\r\n")
+    if not re.fullmatch(r"[0-9]+", text, re.ASCII):
+        raise EvaluatorError("bad_config")
+    digits = text.lstrip("0")
+    if len(digits) > 100:  # far beyond MAX_SEED_BITS; also keeps int() clear of its digit limit
+        raise EvaluatorError("bad_config")
+    return int(digits or "0")
+
+
 class EvaluatorError(Exception):
     """A request the evaluator refuses outright (bad seed or config, nothing loaded)."""
 
@@ -146,6 +160,8 @@ class Evaluator:
             if self._loaded is not None:
                 return self._swap_in(copy.deepcopy(self._loaded))
             seed = self._next_seed
+        elif isinstance(seed, str):
+            seed = _seed_from_text(seed)
         elif not isinstance(seed, int) or isinstance(seed, bool):
             raise EvaluatorError("bad_config")
         if seed.bit_length() > MAX_SEED_BITS:

@@ -107,7 +107,7 @@ class ResetTest(unittest.TestCase):
 
     def test_bad_seed_and_config_are_refused(self):
         evaluator = Evaluator(clock=FakeClock())
-        for seed, config in ((True, CLEAN), ("7", CLEAN), (1.0, CLEAN), (1, {"nope": 1}), (1, []),
+        for seed, config in ((True, CLEAN), ("seven", CLEAN), (1.0, CLEAN), (1, {"nope": 1}), (1, []),
                              (1, {"mode": "train"})):
             with self.assertRaises(EvaluatorError) as caught:
                 evaluator.reset(seed, config)
@@ -152,6 +152,23 @@ class ResetTest(unittest.TestCase):
         self.assertEqual(evaluator.step({"action": "list_records", "table": "fx"})[0]["steps_remaining"], 98)
         fresh = Evaluator(clock=FakeClock())
         fresh.reset((1 << 256) - 1, CLEAN)  # the largest seed is fine
+
+    def test_seed_as_a_string_of_ascii_digits_is_that_number(self):
+        def episode_id(seed):
+            return Evaluator(clock=FakeClock()).reset(seed, CLEAN)[0]["manifest"]["episode_id"]
+
+        for text, number in (("42", 42), (" 42 ", 42), ("0", 0), ("007", 7), (str((1 << 256) - 1), (1 << 256) - 1),
+                             ("0" * 500 + "5", 5)):
+            self.assertEqual(episode_id(text), episode_id(number), text)
+
+    def test_seed_as_any_other_string_is_bad_config_and_keeps_the_episode(self):
+        evaluator = tiny()
+        for text in ("", " ", "-1", "+1", "1.0", "1e3", "4 2", "4_2", "0x10", "\u0664\u0662", "forty-two", "42\x00",
+                     str(1 << 256), "9" * 5000):
+            with self.assertRaises(EvaluatorError, msg=repr(text)) as caught:
+                evaluator.reset(text, CLEAN)
+            self.assertEqual(caught.exception.code, "bad_config")
+        self.assertEqual(evaluator.steps_remaining(), 100)
 
     def test_bad_directory_is_one_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:

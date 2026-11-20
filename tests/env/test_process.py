@@ -94,12 +94,18 @@ class ProcessTest(unittest.TestCase):
 
     def test_refused_reset_raises_a_fixed_code(self):
         with Env() as env:
-            for seed, config in ((1, {"nope": 1}), ("1", None), (1, {"mode": "eval"})):
+            for seed, config in ((1, {"nope": 1}), ("one", None), ("-1", None), (1, {"mode": "eval"})):
                 with self.assertRaises(EnvError) as caught:
                     env.reset(seed, config)
                 self.assertEqual(caught.exception.code, "bad_config")
             observation, info = env.reset()  # C7: no seed is the default seed, not an error
             self.assertEqual((observation["type"], info), ("reset", {}))
+
+    def test_seed_string_of_digits_is_the_same_episode_as_the_number(self):
+        with Env() as env:
+            by_number, _ = env.reset(42, CLEAN)
+            by_text, _ = env.reset("42", CLEAN)
+        self.assertEqual(by_number["manifest"], by_text["manifest"])
 
     def test_bad_directory_is_a_fixed_error(self):
         with tempfile.TemporaryDirectory() as directory:
