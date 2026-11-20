@@ -25,7 +25,7 @@
   "payment": "timestamp"
  },
  "refund": "payment with negative amount_minor and one invoice ref",
- "payment_rule": "a payment with one reference moves the invoice's receivable by round_half_even(booked * paid_after / total) - round_half_even(booked * paid_before / total), where booked is the invoice's posted base amount and paid counts earlier posted payments of it (refunds reopen it the same way); an overpayment closes what is left and puts the excess at the payment date's rate on unallocated; a payment of several invoices closes each in full; an advance goes to unallocated; cash is the payment at its date's rate and the rest of every foreign payment is its own fx_difference row",
+ "payment_rule": "a payment with one reference moves the invoice's receivable by round_half_even(booked * paid_after / total) - round_half_even(booked * paid_before / total), where booked is the invoice's posted base amount and paid counts its posted payments that come earlier in document-date order (the payment's own timestamp as an instant, not its posting time) (refunds reopen it the same way); an overpayment closes what is left and puts the excess at the payment date's rate on unallocated; a payment of several invoices closes each in full; an advance goes to unallocated; cash is the payment at its date's rate and the rest of every foreign payment is its own fx_difference row",
  "duplicate_signature": "entity, currency, total, line items incl. service period",
  "amount_tolerance_minor": {
   "duplicate_invoice": 0,

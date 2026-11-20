@@ -391,6 +391,46 @@ class PolicyTest(unittest.TestCase):
         self.assertNotIn("\n", policy["payment_rule"])
         self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period")
 
+    def test_payment_rule_text_orders_by_document_date_as_the_books_do(self):
+        """Audit B1: the rule said "earlier posted payments", the books order by document date. Read
+        literally, the published text must give every single-reference closing of clean invoices."""
+        from collections import defaultdict
+        from auditgym.money import closed_share
+
+        rule = generate(1, CLEAN)["public"]["policy"]["payment_rule"]
+        self.assertIn("earlier in document-date order", rule)
+        self.assertIn("not its posting time", rule)
+        self.assertNotIn("earlier posted payments", rule)
+        checked = 0
+        config = {"errors": {}, "currencies": ["USD", "EUR", "RUB"], "size": {"invoices": [60, 90]}}
+        for seed in range(12):
+            public = generate(seed, config)["public"]
+            receivable = public["policy"]["accounts"]["receivable"]
+            invoices = {inv["invoice_id"]: inv for inv in public["invoices"]}
+            rows, booked = defaultdict(list), {}
+            for row in public["ledger"]:
+                if row["payment_id"] is not None:
+                    rows[row["payment_id"]].append(row)
+                elif row["invoice_id"] is not None and row["account"] == receivable:
+                    booked[row["invoice_id"]] = row["debit_minor"]
+            by_invoice = defaultdict(list)
+            for payment in public["payments"]:
+                refs = payment["invoice_refs"]
+                if rows.get(payment["payment_id"]) and refs and len(refs) == 1 and refs[0] in booked:
+                    by_invoice[refs[0]].append(payment)
+            for ref, payments in by_invoice.items():
+                total, paid = invoices[ref]["total_minor"], 0
+                if sum(p["amount_minor"] for p in payments) > total:
+                    continue  # an overpayment closes what is left: another clause of the rule
+                for payment in sorted(payments, key=lambda p: parse_time(p["timestamp"])):
+                    after = paid + payment["amount_minor"]
+                    expected = closed_share(booked[ref], total, after) - closed_share(booked[ref], total, paid)
+                    actual = sum(r["credit_minor"] - r["debit_minor"] for r in rows[payment["payment_id"]]
+                                 if r["account"] == receivable)
+                    self.assertEqual(actual, expected, (seed, payment["doc_id"]))
+                    paid, checked = after, checked + 1
+        self.assertGreater(checked, 200)
+
     def test_no_truth_derived_value_in_public_files(self):
         """Episodes that differ only in errors and interaction expose the same policy, the same manifest
         keys, no error type outside the fixed tolerance table, and no scenario name."""
