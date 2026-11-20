@@ -7,7 +7,10 @@ copy of the case formula (exact fractions), not by calling auditgym.reward. A st
 expects reward -1 and a specific StructureError code.
 
 Episodes: `tiny` is tests/fixtures/tiny (one duplicate_invoice); `multi` is a hand-built
-episode with one issue of each of the four types; `clean` is `multi` without issues.
+episode with one issue of each of the four types and the evidence sets of contract v2;
+`clean` is `multi` without issues; `empty_set`, `twins` and `no_superset_key` each isolate one
+matcher rule (an empty evidence set, maximum matching, the superset default).
+A row also checks precision, recall and, for a structure error, tp = fp = 0 and fn = issues.
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ from typing import Callable
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STEPS = 10
 EP = "ep_multi0001"
+FX_KEY = "2026-10-03|USD|KZT"
+GAP_FULL = ["p1", "d3", "r1", "r13", "r15"]
 
 
 # --- episodes ---------------------------------------------------------------------------
@@ -57,7 +62,11 @@ def multi_episode() -> dict:
                    _row("r9", "receivable", 58000000, 0, invoice_id="iv1"),
                    _row("r10", "revenue", 0, 58000000, invoice_id="iv1"),
                    _row("r11", "receivable", 58000000, 0, invoice_id="iv2"),
-                   _row("r12", "revenue", 0, 58000000, invoice_id="iv2")],
+                   _row("r12", "revenue", 0, 58000000, invoice_id="iv2"),
+                   # The gap's invoice and the payment's closing of it (CONTRACTS v2 §3.1).
+                   _row("r13", "receivable", 100000, 0, invoice_id="iv3"),
+                   _row("r14", "revenue", 0, 100000, invoice_id="iv3"),
+                   _row("r15", "receivable", 0, 100000, invoice_id="iv3", payment_id="py1")],
         "invoices": [_invoice("d1", "iv1", "USD", 125000), _invoice("d2", "iv2", "USD", 125000),
                      _invoice("d3", "iv3", "KZT", 100000), _invoice("d4", "iv4", "USD", 125000),
                      _invoice("d5", "iv5", "USD", 90000), _invoice("d6", "iv6", "USD", 70000)],
@@ -72,9 +81,12 @@ def multi_episode() -> dict:
          # CONTRACTS v2 §3.1 / DECISIONS A2: both docs plus one posting row of each invoice.
          "evidence_sets": [["d1", "d2", a, b] for a in ("r9", "r10") for b in ("r11", "r12")]},
         {"issue_id": "t2", "type": "allocation_gap", "affected_ids": ["d3", "p1"],
-         "expected_amount_minor": 50000, "currency": "KZT", "evidence_sets": [["d3", "p1", "r1"]]},
+         # v2: payment, invoice, the unallocated row, the invoice's receivable debit and the
+         # payment's receivable credit of that invoice.
+         "expected_amount_minor": 50000, "currency": "KZT", "evidence_sets": [GAP_FULL]},
         {"issue_id": "t3", "type": "fx_error", "affected_ids": ["d4"],
-         "expected_amount_minor": 700, "currency": "KZT", "evidence_sets": [["d4", "r2"], ["d4", "r3"]]},
+         # v2: the document, one conversion row and the rate key of the document's date.
+         "expected_amount_minor": 700, "currency": "KZT", "evidence_sets": [["d4", "r2", FX_KEY], ["d4", "r3", FX_KEY]]},
         {"issue_id": "t4", "type": "period_cutoff", "affected_ids": ["d5"],
          "expected_amount_minor": 90000, "currency": "USD", "evidence_sets": [["d5", "r4"], ["d5", "r5"]]},
     ]
@@ -86,6 +98,39 @@ def clean_episode() -> dict:
     episode = multi_episode()
     episode["private"]["truth"]["issues"] = []
     return episode
+
+
+def empty_set_episode() -> dict:
+    """One duplicate whose only evidence set is empty: an empty set must never accept a finding."""
+    episode = multi_episode()
+    issue = dict(episode["private"]["truth"]["issues"][0], evidence_sets=[[]])
+    episode["private"]["truth"]["issues"] = [issue]
+    return episode
+
+
+def twins_episode() -> dict:
+    """Two fx_error issues on one document that differ only in the evidence set: a greedy
+    first-come matching makes TP depend on the order of findings, a maximum matching does not."""
+    episode = multi_episode()
+    episode["private"]["truth"]["issues"] = [
+        {"issue_id": "t1", "type": "fx_error", "affected_ids": ["d4"], "expected_amount_minor": 700,
+         "currency": "KZT", "evidence_sets": [["d4", "r2", FX_KEY]]},
+        {"issue_id": "t2", "type": "fx_error", "affected_ids": ["d4"], "expected_amount_minor": 700,
+         "currency": "KZT", "evidence_sets": [["d4", "r3", FX_KEY]]},
+    ]
+    return episode
+
+
+def no_superset_key_episode() -> dict:
+    """`evidence_superset_allowed` missing from the policy: the published default is «allowed»."""
+    episode = multi_episode()
+    del episode["public"]["policy"]["evidence_superset_allowed"]
+    return episode
+
+
+def _twin(evidence: list) -> dict:
+    return {"type": "fx_error", "affected_ids": ["d4"], "claimed_amount_minor": 700, "currency": "KZT",
+            "evidence_ids": list(evidence), "explanation": ""}
 
 
 def tiny_episode() -> dict:
@@ -183,13 +228,25 @@ ATTACKS: list[tuple] = [
      (3, 1, 1)),
     ("duplicate evidence: debit of one, credit of other", "multi", _with(0, evidence_ids=["d2", "r12", "d1", "r9"]),
      STEPS, (4, 0, 0)),
-    ("full evidence plus extra existing ids", "multi", _with(1, evidence_ids=["d3", "p1", "r1", "r6", "d6"]), STEPS, (4, 0, 0)),
-    ("second allowed evidence set", "multi", _with(2, evidence_ids=["d4", "r3"]), STEPS, (4, 0, 0)),
-    ("fx key as an extra existing id", "multi", _with(2, evidence_ids=["d4", "r2", "2026-10-03|USD|KZT"]), STEPS, (4, 0, 0)),
-    ("full evidence plus a non-existent id", "multi", _with(1, evidence_ids=["d3", "p1", "r1", "nope"]), STEPS, (3, 1, 1)),
-    ("existing row from the wrong place instead of r1", "multi", _with(1, evidence_ids=["d3", "p1", "r6"]), STEPS, (3, 1, 1)),
+    ("full evidence plus extra existing ids", "multi", _with(1, evidence_ids=GAP_FULL + ["r6", "d6"]), STEPS, (4, 0, 0)),
+    ("second allowed evidence set", "multi", _with(2, evidence_ids=["d4", "r3", FX_KEY]), STEPS, (4, 0, 0)),
+    ("fx_error without the rate key (contract v1)", "multi", _with(2, evidence_ids=["d4", "r2"]), STEPS, (3, 1, 1)),
+    ("allocation_gap without the receivable rows (contract v1)", "multi",
+     _with(1, evidence_ids=["d3", "p1", "r1"]), STEPS, (3, 1, 1)),
+    ("full evidence plus a non-existent id", "multi", _with(1, evidence_ids=GAP_FULL + ["nope"]), STEPS, (3, 1, 1)),
+    ("existing row from the wrong place instead of r1", "multi",
+     _with(1, evidence_ids=["p1", "d3", "r6", "r13", "r15"]), STEPS, (3, 1, 1)),
     ("invoice_id instead of doc_id in evidence", "multi", _with(0, evidence_ids=["iv1", "iv2"]), STEPS, (3, 1, 1)),
-    ("payment_id cited with full evidence", "multi", _with(1, evidence_ids=["d3", "p1", "r1", "py1"]), STEPS, (3, 1, 1)),
+    ("payment_id cited with full evidence", "multi", _with(1, evidence_ids=GAP_FULL + ["py1"]), STEPS, (3, 1, 1)),
+    ("explanation null", "multi", _with(0, explanation=None), STEPS, "explanation_not_string"),
+    ("a finding that is not an object", "multi", lambda e: oracle_findings(e) + ["duplicate_invoice d1 d2"], STEPS,
+     "finding_not_object"),
+    ("an empty evidence set in the truth never matches", "empty_set", lambda e: [dict(T1, evidence_ids=["d1"])], STEPS,
+     (0, 1, 1)),
+    ("greedy order: wide evidence first, narrow second", "twins",
+     lambda e: [_twin(["d4", "r2", "r3", FX_KEY]), _twin(["d4", "r2", FX_KEY])], STEPS, (2, 0, 0)),
+    ("policy without evidence_superset_allowed: superset accepted", "no_superset_key",
+     _with(1, evidence_ids=GAP_FULL + ["d6"]), STEPS, (4, 0, 0)),
     ("affected_ids superset", "multi", _with(0, affected_ids=["d1", "d2", "d6"]), STEPS, (3, 1, 1)),
     ("affected_ids subset", "multi", _with(0, affected_ids=["d1"]), STEPS, (3, 1, 1)),
     ("affected_ids reordered", "multi", _with(1, affected_ids=["p1", "d3"]), STEPS, (4, 0, 0)),
@@ -234,7 +291,8 @@ def _deep(depth: int) -> list:
     return value
 
 
-EPISODES = {"multi": multi_episode, "tiny": tiny_episode, "clean": clean_episode}
+EPISODES = {"multi": multi_episode, "tiny": tiny_episode, "clean": clean_episode,
+            "empty_set": empty_set_episode, "twins": twins_episode, "no_superset_key": no_superset_key_episode}
 
 
 def expected_reward(expected, steps: int) -> Fraction:
@@ -275,10 +333,17 @@ def run_attack(attack: tuple) -> tuple[bool, dict, Fraction]:
     except Exception as error:  # a crash is a failed row, reported, not raised
         return False, {"reward": float("nan"), "crash": repr(error)}, want
     if isinstance(expected, str):
-        ok = result["structure_error"] == expected and result["reward"] == -1.0
+        # A structure error: reward -1, nothing found, every truth issue missed (CONTRACTS §6).
+        issues = len(episode["private"]["truth"]["issues"])
+        ok = (result["structure_error"] == expected and result["reward"] == -1.0
+              and (result["tp"], result["fp"], result["fn"]) == (0, 0, issues)
+              and (result["precision"], result["recall"], result["f1"]) == (0.0, 0.0, 0.0))
     else:
+        tp, fp, fn = expected
         ok = (result["structure_error"] is None
               and (result["tp"], result["fp"], result["fn"]) == expected
+              and result["precision"] == (tp / (tp + fp) if tp + fp else 0.0)
+              and result["recall"] == (tp / (tp + fn) if tp + fn else 0.0)
               and result["reward"] == literal_reward(expected, steps))
     return ok, result, want
 

@@ -52,8 +52,64 @@ def _parse_any_episode(payload, episode_id):
     return _ORIGINAL_PARSE(payload, episode_id)
 
 
+def _covers_with_empty(finding, issue, superset_allowed):
+    cited = set(finding["evidence_ids"])
+    return any(set(allowed) == cited or (superset_allowed and set(allowed) <= cited)
+               for allowed in issue["evidence_sets"])
+
+
+def _greedy_match(truth, findings_list, public):
+    """First come, first served: the slip the maximum matching replaced."""
+    policy = public.get("policy", {})
+    known = matcher.known_ids(public)
+    used, pairs = set(), []
+    for index, finding in enumerate(findings_list):
+        for issue in sorted(truth.get("issues", []), key=lambda i: i["issue_id"]):
+            if issue["issue_id"] not in used and matcher.is_match(finding, issue, policy, known):
+                used.add(issue["issue_id"])
+                pairs.append([index, issue["issue_id"]])
+                break
+    tp = len(pairs)
+    return {"tp": tp, "fp": len(findings_list) - tp, "fn": len(truth.get("issues", [])) - tp, "pairs": pairs}
+
+
+def _known_without_rate_keys(public):
+    return frozenset(i for i in _ORIGINAL_KNOWN(public) if "|" not in i)
+
+
+def _finding_null_explanation(raw):
+    if isinstance(raw, dict) and raw.get("explanation", "") is None:
+        raw = dict(raw, explanation="")
+    return _ORIGINAL_FINDING(raw)
+
+
+def _finding_collapsing_affected(raw):
+    if isinstance(raw, dict) and isinstance(raw.get("affected_ids"), list):
+        raw = dict(raw, affected_ids=list(dict.fromkeys(raw["affected_ids"])))
+    return _ORIGINAL_FINDING(raw)
+
+
+def _parse_skipping_non_objects(payload, episode_id):
+    if isinstance(payload, dict) and isinstance(payload.get("findings"), list):
+        payload = dict(payload, findings=[f for f in payload["findings"] if isinstance(f, dict)])
+    return _ORIGINAL_PARSE(payload, episode_id)
+
+
+def _judge_structure_fn_zero(episode, payload, steps):
+    result = _ORIGINAL_JUDGE(episode, payload, steps)
+    return dict(result, fn=0) if result["structure_error"] else result
+
+
+def _metrics_zero_denominator_one(tp, fp, fn):
+    base = reward.metrics(tp, fp, fn)
+    return dict(base, precision=base["precision"] if tp + fp else 1.0, recall=base["recall"] if tp + fn else 1.0)
+
+
 _ORIGINAL_AMOUNT = findings._amount
 _ORIGINAL_PARSE = findings.parse_findings
+_ORIGINAL_FINDING = findings._finding
+_ORIGINAL_KNOWN = matcher.known_ids
+_ORIGINAL_JUDGE = judge.judge
 
 # (name, [(module, attribute, replacement)])
 MUTANTS: list[tuple[str, list]] = [
@@ -71,6 +127,11 @@ MUTANTS: list[tuple[str, list]] = [
     ("matcher: evidence set not checked", [(matcher, "evidence_covers", ALWAYS)]),
     ("matcher: one issue may be matched twice", [(matcher, "issue_available", ALWAYS)]),
     ("matcher: superset of evidence never allowed", [(matcher, "superset_allowed", lambda policy: False)]),
+    ("matcher: superset off when the policy key is missing",
+     [(matcher, "superset_allowed", lambda policy: policy.get("evidence_superset_allowed", False) is True)]),
+    ("matcher: an empty evidence set accepts any evidence", [(matcher, "evidence_covers", _covers_with_empty)]),
+    ("matcher: greedy first-come matching", [(matcher, "match", _greedy_match), (judge, "match", _greedy_match)]),
+    ("matcher: rate keys are not citable ids", [(matcher, "known_ids", _known_without_rate_keys)]),
     # reward: the case formula with one change
     ("reward: no step cost", _reward(final=lambda f1, s: _clip(2 * f1 - 1))),
     ("reward: step cost x10", _reward(final=lambda f1, s: _clip(2 * f1 - 1 - 0.02 * s))),
@@ -85,6 +146,8 @@ MUTANTS: list[tuple[str, list]] = [
      _reward(f1_of=lambda tp, fp, fn: 1.0 if tp + fn == 0 else tp / (tp + fn))),
     ("reward: misses ignored (precision only)",
      _reward(f1_of=lambda tp, fp, fn: 1.0 if tp + fp == 0 else tp / (tp + fp))),
+    ("reward: P and R = 1 on a zero denominator", [(judge, "metrics", _metrics_zero_denominator_one)]),
+    ("judge: a structure error reports no missed issues", [(judge, "judge", _judge_structure_fn_zero)]),
     # structure check: one limit or rule switched off
     ("structure: no limit of 30 findings", [(findings, "MAX_FINDINGS", HUGE)]),
     ("structure: no limit of 10 evidence ids", [(findings, "MAX_EVIDENCE_IDS", HUGE)]),
@@ -93,6 +156,9 @@ MUTANTS: list[tuple[str, list]] = [
     ("structure: negative amount accepted", [(findings, "_amount", _amount_allows_negative)]),
     ("structure: unknown type accepted", [(findings, "TYPES", findings.TYPES + ("fraud",))]),
     ("structure: foreign episode_id accepted", [(judge, "parse_findings", _parse_any_episode)]),
+    ("structure: explanation null accepted", [(findings, "_finding", _finding_null_explanation)]),
+    ("structure: a repeated affected id collapses", [(findings, "_finding", _finding_collapsing_affected)]),
+    ("structure: a finding that is not an object is skipped", [(judge, "parse_findings", _parse_skipping_non_objects)]),
 ]
 
 

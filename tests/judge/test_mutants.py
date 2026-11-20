@@ -15,9 +15,14 @@ class JudgeMutantsTest(unittest.TestCase):
     def test_patches_are_undone(self):
         from auditgym import findings, judge, matcher
 
-        before = (matcher.same_type, judge.terminal_reward, findings.MAX_FINDINGS)
-        mutants.run(mutants.MUTANTS[:1] + mutants.MUTANTS[10:11] + mutants.MUTANTS[19:20])
-        self.assertEqual((matcher.same_type, judge.terminal_reward, findings.MAX_FINDINGS), before)
+        before = (matcher.same_type, matcher.match, judge.terminal_reward, judge.judge, findings.MAX_FINDINGS)
+        picked = {"matcher: type not checked", "matcher: greedy first-come matching", "reward: no step cost",
+                  "judge: a structure error reports no missed issues", "structure: no limit of 30 findings"}
+        chosen = [mutant for mutant in mutants.MUTANTS if mutant[0] in picked]
+        self.assertEqual(len(chosen), len(picked))
+        mutants.run(chosen)
+        self.assertEqual((matcher.same_type, matcher.match, judge.terminal_reward, judge.judge,
+                          findings.MAX_FINDINGS), before)
 
 
 if __name__ == "__main__":

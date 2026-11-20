@@ -130,6 +130,37 @@ def fx_error_payment(c: Company):
     return [expect("fx_error", [payment["doc_id"]], delta, c.base, [[payment["doc_id"], cash["row_id"]]])]
 
 
+def fx_error_refund(c: Company):
+    """DECISIONS G5: a foreign refund converted at a wrong rate is an fx_error like any payment."""
+    pair = _first([(inv, pay) for inv, pay in c.paid_once(True) if c.inside(shift(pay["timestamp"], hours=2))], c)
+    if pair is None:
+        return None
+    invoice, payment = pair
+    back = -(invoice["total_minor"] // 4)
+    refund_ = c.add_payment(timestamp=shift(payment["timestamp"], hours=2), currency=payment["currency"],
+                            amount_minor=back, invoice_refs=[invoice["invoice_id"]])
+    correct = c.to_base(back, refund_["currency"], refund_["timestamp"])
+    delta = _fx_delta(correct)
+    rows = c.book_payment(refund_, closes={invoice["invoice_id"]: correct}, cash=correct - delta)
+    cash = c.row(rows, "cash")
+    return [expect("fx_error", [refund_["doc_id"]], delta, c.base, [[refund_["doc_id"], cash["row_id"]]])]
+
+
+def fx_error_advance(c: Company):
+    """DECISIONS G5: a foreign advance (no invoice yet) converted at a wrong rate is an fx_error."""
+    currency = next((inv["currency"] for inv in c.public["invoices"] if inv["currency"] != c.base), None)
+    if currency is None:
+        return None
+    entity = c.public["invoices"][0]["entity_id"]
+    payment = c.add_payment(timestamp=shift(c.policy["period_start"], days=9, hours=11), currency=currency,
+                            amount_minor=4_321_000, invoice_refs=None)
+    correct = c.to_base(payment["amount_minor"], currency, payment["timestamp"])
+    delta = _fx_delta(correct)
+    rows = c.book_payment(payment, closes={}, unallocated=correct - delta, cash=correct - delta, entity_id=entity)
+    cash = c.row(rows, "cash")
+    return [expect("fx_error", [payment["doc_id"]], delta, c.base, [[payment["doc_id"], cash["row_id"]]])]
+
+
 def _shift_service(invoice: dict, days: int) -> None:
     for item in invoice["line_items"]:
         item["service_start"] = shift_date(item["service_start"], days)
@@ -329,6 +360,8 @@ ERROR_CASES = {
     "fx_error_invoice_up": lambda c: fx_error_invoice(c, 1),
     "fx_error_invoice_down": lambda c: fx_error_invoice(c, -1),
     "fx_error_payment": fx_error_payment,
+    "fx_error_refund": fx_error_refund,
+    "fx_error_advance": fx_error_advance,
     "cutoff_invoice_end_base": lambda c: cutoff_invoice(c, False, "end"),
     "cutoff_invoice_start_foreign": lambda c: cutoff_invoice(c, True, "start"),
     "cutoff_payment": cutoff_payment,

@@ -33,34 +33,49 @@ def _rows(names: tuple) -> Optional[str]:
 
 
 def _synthetic(n_issues: int, n_docs: int) -> dict:
-    """N invoices, n_issues single-document period_cutoff issues (doc + its own row)."""
+    """N invoices (doc k: total 100 + k KZT, its own row r k), n_issues single-document period_cutoff
+    issues spread over the books (every fifth document), each proved by its doc and its row."""
     docs = [f"d{k:03d}" for k in range(n_docs)]
+    hit = [5 * k for k in range(n_issues)]
     issues = [{"issue_id": f"t{k:03d}", "type": "period_cutoff", "affected_ids": [docs[k]],
                "expected_amount_minor": 100 + k, "currency": "KZT",
-               "evidence_sets": [[docs[k], f"r{k:03d}"]]} for k in range(n_issues)]
+               "evidence_sets": [[docs[k], f"r{k:03d}"]]} for k in hit]
     public = {"manifest": {"episode_id": "ep_syn"},
               "policy": {"amount_tolerance_minor": {t: 0 for t in TYPES}, "evidence_superset_allowed": True},
               "ledger": [{"row_id": f"r{k:03d}"} for k in range(n_docs)],
-              "invoices": [{"doc_id": d} for d in docs], "payments": [], "fx": []}
+              "invoices": [{"doc_id": d, "currency": "KZT", "total_minor": 100 + k} for k, d in enumerate(docs)],
+              "payments": [], "fx": []}
     return {"public": public, "private": {"truth": {"issues": issues}}}
 
 
-def _flag(doc: str, kind: str) -> dict:
-    return {"type": kind, "affected_ids": [doc], "claimed_amount_minor": 0, "currency": "KZT",
-            "evidence_ids": [doc], "explanation": ""}
+def _flag(doc: str, kind: str, amount: int = 0, row: Optional[str] = None) -> dict:
+    """A blind accusation. With `amount` and `row` it is as well-formed as a real finding (the
+    document's own total, currency and posting row), so on a document with an issue of that type it
+    is a true positive: flagging everything then really can hit."""
+    return {"type": kind, "affected_ids": [doc], "claimed_amount_minor": amount, "currency": "KZT",
+            "evidence_ids": [doc] + ([row] if row else []), "explanation": ""}
+
+
+def _blind_flags(episode: dict) -> list[dict]:
+    """Every document x every type, with the document's real total and row."""
+    return [_flag(doc["doc_id"], kind, doc["total_minor"], "r" + doc["doc_id"][1:])
+            for doc in episode["public"]["invoices"] for kind in TYPES]
 
 
 # --- checks -----------------------------------------------------------------------------
 
 def formulas_match_the_case() -> Optional[str]:
-    from auditgym.reward import metrics_exact, terminal_reward
+    from auditgym.reward import metrics, metrics_exact, terminal_reward
 
     cases = {(0, 0, 0): 1, (0, 2, 0): 0, (0, 0, 3): 0, (1, 1, 0): Fraction(2, 3), (3, 1, 1): Fraction(3, 4)}
     for counts, f1 in cases.items():
-        if metrics_exact(*counts)["f1"] != f1:
+        # Both the exact reference and the float metrics the judge actually calls.
+        want = Fraction(f1)
+        if metrics_exact(*counts)["f1"] != want or metrics(*counts)["f1"] != want.numerator / want.denominator:
             return f"F1{counts} != {f1}"
-    if metrics_exact(0, 0, 3)["precision"] != 0 or metrics_exact(0, 2, 0)["recall"] != 0:
-        return "zero denominator must give 0"
+    for compute in (metrics_exact, metrics):
+        if compute(0, 0, 3)["precision"] != 0 or compute(0, 2, 0)["recall"] != 0 or compute(0, 0, 0)["precision"] != 0:
+            return f"zero denominator must give 0 ({compute.__name__})"
     for f1, steps, want in ((1, 100, 0.8), (0, 1, -1.0), (Fraction(1, 2), 1, -0.002), (1, 0, 1.0)):
         if terminal_reward(f1, steps) != want:
             return f"reward({f1}, {steps}) = {terminal_reward(f1, steps)}, want {want}"
@@ -105,8 +120,9 @@ BAD = -0.5  # "a bad result" (CASE 05): no episode with errors better than an an
 def flag_everything_is_bad() -> Optional[str]:
     """Flagging everything gives a bad result (CASE 05), checked three ways.
 
-    1. Blind flags on synthetic books (every document x every type, all and capped at 30) never
-       beat silence, and are strictly below it on clean books.
+    1. Blind flags on synthetic books (every document x every type, each with the document's real
+       total, currency and posting row, so they do hit the issues; all of them and the first 30):
+       strictly below silence on clean books and at most BAD on books with errors (T = N/5).
     2. The real flag-all policies through reset/step on generated episodes: strictly below
        silence on every clean book, at most BAD on every book with errors, and below silence on
        average over a set with clean books. On books with errors silence sits at the floor -1, so
@@ -118,14 +134,19 @@ def flag_everything_is_bad() -> Optional[str]:
     for n_docs in range(5, 61, 5):
         for n_issues in (0, n_docs // 5):
             episode = _synthetic(n_issues, n_docs)
-            docs = [d["doc_id"] for d in episode["public"]["invoices"]]
-            blind = [_flag(d, t) for d in docs for t in TYPES]
+            blind = _blind_flags(episode)
             for s in STEPS:
                 silence = _judge(episode, [], s)["reward"]
                 for answer in (blind, blind[:30]):
-                    got = _judge(episode, answer, s)["reward"]
-                    if got > silence or (n_issues == 0 and got >= silence):
-                        return f"N={n_docs} T={n_issues}: blind flags {got} vs silence {silence}"
+                    result = _judge(episode, answer, s)
+                    got = result["reward"]
+                    if n_issues == 0 and not got < silence:
+                        return f"N={n_docs} clean: blind flags {got} not below silence {silence}"
+                    if n_issues and got > BAD:
+                        return f"N={n_docs} T={n_issues}: blind flags {got} > {BAD} (tp={result['tp']})"
+    probe = _synthetic(2, 10)
+    if _judge(probe, _blind_flags(probe)[:30], 1)["tp"] == 0:
+        return "blind flags never hit an issue: the check would prove nothing"
     for n_docs in range(5, 26, 5):
         episode = _synthetic(n_docs // 5, n_docs)
         docs = [d["doc_id"] for d in episode["public"]["invoices"]]
