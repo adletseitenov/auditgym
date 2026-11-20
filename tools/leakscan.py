@@ -341,8 +341,8 @@ def probe(server: RawServer, seed, config, episode: dict, load_dir: str | None, 
             reply = server.reset()
             if reply["observation"].get("type") != "error":
                 return reply
-            # Eval plays a loaded episode once: after its first step a restart is refused
-            # (bad_request). The same episode comes from its seed (load_dir was written from it).
+            # A reset of the loaded episode can be refused (for example an unreadable directory); the
+            # same episode comes from its seed (load_dir was written from it).
         return server.reset(seed, config)
 
     first = start()["observation"]

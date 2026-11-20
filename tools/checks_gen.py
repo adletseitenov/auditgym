@@ -205,8 +205,8 @@ def recomputed_from_files_evidence_suffices() -> Optional[str]:
 def recomputed_from_files_books_balance() -> Optional[str]:
     """Clean and dense companies: balance and counts recomputed from the files (no truth to lean on)."""
     return _first_file_problem([{"errors": {}}, {"errors": {}, "currencies": ["USD", "EUR", "CNY"]},
-                                {"errors": {"duplicate_invoice": 6, "allocation_gap": 6, "fx_error": 6,
-                                            "period_cutoff": 6}, "currencies": ["USD", "EUR"]}], range(10))
+                                {"errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 3,
+                                            "period_cutoff": 3}, "currencies": ["USD", "EUR"]}], range(10))
 
 
 def each_error_type_configurable_alone() -> Optional[str]:

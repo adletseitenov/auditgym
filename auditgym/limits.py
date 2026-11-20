@@ -6,7 +6,8 @@ limit is never written twice. Nothing here depends on anything else in the packa
 from __future__ import annotations
 
 # Answer
-MAX_FINDINGS = 30                 # findings in one submit; also the most issues one episode may hold
+MAX_FINDINGS = 30                 # findings in one submit
+MAX_ISSUES = 12                   # most issues one episode may hold (errors plus 2 for I1/I2): docs/CASE.md section 03
 MAX_EVIDENCE_IDS = 10             # evidence ids per finding, and ids per truth evidence set
 MAX_EXPLANATION_CHARS = 1000
 MAX_MESSAGE_BYTES = 256 * 1024    # docs/AUDIT.md R2: 30 x 10 x 1 000 Cyrillic characters must fit

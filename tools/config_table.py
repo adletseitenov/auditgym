@@ -20,7 +20,7 @@ def errors_for(total: int) -> dict:
 
 def row(total: int) -> tuple:
     errors = errors_for(total)
-    default = cfg.normalize_config({"errors": errors})["size"]["invoices"] if total * 8 <= limits.MAX_INVOICES else None
+    default = cfg.normalize_config({"errors": errors})["size"]["invoices"] if total <= limits.MAX_ISSUES else None
     need = max(limits.MIN_INVOICES, limits.INVOICES_PER_ERROR * total)
     try:
         cfg.normalize_config({"errors": errors, "size": {"invoices": [need, limits.MAX_INVOICES]}})
@@ -32,14 +32,15 @@ def row(total: int) -> tuple:
 
 def main() -> None:
     print("limits (auditgym/limits.py):")
-    for name in ("MAX_STEPS", "PAGE_SIZE", "MAX_FINDINGS", "MAX_EVIDENCE_IDS", "MAX_EXPLANATION_CHARS",
+    for name in ("MAX_STEPS", "PAGE_SIZE", "MAX_FINDINGS", "MAX_ISSUES", "MAX_EVIDENCE_IDS", "MAX_EXPLANATION_CHARS",
                  "MAX_MESSAGE_BYTES", "MAX_LEDGER_ROWS", "MAX_PAGES", "INVOICES_PER_ERROR", "MIN_INVOICES",
                  "MAX_INVOICES", "MAX_BACKGROUND_PAIRS", "MAX_PERIOD_MONTHS", "MAX_FOREIGN_CURRENCIES"):
         print(f"  {name} = {getattr(limits, name)}")
-    print(f"most errors one config can hold: {limits.MAX_INVOICES // limits.INVOICES_PER_ERROR} "
-          f"(MAX_INVOICES // INVOICES_PER_ERROR); an answer holds at most {limits.MAX_FINDINGS} findings")
+    print(f"most issues one config can hold: {limits.MAX_ISSUES} (MAX_ISSUES, errors plus 2 for I1/I2; "
+          f"density alone would allow {limits.MAX_INVOICES // limits.INVOICES_PER_ERROR}); "
+          f"an answer holds at most {limits.MAX_FINDINGS} findings")
     print("errors | invoices needed (>=) | default size.invoices when size is omitted | accepted")
-    for total in (1, 2, 4, 6, 8, 12, 16, 20, 24, 25, 26):
+    for total in (1, 2, 4, 6, 8, 10, 12, 13, 16, 25):
         n, need, default, accepted = row(total)
         print(f"{n:>6} | {need:>20} | {str(default):>42} | {accepted}")
 

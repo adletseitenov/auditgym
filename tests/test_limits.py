@@ -21,7 +21,7 @@ SEED = 987654321
 
 
 class OneConstantPerLimitTest(unittest.TestCase):
-    NAMES = ("MAX_FINDINGS", "MAX_EVIDENCE_IDS", "MAX_EXPLANATION_CHARS", "MAX_MESSAGE_BYTES", "MAX_STEPS",
+    NAMES = ("MAX_FINDINGS", "MAX_ISSUES", "MAX_EVIDENCE_IDS", "MAX_EXPLANATION_CHARS", "MAX_MESSAGE_BYTES", "MAX_STEPS",
              "PAGE_SIZE", "MAX_PAGES", "MAX_LEDGER_ROWS", "MAX_PERIOD_MONTHS", "INVOICES_PER_ERROR")
 
     def test_modules_reuse_the_values_of_limits(self):
@@ -35,7 +35,7 @@ class OneConstantPerLimitTest(unittest.TestCase):
                           limits.MAX_MESSAGE_BYTES, limits.MAX_STEPS, limits.PAGE_SIZE))
         self.assertEqual(verify.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
         self.assertEqual(solver.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
-        self.assertEqual(config.MAX_FINDINGS, limits.MAX_FINDINGS)
+        self.assertEqual(config.MAX_ISSUES, limits.MAX_ISSUES)
 
     def test_no_module_of_the_package_assigns_a_limit_a_second_time(self):
         """A limit name bound to a number anywhere but limits.py would be a second source of truth."""
@@ -118,15 +118,36 @@ class ConfigBoundaryTest(unittest.TestCase):
         self.assertEqual(error.code, "bad_period")
         self.assertIn(str(limits.MAX_PERIOD_MONTHS), str(error))
 
-    def test_issues_per_answer(self):
-        # Density (8 invoices per error, at most 200 invoices) allows 25 issues, so the exact limit of 30
-        # is refused as too_dense and never reaches the findings check; one past it names the answer limit.
-        with self.assertRaises(ConfigError) as at_limit:
-            normalize_config({"errors": {"duplicate_invoice": limits.MAX_FINDINGS}})
-        self.assertEqual(at_limit.exception.code, "too_dense")
-        error = self.refused({"errors": {"duplicate_invoice": limits.MAX_FINDINGS + 1}})
+    def test_issues_per_episode(self):
+        # docs/CASE.md section 03: 0-12 errors. The total counts the 2 issues interaction I1/I2 add.
+        normalize_config({"errors": {"duplicate_invoice": limits.MAX_ISSUES}})
+        error = self.refused({"errors": {"duplicate_invoice": limits.MAX_ISSUES + 1}})
         self.assertEqual(error.code, "too_many_errors")
-        self.assertIn(str(limits.MAX_FINDINGS), str(error))
+        self.assertIn(str(limits.MAX_ISSUES), str(error))
+
+    def test_interaction_issues_count_toward_the_limit(self):
+        for interaction in ("I1", "I2"):
+            normalize_config({"interaction": interaction, "errors": {"duplicate_invoice": 5, "allocation_gap": 5}})
+            error = self.refused({"interaction": interaction,
+                                  "errors": {"duplicate_invoice": 4, "allocation_gap": 4, "fx_error": 3}})
+            self.assertEqual(error.code, "too_many_errors")
+        self.assertEqual(self.refused({"interaction": "I1", "errors": {"duplicate_invoice": 4, "allocation_gap": 3,
+                                                                       "fx_error": 3, "period_cutoff": 3}}).code,
+                         "too_many_errors")  # 13 + 2 = 15
+        self.assertEqual(self.refused({"interaction": "I2", "errors": {"duplicate_invoice": 3, "allocation_gap": 3,
+                                                                       "fx_error": 3, "period_cutoff": 3}}).code,
+                         "too_many_errors")  # 12 + 2 = 14
+
+    def test_env_reports_too_many_issues_as_bad_config(self):
+        from auditgym.evaluator import Evaluator, EvaluatorError  # noqa: PLC0415
+        for config_ in ({"errors": {"duplicate_invoice": 13}},
+                        {"interaction": "I1", "errors": {"duplicate_invoice": 4, "allocation_gap": 4, "fx_error": 3}},
+                        {"interaction": "I2", "errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 3,
+                                                         "period_cutoff": 3}}):
+            with self.assertRaises(EvaluatorError) as caught:
+                Evaluator().reset(1, config_)
+            self.assertEqual(caught.exception.code, "bad_config")
+        self.assertEqual(caught.exception.code, "bad_config")
 
     def test_sizes(self):
         for name, (low, high) in (("invoices", (limits.MIN_INVOICES, limits.MAX_INVOICES)),

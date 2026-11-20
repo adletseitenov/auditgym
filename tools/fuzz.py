@@ -54,9 +54,10 @@ def grid() -> list[tuple[str, dict]]:
     out.append(("max_density_small", {"errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1,
                                                  "period_cutoff": 1}, "size": {"invoices": [32, 40], "background_pairs": [0, 10]},
                                       "currencies": ["USD"], "timezone": "+14:00"}))
-    out.append(("max_density_large", {"errors": {"duplicate_invoice": 6, "allocation_gap": 6, "fx_error": 6,
-                                                 "period_cutoff": 5}, "interaction": "I1",
-                                      "size": {"invoices": [200, 200], "background_pairs": [400, 420]},
+    # 12 issues (10 errors + I1) is the most one episode may hold (limits.MAX_ISSUES): 96 invoices.
+    out.append(("max_density_large", {"errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 2,
+                                                 "period_cutoff": 2}, "interaction": "I1",
+                                      "size": {"invoices": [96, 100], "background_pairs": [400, 420]},
                                       "currencies": ["USD", "EUR", "CNY"], "timezone": "-11:00",
                                       "period": {"start": "2026-12-01", "months": 2}}))
     return out
