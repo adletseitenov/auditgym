@@ -217,7 +217,7 @@ class Evaluator:
         # Restarting the loaded episode before its first step is not a new attempt: it showed
         # nothing new, and a harness may load long before the policy resets.
         if self.running and self._expired() and (self._steps > 0 or not (from_loaded and self._from_loaded)):
-            self._finish(None, truncated=True)
+            self._finish(None, truncated=True, by_time=True)
         saved = dict(self.__dict__)
         # A reset of a running episode is allowed (the jury may test that reset isolates the
         # episode), but it is never silent: the abandoned episode goes to the journal with the
@@ -287,10 +287,11 @@ class Evaluator:
     def end(self) -> None:
         """The input ended, a close arrived or the server stops (audit A2): a running episode that
         had a step, or whose 60 s are over, is truncated now and leaves its journal row (empty
-        answer, 100 inspection steps, "ended_by": "close"). Otherwise a policy could keep an
+        answer, "ended_by": "close"; 100 inspection steps, or the steps really taken when its 60 s are
+        over: a time limit does not charge steps that were not made). Otherwise a policy could keep an
         episode out of the journal by closing the pipe or stopping to answer."""
         if self.running and (self._steps > 0 or self._expired()):
-            self._finish(None, truncated=True, ended_by="close")
+            self._finish(None, truncated=True, ended_by="close", by_time=self._expired())
 
     @property
     def running(self) -> bool:
@@ -308,7 +309,7 @@ class Evaluator:
                     0.0, not self._truncated, self._truncated, {})
         self._count_step()
         if self._expired():
-            return self._finish(None, truncated=True)
+            return self._finish(None, truncated=True, by_time=True, spent_step=True)
         try:
             name, arguments = actions.parse_action(action)
             if name == "submit":
@@ -340,17 +341,21 @@ class Evaluator:
             raise EvaluatorError("bad_request")
         self._count_step()
         if self._expired():
-            return self._finish(None, truncated=True)
+            return self._finish(None, truncated=True, by_time=True, spent_step=True)
         if submit:
             return self._finish({}, truncated=False)
         return self._after_step({"type": "error", "error": error("bad_arguments")})
 
-    def _finish(self, payload, truncated: bool, ended_by: str | None = None):
+    def _finish(self, payload, truncated: bool, ended_by: str | None = None, by_time: bool = False,
+                spent_step: bool = False):
+        """`by_time`: the 60 s ran out. Then `inspection_steps` is the number of inspection actions really
+        taken (`spent_step`: the step that found the time over was counted but not run, so it is not one
+        of them), and the answer is empty. Any other truncation (100 steps, a close) charges all 100."""
         self._done = True
         self._truncated = truncated
         if truncated:
             payload = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "findings": []}
-            inspection_steps = MAX_STEPS
+            inspection_steps = self._steps - (1 if spent_step else 0) if by_time else MAX_STEPS
         else:
             inspection_steps = self._steps - 1  # steps before submit, error steps included
             if payload is None:

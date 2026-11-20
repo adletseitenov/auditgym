@@ -488,9 +488,33 @@ class TerminationTest(unittest.TestCase):
         observation, reward, terminated, truncated, info = evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         self.assertEqual((terminated, truncated), (False, True))
         self.assertEqual(observation, {"type": "final", "steps_remaining": 0})  # C10: nothing left
-        self.assertEqual(info["inspection_steps"], 100)
+        self.assertEqual(info["inspection_steps"], 2)  # the two actions made; the submit that met the limit did not run
         self.assertEqual(reward, -1.0)
         self.assertEqual(evaluator.steps_remaining(), 0)  # consistent with the final observation
+
+    def test_time_truncation_charges_only_the_steps_made(self):
+        """A minute of silence after 3 actions on clean books: reward 1 - 0.002 * 3, not 0.8; the journal
+        keeps steps_total as it was and inspection_steps as the actions really run."""
+        clock = FakeClock()
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "r.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path, clock=clock)
+            evaluator.reset(3, CLEAN)
+            for _ in range(3):
+                evaluator.step({"action": "calculator", "expression": "1+1"})
+            clock.t += 60
+            evaluator.step({"action": "calculator", "expression": "1+1"})
+            [row] = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual((row["truncated"], row["inspection_steps"], row["steps_total"]), (True, 3, 4))
+        self.assertAlmostEqual(row["reward"], 1 - 0.002 * 3)
+
+    def test_step_limit_truncation_still_charges_100(self):
+        clock = FakeClock()
+        evaluator = Evaluator(clock=clock)
+        evaluator.reset(3, CLEAN)
+        for _ in range(100):
+            result = evaluator.step({"action": "calculator", "expression": "1+1"})
+        self.assertEqual(result[4]["inspection_steps"], 100)
 
     def test_reset_restarts_the_clock(self):
         clock = FakeClock()

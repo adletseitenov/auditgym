@@ -129,7 +129,7 @@ class EndOfInputTest(unittest.TestCase):
             found = rows(path)
         self.assertEqual([(row["episode_id"], row["event"], row["truncated"], row["inspection_steps"])
                           for row in found],
-                         [(first, "finished", True, 100), (second, "finished", True, 100)])
+                         [(first, "finished", True, 0), (second, "finished", True, 0)])
         self.assertNotIn("ended_by", found[0])  # out of time, found at reset
 
     def test_a_loaded_episode_restarted_before_its_first_step_is_not_journaled(self):

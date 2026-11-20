@@ -304,7 +304,7 @@ class TruncationConsistencyTest(unittest.TestCase):
             line = json.loads(path.read_text())
         self.assertEqual(result, ({"type": "final", "steps_remaining": 0}, 0.0, False, True, {}))
         self.assertEqual((line["reward"], line["truncated"], line["terminated"], line["inspection_steps"]),
-                         (-1.0, True, False, 100))
+                         (-1.0, True, False, 0))
 
     def test_an_error_action_on_step_100_truncates(self):
         """N5: the budget is spent by any action, an error included."""

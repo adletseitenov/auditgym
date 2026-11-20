@@ -270,7 +270,7 @@ def truncation() -> Optional[str]:
     timed.step({"action": "list_records", "table": "fx"})
     clock.t += 60
     observation, reward, terminated, truncated, info = timed.step({"action": "submit", "findings": TINY_ANSWER})
-    if (terminated, truncated) != (False, True) or info.get("inspection_steps") != 100 or reward != -1.0:
+    if (terminated, truncated) != (False, True) or info.get("inspection_steps") != 1 or reward != -1.0:
         return "time limit does not truncate with an empty answer"
     return None
 
