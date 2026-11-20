@@ -24,7 +24,7 @@ CHECK: PASSED
 
 Вне быстрого режима: мутационные прогоны `python3 -m tools.mutants` (судья) и `python3 -m tools.mutate_gen` (генератор и проверка данных: 44 мутации, 41 убита, 3 эквивалентные) и фазз `python3 -m tools.fuzz --seeds 10000` (180 000 эпизодов, 0 сбоев); подробности в `docs/DESIGN.md` §4.2.
 
-**Время проверки.** Быстрый режим занимает около 4–7 минут в зависимости от машины, полный (`--full`) около 10–14 минут. Измерено: 235 с в Docker на двух ядрах, 386 с на Mac без контейнера, 314–349 с на двухъядерной машине GitHub Actions (Python 3.11, 3.12, Docker с `--network none`); точное число печатает сама команда в строке «total». Это единственное место с цифрами: `Makefile` и `Dockerfile` ссылаются сюда. `python3 -m auditgym check --full` (в контейнере: `docker run --rm --network none auditgym python -m auditgym check --full`) добавляет все пропущенные тесты и пять длинных инструментов: `tools.fuzz --seeds 100`, `tools.leakscan`, `tools.metamorph`, `tools.attack`, `tools.mutants`; в Docker на GitHub Actions он занял 736 с (около 12 минут). Обе команды на каждый пуш запускает CI (`.github/workflows/check.yml`): Python 3.11 и 3.12, побайтная пересборка эпизодов и траекторий, сборка образа и запуск с `--network none`. Команда по умолчанию в Dockerfile — быстрая: полный режим помещается в разумное время, но проверяющему нужен один короткий запуск, а полный запускается явно. Что именно пропускает быстрый режим и почему — `tools/check_modes.py`. Код возврата 0 только при `CHECK: PASSED`. Образ закреплён по digest (`Dockerfile`), в сборке и при запуске ничего не скачивается.
+**Время проверки.** Быстрый режим занимает около 4–7 минут в зависимости от машины, полный (`--full`) около 10–14 минут. Измерено: 235 с в Docker на двух ядрах, 386 с на Mac без контейнера, 314–349 с на двухъядерной машине GitHub Actions (Python 3.11, 3.12, Docker с `--network none`); точное число печатает сама команда в строке «total». Это единственное место с цифрами: `Makefile` и `Dockerfile` ссылаются сюда. `python3 -m auditgym check --full` (в контейнере: `docker run --rm --network none auditgym python -m auditgym check --full`) добавляет все пропущенные тесты и шесть длинных инструментов: `tools.fuzz --seeds 100`, `tools.leakscan`, `tools.metamorph`, `tools.attack`, `tools.mutants`, `tools.tricks --seeds 300 --check` (ловушки против простых трюков и решатель = эталон на 2 100 эпизодах, около двух минут); в Docker на GitHub Actions он занял 736 с (около 12 минут). Обе команды на каждый пуш запускает CI (`.github/workflows/check.yml`): Python 3.11 и 3.12, побайтная пересборка эпизодов и траекторий, сборка образа и запуск с `--network none`. Команда по умолчанию в Dockerfile — быстрая: полный режим помещается в разумное время, но проверяющему нужен один короткий запуск, а полный запускается явно. Что именно пропускает быстрый режим и почему — `tools/check_modes.py`. Код возврата 0 только при `CHECK: PASSED`. Образ закреплён по digest (`Dockerfile`), в сборке и при запуске ничего не скачивается.
 
 ## Что сдано (CASE §09)
 
@@ -46,7 +46,7 @@ CHECK: PASSED
 |---|---|---|
 | Четыре типа ошибок | `auditgym/inject.py` (операторы), `auditgym/config.py` (`errors`) | `tests/gen/test_inject.py`, `python3 -m tools.fuzz --seeds 20` |
 | Два сценария взаимодействия | `auditgym/inject.py` (`I1`, `I2`) | `tests/gen/test_inject.py` (`InteractionTest`), решётка `tools/fuzz.py` |
-| Чистые компании и отвлекающие случаи | `auditgym/world.py` (`distractors`), `config.errors = {}` | `tests/gen/test_generate.py` (`CleanCompanyTest`), `tests/solver/test_solver.py`; строка score «clean companies: solver finds nothing» |
+| Чистые компании и отвлекающие случаи, ловушки против трюков | `auditgym/world.py` (`distractors`, ловушки A и B), `config.errors = {}` | `tests/gen/test_generate.py` (`CleanCompanyTest`), `tests/gen/test_decoys.py`, `tests/solver/test_solver.py`, `python3 -m tools.tricks`; строка score «clean companies: solver finds nothing» |
 | Контракт `reset`/`step`, пять действий, 100 шагов | `auditgym/evaluator.py`, `actions.py`, `serve.py`, `client.py` | `tests/env/test_evaluator.py`, `tests/env/test_audit_env.py` (тест на каждое предложение кейса §03–§04); 15 строк «Контракт и изоляция» |
 | Общий matcher и терминальная награда, атакующие ответы | `auditgym/matcher.py`, `reward.py`, `findings.py`, `judge.py` | `tests/judge/` (`test_matcher`, `test_reward`, `test_attacks`, `test_mutations`), `python3 -m tools.attack` |
 | Траектории без закрытого эталона | `tools/trajectories.py` | `tests/env/test_trajectories.py`, `tests/test_schemas.py` (`TrajectoriesTest`), `python3 -m tools.leakscan` |
@@ -147,17 +147,17 @@ errors | invoices needed (>=) | default size.invoices when size is omitted | acc
 | Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Shaped (эксп.): ошибки | Шаги |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | oracle | 200 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.0 |
-| solver_policy | 200 | 1.000 | 1.000 | 1.000 | 0.960 | 0.959 | 0.960 | 0.960 | 21.1 |
-| reconcile | 200 | 0.236 | 0.517 | 0.318 | -0.391 | -1.000 | -0.543 | -0.389 | 19.6 |
-| random_explorer | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 0.109 | -0.723 | -1.000 | 11.0 |
+| solver_policy | 200 | 1.000 | 1.000 | 1.000 | 0.960 | 0.959 | 0.960 | 0.960 | 21.0 |
+| reconcile | 200 | 0.144 | 0.523 | 0.224 | -0.580 | -1.000 | -0.685 | -0.578 | 19.5 |
+| random_explorer | 200 | 0.000 | 0.000 | 0.000 | -1.000 | -0.089 | -0.772 | -0.999 | 11.0 |
 | silence | 200 | 0.000 | 0.000 | 0.000 | -1.000 | 1.000 | -0.500 | -1.000 | 1.0 |
-| flag_all | 200 | 0.006 | 0.058 | 0.012 | -0.983 | -1.000 | -0.987 | -0.974 | 19.6 |
-| flag_all_cutoff | 200 | 0.012 | 0.106 | 0.022 | -0.967 | -1.000 | -0.975 | -0.967 | 19.6 |
-| flag_all_duplicates | 200 | 0.009 | 0.079 | 0.016 | -0.977 | -1.000 | -0.983 | -0.976 | 19.6 |
-| heuristic | 200 | 0.321 | 0.948 | 0.470 | -0.099 | -1.000 | -0.324 | -0.088 | 21.1 |
+| flag_all | 200 | 0.007 | 0.059 | 0.012 | -0.982 | -1.000 | -0.987 | -0.973 | 19.5 |
+| flag_all_cutoff | 200 | 0.013 | 0.111 | 0.023 | -0.965 | -1.000 | -0.974 | -0.965 | 19.5 |
+| flag_all_duplicates | 200 | 0.008 | 0.077 | 0.015 | -0.977 | -1.000 | -0.983 | -0.976 | 19.5 |
+| heuristic | 200 | 0.237 | 0.963 | 0.377 | -0.285 | -1.000 | -0.464 | -0.283 | 21.0 |
 <!-- results:end -->
 
-`heuristic` — демонстрационная эвристика без учёта отвлекающих случаев (частичные оплаты, позиции, пояс компании, переплаты): она ловит почти всё (R 0.948), но обвиняет и законные случаи (P 0.321, F1 0.470), на чистых книгах получает −1. Это не базовая политика и не часть баллов проверки.
+`heuristic` — демонстрационная эвристика без учёта отвлекающих случаев (частичные оплаты, позиции, пояс компании, переплаты): она ловит почти всё (R 0.963), но обвиняет и законные случаи (P 0.237, F1 0.377), на чистых книгах получает −1. Это не базовая политика и не часть баллов проверки.
 
 Колонка «Shaped (эксп.)» — экспериментальная награда с частичным баллом, не входит в награду кейса (раздел «Экспериментальная награда с частичным баллом»).
 

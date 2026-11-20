@@ -62,7 +62,7 @@ episode = {
  "evidence_superset_allowed": true, "period_basis": "document_date",
  "period_interval": "[start, end)",
  "payment_rule": "a payment with one reference moves the invoice's receivable by round_half_even(booked * paid_after / total) - ...",
- "duplicate_signature": "entity, currency, total, line items incl. service period; service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)"}
+ "duplicate_signature": "entity, currency, total, line items incl. service period; a duplicate_invoice is two invoices with this signature that are both posted in the ledger (an unposted invoice is never part of one); service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)"}
 ```
 `policy.json` собирается по белому списку ключей (`auditgym.generate.POLICY_KEYS`); ничего из эталона и из конфигурации ошибок в него не попадает. Записи всех таблиц упорядочены по открытому ID (`ledger` — по `row_id`, документы — по `doc_id`, `fx` — по дате и валюте).
 
