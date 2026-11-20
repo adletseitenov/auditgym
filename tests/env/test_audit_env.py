@@ -405,14 +405,16 @@ class JournalTest(unittest.TestCase):
     def test_terminated_and_truncated_are_in_the_journal(self):
         evaluator, path = self.journal()
         evaluator.step({"action": "submit", "findings": CORRECT_TINY})
-        evaluator.reset()
+        again = Evaluator(mode="eval", results_path=path, clock=FakeClock())  # eval plays a loaded episode once
+        again.load(TINY)
         for _ in range(100):
-            evaluator.step(FX_PAGE)
+            again.step(FX_PAGE)
         first, second = [json.loads(line) for line in path.read_text().splitlines()]
         self.assertEqual((first["terminated"], first["truncated"]), (True, False))
         self.assertEqual((second["terminated"], second["truncated"]), (False, True))
-        self.assertEqual(set(first), {"episode_id", "mode", "event", "terminated", "truncated", "inspection_steps", "reward",
-                                      "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"})
+        self.assertEqual(set(first), {"episode_id", "mode", "event", "episode_run", "terminated", "truncated",
+                                      "inspection_steps", "reward", "precision", "recall", "f1", "tp", "fp", "fn",
+                                      "structure_error"})
 
     def test_judge_exception_is_minus_one_and_logged_never_a_win(self):
         for mode in ("eval", "train"):
@@ -549,7 +551,7 @@ class ServerLineLimitTest(unittest.TestCase):
         # the long line is an error step during the episode: 3 requests, 3 steps
         self.assertEqual(replies[1]["observation"]["error"]["code"], "bad_arguments")
         self.assertEqual([r["observation"]["steps_remaining"] for r in replies], [99, 98, 97])
-        self.assertEqual(evaluator.steps_remaining(), 97)
+        self.assertFalse(evaluator.running)  # the end of input truncated the episode (audit A2)
 
     def test_a_long_line_without_an_episode_is_a_bad_request_and_spends_nothing(self):
         evaluator = Evaluator(clock=FakeClock())
@@ -557,11 +559,13 @@ class ServerLineLimitTest(unittest.TestCase):
         self.assertEqual(reply["observation"]["error"]["code"], "bad_request")
         self.assertEqual(reply["observation"]["steps_remaining"], 0)
 
-    def test_a_long_line_after_the_end_is_a_bad_request(self):
+    def test_a_long_line_after_the_end_is_episode_over_as_a_step(self):
         evaluator = tiny()
         evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         [reply] = self.run_lines(evaluator, [self.padded(self.LIMIT + 5)])
-        self.assertEqual(reply["observation"]["error"]["code"], "bad_request")
+        [step] = self.run_lines(evaluator, [json.dumps({"op": "step", "action": FX_PAGE}).encode()])
+        self.assertEqual(reply, step)
+        self.assertEqual(reply["observation"]["error"]["code"], "episode_over")
 
     def test_a_long_submit_is_an_invalid_structure(self):
         evaluator = tiny()
@@ -740,6 +744,8 @@ class ClientRobustnessTest(unittest.TestCase):
         real, env._process = env._process, stalled
         real.kill()
         real.wait()
+        for stream in (real.stdin, real.stdout):  # the replaced server's pipes (no ResourceWarning)
+            stream.close()
         try:
             with self.assertRaises(EnvError) as caught:
                 env.reset(1, {})

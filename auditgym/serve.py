@@ -12,6 +12,10 @@ One JSON object per line on stdin, one per line on stdout (docs/CONTRACTS.md, se
     <- {"observation": {...}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
     -> {"op": "close"}                         (end of input also stops the server)
 
+When the input ends, a close arrives or the output breaks, a running episode that had a step or
+whose 60 s are over is truncated and journaled (Evaluator.end); the 60 s are also checked at
+reset and load, not only at the next step.
+
 Protocol problems (a line that is not JSON, not an object, an unknown op, a load that is not
 the first request) never stop the server and never spend a step; the reply has the shape of a
 step reply with an error observation. Lines that cannot be read are the exception while an
@@ -21,7 +25,8 @@ as a step with a `bad_arguments` error, or, if they name a submit action (an act
 key with the value "submit", also inside an action sent as a JSON string), as an invalid
 structure that ends the episode with reward -1. A long line that names another op (a reset with
 a huge config) is a `bad_request` and spends nothing. With no running episode, or after its end,
-it is a `bad_request` like any other bad line:
+it is a `bad_request` like any other bad line; after the end of the episode it gets the same
+`episode_over` reply as a step:
 
     <- {"observation": {"type": "error", "error": {"code": "bad_request", "message": "Bad request."},
         "steps_remaining": N}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
@@ -34,7 +39,9 @@ generation secret from a file (auditgym/secret.py; else $AUDITGYM_SECRET_FILE, e
 an unusable secret file stops the server with exit code 2 before the first request.
 
 A refused reset or load replies the same way with code `bad_config` (bad seed or config),
-`not_loaded` (reset without seed and nothing loaded) or `bad_episode` (directory unreadable).
+`bad_request` (eval: a restart of the loaded episode after its first step) or `bad_episode`
+(directory unreadable). `not_loaded` is reserved: since audit C7 a reset without a seed always
+starts an episode.
 In eval mode without `--results` and `--results-fd` the journal goes to $AUDITGYM_RESULTS or
 `runs/results.jsonl` (directory created, file mode 0600). Python's limit on the digits of an int is lifted in this
 process, so a submit with a 5 000-digit amount is judged (a well-formed amount that never
@@ -57,7 +64,7 @@ MAX_LINE_BYTES = 1 << 20
 PROTOCOL_ERRORS = {
     "bad_request": "Bad request.",
     "bad_config": "Bad seed or configuration.",
-    "not_loaded": "No episode is loaded.",
+    "not_loaded": "No episode is loaded.",  # reserved: not sent since C7
     "bad_episode": "Episode directory cannot be read.",
     "internal_error": "Internal error.",
 }
@@ -194,22 +201,29 @@ def serve(evaluator: Evaluator, stdin=None, stdout=None, allow_load: bool = True
     stdin = stdin if stdin is not None else sys.stdin.buffer
     stdout = stdout if stdout is not None else sys.stdout
     server = Server(evaluator, allow_load=allow_load)
-    while True:
-        line = _read_line(stdin)
-        if line is None:
-            return 0
-        if not isinstance(line, Unreadable) and not line.strip():
-            continue
-        reply = server.handle(line)
-        if reply is None:
-            return 0
+    try:
+        while True:
+            line = _read_line(stdin)
+            if line is None:
+                return 0
+            if not isinstance(line, Unreadable) and not line.strip():
+                continue
+            reply = server.handle(line)
+            if reply is None:
+                return 0
+            try:
+                text = _dump(reply)
+            except (TypeError, ValueError):
+                print("auditgym serve: reply is not valid JSON", file=sys.stderr)
+                text = _dump(protocol_error("internal_error", server._remaining()))
+            stdout.write(text + "\n")
+            stdout.flush()
+    finally:
+        # End of input, close, or a broken stdout: the running episode leaves its row (audit A2).
         try:
-            text = _dump(reply)
-        except (TypeError, ValueError):
-            print("auditgym serve: reply is not valid JSON", file=sys.stderr)
-            text = _dump(protocol_error("internal_error", server._remaining()))
-        stdout.write(text + "\n")
-        stdout.flush()
+            evaluator.end()
+        except Exception as exc:  # noqa: BLE001 - stopping must not fail
+            print(f"auditgym serve: internal error at the end {type(exc).__name__}", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:

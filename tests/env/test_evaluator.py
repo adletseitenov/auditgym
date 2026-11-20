@@ -566,7 +566,7 @@ class RewardTest(unittest.TestCase):
             self.assertEqual((observation, reward, terminated, truncated, info),
                              ({"type": "final", "steps_remaining": 96}, 0.0, True, False, {}))
             evaluator.step({"action": "submit", "findings": CORRECT_TINY})
-            evaluator.reset()
+            evaluator = tiny(mode="eval", results_path=path)  # eval plays a loaded episode once
             evaluator.step({"action": "submit", "findings": None})
             lines = [json.loads(line) for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(lines), 2)

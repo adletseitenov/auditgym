@@ -63,11 +63,13 @@ class ExportTest(unittest.TestCase):
         code, text = export(self.root / "ep", SECRET)
         self.assertEqual(code, 0, text)
         exported = load_episode(self.root / "ep")
+        secret_file = self.root / "secret"
+        secret_file.write_text(SECRET + "\n", encoding="utf-8")
         with mock.patch.dict(os.environ, {SECRET_ENV: SECRET}):
             evaluator = Evaluator()
             observation, _ = evaluator.reset(SEED, WITH_ERRORS)
-            with Env() as env:
-                env_observation, _ = env.reset(SEED, WITH_ERRORS)
+        with Env(secret_file=secret_file) as env:  # Env passes the secret only explicitly (audit A3)
+            env_observation, _ = env.reset(SEED, WITH_ERRORS)
         self.assertEqual(exported["public"], evaluator._episode["public"])
         self.assertEqual(exported["private"]["truth"], evaluator._episode["private"]["truth"])
         self.assertEqual(exported["public"]["manifest"], evaluator._episode["public"]["manifest"])

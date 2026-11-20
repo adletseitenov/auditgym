@@ -140,9 +140,9 @@ class ProcessJournalTest(unittest.TestCase):
             secret = root / "secret"
             secret.write_text("process-journal-secret\n", encoding="utf-8")
             path = root / "results.jsonl"
-            with mock.patch.dict(os.environ, {**CLEAN_ENV, SECRET_FILE_ENV: str(secret)}):
+            with mock.patch.dict(os.environ, CLEAN_ENV):
                 for seed in (1, 2):
-                    with Env(mode="eval", results_path=path) as env:
+                    with Env(mode="eval", results_path=path, secret_file=secret) as env:
                         observation, _ = env.reset(seed, {})
                         env.step({"action": "submit", "findings": {
                             "episode_id": observation["manifest"]["episode_id"], "findings": []}})

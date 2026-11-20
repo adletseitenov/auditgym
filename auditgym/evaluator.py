@@ -139,6 +139,8 @@ class Evaluator:
         self._next_seed = DEFAULT_SEED  # seed of the next reset() without a seed and without files
         self._episode = None  # the running episode, public and private
         self._resets_abandoned = 0  # episodes of this session replaced by reset/load while running
+        self._episode_runs = {}   # episode_id -> journal rows written for it in this session (episode_run)
+        self._loaded_spent = False  # the loaded episode has had a step (eval: no restart after that)
         self._clear()
 
     @property
@@ -151,6 +153,7 @@ class Evaluator:
         self._done = False
         self._truncated = False
         self._started_at = None
+        self._from_loaded = False  # the running episode is the one from load()
         self._tables = {}
         self._index = {}
         self._doc_index = {}
@@ -167,7 +170,12 @@ class Evaluator:
             if self._loaded is not None:
                 if config not in (None, {}):  # a loaded episode has no config to apply (CONTRACTS §4)
                     raise EvaluatorError("bad_config")
-                return self._swap_in(copy.deepcopy(self._loaded))
+                if self._mode == "eval" and self._loaded_spent:
+                    # Eval plays the loaded episode once: a restart after its first step would give a
+                    # fresh 100 steps and 60 s on the same books (audit A1). A protocol error; the
+                    # running or finished episode stays as it is.
+                    raise EvaluatorError("bad_request")
+                return self._swap_in(copy.deepcopy(self._loaded), from_loaded=True)
             seed = self._next_seed
         elif isinstance(seed, str):
             seed = _seed_from_text(seed)
@@ -197,16 +205,23 @@ class Evaluator:
 
         try:
             loaded = load_episode(directory)
-            observation = self._swap_in(copy.deepcopy(loaded))
+            observation = self._swap_in(copy.deepcopy(loaded), from_loaded=True)
         except EvaluatorError:
             raise
         except Exception:  # files are outside input: any defect is one fixed error
             raise EvaluatorError("bad_episode") from None
         self._loaded = loaded
+        self._loaded_spent = False
         return observation
 
-    def _swap_in(self, episode: dict) -> tuple[dict, dict]:
+    def _swap_in(self, episode: dict, from_loaded: bool = False) -> tuple[dict, dict]:
         """Start `episode`; if that fails, the previous state is put back untouched."""
+        # A running episode whose 60 s are over is truncated now, as the next step would do; the
+        # time limit is checked at reset, load and close too, not only at a step (audit A2).
+        # Restarting the loaded episode before its first step is not a new attempt: it showed
+        # nothing new, and a harness may load long before the policy resets.
+        if self.running and self._expired() and (self._steps > 0 or not (from_loaded and self._from_loaded)):
+            self._finish(None, truncated=True)
         saved = dict(self.__dict__)
         # A reset of a running episode is allowed (the jury may test that reset isolates the
         # episode), but it is never silent: the abandoned episode goes to the journal with the
@@ -221,6 +236,7 @@ class Evaluator:
             self.__dict__.clear()
             self.__dict__.update(saved)
             raise
+        self._from_loaded = from_loaded
         if abandoned is not None:
             self._resets_abandoned += 1
             self._write_abandoned(*abandoned)
@@ -269,6 +285,17 @@ class Evaluator:
         (the same 0 as in the final observation, whichever limit ended the episode)."""
         return 0 if self._episode is None or self._truncated else self._remaining()
 
+    def _expired(self) -> bool:
+        return self._started_at is not None and self._clock.now() - self._started_at >= self._time_limit
+
+    def end(self) -> None:
+        """The input ended, a close arrived or the server stops (audit A2): a running episode that
+        had a step, or whose 60 s are over, is truncated now and leaves its journal row (empty
+        answer, 100 inspection steps, "ended_by": "close"). Otherwise a policy could keep an
+        episode out of the journal by closing the pipe or stopping to answer."""
+        if self.running and (self._steps > 0 or self._expired()):
+            self._finish(None, truncated=True, ended_by="close")
+
     @property
     def running(self) -> bool:
         """An episode is in progress (reset, not finished)."""
@@ -283,8 +310,8 @@ class Evaluator:
             return ({"type": "error", "error": error("episode_over"),
                      "steps_remaining": 0 if self._truncated else self._remaining()},
                     0.0, not self._truncated, self._truncated, {})
-        self._steps += 1
-        if self._clock.now() - self._started_at >= self._time_limit:
+        self._count_step()
+        if self._expired():
             return self._finish(None, truncated=True)
         try:
             name, arguments = actions.parse_action(action)
@@ -298,6 +325,11 @@ class Evaluator:
             observation = {"type": "error", "error": error(exc.code)}
         return self._after_step(observation)
 
+    def _count_step(self) -> None:
+        self._steps += 1
+        if self._from_loaded:
+            self._loaded_spent = True
+
     def _after_step(self, observation: dict):
         observation["steps_remaining"] = self._remaining()
         if self._steps >= MAX_STEPS:
@@ -306,17 +338,20 @@ class Evaluator:
 
     def reject(self, submit: bool = False):
         """A request line the server could not take as an action (too long, audit L4) during an
-        episode: a step with an error, or, if it was a submit, an invalid structure."""
+        episode: a step with an error, or, if it was a submit, an invalid structure. After the end of
+        the episode: the same episode_over reply as a step."""
+        if self._episode is not None and self._done:
+            return self.step(None)
         if not self.running:
             raise EvaluatorError("bad_request")
-        self._steps += 1
-        if self._clock.now() - self._started_at >= self._time_limit:
+        self._count_step()
+        if self._expired():
             return self._finish(None, truncated=True)
         if submit:
             return self._finish({}, truncated=False)
         return self._after_step({"type": "error", "error": error("bad_arguments")})
 
-    def _finish(self, payload, truncated: bool):
+    def _finish(self, payload, truncated: bool, ended_by: str | None = None):
         self._done = True
         self._truncated = truncated
         if truncated:
@@ -329,7 +364,7 @@ class Evaluator:
                 # findings is an invalid structure instead, so it must not be scored as silence.
                 payload = {}
         result = _judge(self._episode, payload, inspection_steps)
-        self._write_result(result, inspection_steps, truncated)
+        self._write_result(result, inspection_steps, truncated, ended_by)
         # A truncated episode has no steps left, whichever limit ended it (audit C10).
         observation = {"type": "final", "steps_remaining": 0 if truncated else self._remaining()}
         if self._mode == "eval":
@@ -347,10 +382,12 @@ class Evaluator:
             print(f"auditgym evaluator: shaped reward raised {type(exc).__name__}", file=sys.stderr)
             return -1.0
 
-    def _write_result(self, result: dict, inspection_steps: int, truncated: bool) -> None:
+    def _write_result(self, result: dict, inspection_steps: int, truncated: bool, ended_by=None) -> None:
         line = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "event": "finished", "terminated": not truncated, "truncated": truncated,
                 "inspection_steps": inspection_steps}
+        if ended_by is not None:
+            line["ended_by"] = ended_by
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
         self._write_line(line)
@@ -368,6 +405,11 @@ class Evaluator:
     def _write_line(self, line: dict) -> None:
         if self._results_path is None and self._results_stream is None:
             return
+        # The how-many-th row of this episode_id in this session: a harness sees a replayed episode
+        # (the same seed reset again, a loaded episode restarted in train mode) at a glance.
+        episode_id = line["episode_id"]
+        self._episode_runs[episode_id] = self._episode_runs.get(episode_id, 0) + 1
+        line["episode_run"] = self._episode_runs[episode_id]
         if self._journal_key is not None:
             from .journal import seal
 

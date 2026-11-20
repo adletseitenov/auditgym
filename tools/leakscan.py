@@ -329,10 +329,15 @@ def probe(server: RawServer, seed, config, episode: dict, load_dir: str | None, 
                 b'{"op": "reset", "seed": 1, "config": {"errors": {"duplicate_invoice": 99}}}',
                 b'{"op": "reset", "seed": 1, "config": "x"}', b'{"op": "reset"}', b"[" * 100000 + b"]" * 100000):
         server.send(raw, "probe")
-    if load_dir is not None:
-        start = lambda: server.reset()  # noqa: E731
-    else:
-        start = lambda: server.reset(seed, config)  # noqa: E731
+    def start():
+        if load_dir is not None:
+            reply = server.reset()
+            if reply["observation"].get("type") != "error":
+                return reply
+            # Eval plays a loaded episode once: after its first step a restart is refused
+            # (bad_request). The same episode comes from its seed (load_dir was written from it).
+        return server.reset(seed, config)
+
     first = start()["observation"]
     episode_id = first["manifest"]["episode_id"]
     server.send(json.dumps({"op": "load", "directory": load_dir or str(ROOT)}).encode(), "probe")
