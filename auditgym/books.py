@@ -7,7 +7,8 @@ files; surface.py maps them to opaque ids.
 
 Payment rule (policy.json "payment_rule"; verify.py checks it independently with the same
 published helper money.closed_share). Posted payments of an invoice are taken in document-time
-order; `paid` is what earlier posted single-reference payments paid, in the document currency:
+order (world.order_postings posts them in that order, after the invoice, so the ledger's posting
+order agrees); `paid` is what earlier posted single-reference payments paid, in the document currency:
 - several references: each invoice closed at its booked amount minus what is already closed;
 - one reference, paid + amount <= total (refunds included): the receivable moves by
   closed_share(booked, total, paid + amount) - closed_share(booked, total, paid), so it closes in

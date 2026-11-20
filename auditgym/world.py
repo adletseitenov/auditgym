@@ -6,7 +6,8 @@ surface.py, after errors are injected, so ids carry no information about the sto
 Times are aware datetimes. A document keeps its own UTC offset (usually the company's; with
 distractors some documents are written in another offset, so their naive date differs from the
 company-local date). A posted document has `posted_at`: the moment of its ledger postings, a
-random lag (one minute to three weeks) after the document date and always inside the period.
+random lag (one minute to three weeks) after the document date and always inside the period; the
+documents of one invoice are posted in their document order (order_postings).
 
 Invoices of the neighbouring periods (dated just before or after the period, with that period's
 service) are part of every story and are never posted by it: they are the pool period_cutoff
@@ -102,6 +103,49 @@ def posting_lag(rng: Rng, moment: dt.datetime, end: dt.datetime) -> dt.datetime:
     if lag > room:
         lag = rng.randint(MIN_LAG, room)
     return moment + dt.timedelta(seconds=lag)
+
+
+def _document_moment(document: dict) -> dt.datetime:
+    return document["issued_at"] if "issued_at" in document else document["timestamp"]
+
+
+def order_postings(world: dict) -> None:
+    """Posted documents linked by references (an invoice, its payments and refunds; the invoices of
+    one multi-reference payment) are posted in document order: every payment after its invoices and
+    after their earlier payments, so the ledger's posting order and the documents' order agree
+    (policy.payment_rule). The moments already drawn for such a group are handed out again, the
+    earliest to the earliest document: each was at least MIN_LAG after its own document, so the
+    k-th smallest is at least MIN_LAG after the k-th document, and no new draw is needed. Equal
+    moments are pulled apart by one second, backwards. A group already in order is left unchanged."""
+    docs = [d for d in world["invoices"] + world["payments"] if d["posted_at"] is not None]
+    parent = {d["key"]: d["key"] for d in docs}
+
+    def root(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for payment in world["payments"]:
+        if payment["posted_at"] is None:
+            continue
+        for ref in payment["invoice_refs"] or []:
+            if ref in parent:
+                parent[root(ref)] = root(payment["key"])
+    groups: dict[str, list[dict]] = {}
+    for document in docs:
+        groups.setdefault(root(document["key"]), []).append(document)
+    for key in sorted(groups):
+        group = groups[key]
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda d: (_document_moment(d), "issued_at" not in d, int(d["key"][1:])))
+        moments = sorted(d["posted_at"] for d in group)
+        for index in range(len(moments) - 1, 0, -1):
+            if moments[index - 1] >= moments[index]:
+                moments[index - 1] = moments[index] - dt.timedelta(seconds=1)
+        for document, moment in zip(group, moments):
+            document["posted_at"] = moment
 
 
 def outside_posting(rng: Rng, world: dict, issued: dt.datetime) -> dt.datetime:
@@ -349,6 +393,7 @@ def build_world(rng: Rng, config: dict) -> dict:
 
     world["invoices"] = invoices
     world["payments"] = _payments(rng.child("payments"), world, invoice_count)
+    order_postings(world)
     issues = sum(config["errors"].values()) + interaction_issue_count(config["interaction"])
     world["background"] = _background(rng.child("background"), config, vendors, start, end,
                                       _background_cap(world, issues))

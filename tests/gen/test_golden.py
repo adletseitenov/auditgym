@@ -3,11 +3,12 @@
 Expected amounts below are written out by hand, not computed with auditgym.money.
 """
 import copy
+import datetime as dt
 import unittest
 from decimal import Decimal
 
 from auditgym.generate import generate
-from auditgym.money import closed_share, convert
+from auditgym.money import closed_share, convert, parse_time
 from auditgym.solver import solve
 from auditgym.verify import predicate_issues, verify
 
@@ -77,6 +78,52 @@ class VerifyCatchesTest(unittest.TestCase):
                 row["debit_minor" if row["debit_minor"] else "credit_minor"] += 500
         problems = verify(episode)
         self.assertTrue(any(p.startswith("pre:") for p in problems), problems[:3])
+
+
+class PostingOrderTest(unittest.TestCase):
+    """policy.payment_rule: payments of an invoice are read in document order; they are also posted
+    in that order and after the invoice, so a reader who replays the ledger by posting time gets the
+    same closings (review: seed 51, invoice zr87hh2dvb)."""
+
+    CONFIG = {"size": {"invoices": [150, 200], "background_pairs": [0, 10]}, "currencies": ["USD", "EUR", "CNY"],
+              "base_currency": "RUB", "errors": {}}
+
+    def test_posting_order_equals_document_order(self):
+        checked = 0
+        for seed in (51, 14, 3, 0):
+            public = generate(seed, self.CONFIG)["public"]
+            posted = {}
+            for row in public["ledger"]:
+                key = row["payment_id"] or row["invoice_id"]
+                posted[key] = parse_time(row["timestamp"])
+            for invoice in public["invoices"]:
+                if invoice["invoice_id"] not in posted:
+                    continue
+                payments = [p for p in public["payments"] if invoice["invoice_id"] in (p["invoice_refs"] or [])
+                            and p["payment_id"] in posted]
+                by_document = sorted(payments, key=lambda p: (parse_time(p["timestamp"]), p["doc_id"]))
+                moments = [posted[invoice["invoice_id"]]] + [posted[p["payment_id"]] for p in by_document]
+                self.assertEqual(moments, sorted(set(moments)), invoice["doc_id"])
+                checked += len(payments) > 1
+        self.assertGreater(checked, 20)
+
+    def test_verify_rejects_a_payment_posted_before_its_invoice(self):
+        episode = copy.deepcopy(generate(51, self.CONFIG))
+        ledger = episode["public"]["ledger"]
+        own = {r["invoice_id"]: parse_time(r["timestamp"]) for r in ledger if r["invoice_id"] and not r["payment_id"]}
+        payments = {p["payment_id"]: p for p in episode["public"]["payments"]}
+        # A payment dated before its invoice was posted: post it after its own date but before the invoice.
+        payment = next(p for p in payments.values() if p["invoice_refs"] and len(p["invoice_refs"]) == 1
+                       and p["invoice_refs"][0] in own
+                       and parse_time(p["timestamp"]) < own[p["invoice_refs"][0]] - dt.timedelta(seconds=1)
+                       and any(r["payment_id"] == p["payment_id"] for r in ledger))
+        moment = (own[payment["invoice_refs"][0]] - dt.timedelta(seconds=1)).isoformat()
+        for table in (ledger, episode["private"]["pre_ledger"]):
+            for row in table:
+                if row["payment_id"] == payment["payment_id"]:
+                    row["timestamp"] = moment
+        problems = verify(episode)
+        self.assertTrue(any("is not posted after its invoice" in p for p in problems), problems[:3])
 
 
 class SolverVerifyAgreementTest(unittest.TestCase):

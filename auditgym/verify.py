@@ -10,7 +10,8 @@ What is checked:
 - the fx table: every date of the period plus the margin, at least 6 significant digits;
 - clean postings: a document is posted iff it is dated in the period, after its own date, by the
   document's entity, at the policy amount; payments close receivables by the published payment
-  rule (auditgym/books.py); fx_difference only on foreign payments. A document a posting issue is
+  rule (auditgym/books.py), each after its invoice and the earlier payments of it in document
+  order; fx_difference only on foreign payments. A document a posting issue is
   about (period_cutoff, fx_error, allocation_gap) is checked the same way except for the one
   deviation its issue declares: a cutoff document's period and date, an fx_error's amount (equal
   on both sides of an invoice; the cash row of a payment, whose receivable closings still follow
@@ -367,6 +368,25 @@ def expected_closings(books: Books) -> dict[str, dict]:
     return out
 
 
+def _check_posting_order(books: Books, name: str) -> list[str]:
+    """policy.payment_rule: the posted payments of an invoice are posted after the invoice and in
+    their document order, so reading them in posting order gives the same closings."""
+    problems = []
+    for ref in sorted(books.paid_by):
+        own = books.own.get(ref)
+        if not own:
+            continue
+        last = parse_time(own[0]["timestamp"])
+        payments = [p for p in books.paid_by[ref] if books.by_payment.get(p["payment_id"])]
+        for payment in sorted(payments, key=lambda p: (parse_time(p["timestamp"]), p["doc_id"])):
+            moment = parse_time(books.by_payment[payment["payment_id"]][0]["timestamp"])
+            if moment <= last:
+                problems.append(f"{name}: payment {payment['doc_id']} is not posted after its invoice "
+                                "and the earlier payments of it")
+            last = moment
+    return problems
+
+
 def _check_postings(books: Books, name: str, deviations) -> list[str]:
     """Every document dated in the period is posted once, after its own date, by its entity, at the
     policy amount, and nothing dated outside it is posted. `deviations` maps a doc_id to the posting
@@ -468,6 +488,7 @@ def check_books(public: dict, name: str, deviations, counts: bool = True) -> lis
     if problems:
         return problems
     problems += _check_postings(books, name, deviations)
+    problems += _check_posting_order(books, name)
     if counts:
         manifest = public["manifest"]["counts"]
         for table in ("ledger", "invoices", "payments", "fx"):

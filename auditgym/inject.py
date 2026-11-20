@@ -43,8 +43,8 @@ from .books import build_books, payment_parts, rate_on, to_base
 from .money import convert, fx_key, round_rate
 from .rng import Rng
 from .world import (EDGE_GAP, PAY_AFTER, TERMS_DAYS, doc_zone, in_period, moment_between, new_invoice,
-                    new_payment, outside_moment, outside_posting, paid_like_clean, paid_outside, posting_lag,
-                    share_of)
+                    new_payment, order_postings, outside_moment, outside_posting, paid_like_clean, paid_outside,
+                    posting_lag, share_of)
 
 OPERATOR_ORDER = ("duplicate_invoice", "period_cutoff", "fx_error", "allocation_gap")
 FX_MIN_MINOR = 100
@@ -145,6 +145,7 @@ def duplicate_invoice(rng: Rng, world: dict, order: list[str], used: set) -> tup
                               original["total_minor"], [copy_invoice["key"]])
         payment["posted_at"] = posting_lag(rng, payment["timestamp"], world["period_end"])
         world["payments"].append(payment)
+        order_postings(world)
         used.add(payment["key"])
     used.update({original["key"], copy_invoice["key"]})
     docs = sorted([doc_key(original["key"]), doc_key(copy_invoice["key"])])
@@ -322,6 +323,7 @@ def interaction_i1(rng: Rng, world: dict, order: list[str], used: set) -> list[t
                               invoice["currency"], moment, amount, [key])
         payment["posted_at"] = posting_lag(rng, moment, end)
         first["payments"].append(payment)
+        order_postings(first)
         pkey = payment["key"]
         closing = payment_parts(first)[pkey]["closes"][key]
         if chosen is None or closing < 2:
