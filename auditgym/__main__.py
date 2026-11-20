@@ -5,7 +5,7 @@
     python -m auditgym serve [--mode train|eval] [--results PATH]    the evaluator process
     python -m auditgym export --seed N [--config JSON | --config-file PATH] --out DIR
                                        write an episode directory under the evaluator secret (the oracle's reference)
-    python -m auditgym verify-journal PATH [--secret-file F]
+    python -m auditgym verify-journal PATH [--secret-file F] [--expect-episodes N]
                                        check the signatures and the chain of a signed eval journal
 
 `AUDITGYM_STRICT=1 python -m auditgym check` also fails on any planned score check that is still a
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 
-USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR | verify-journal PATH"
+USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR | verify-journal PATH [--expect-episodes N]"
 
 NO_CHECKOUT = ("check runs from the root of a clone of the repository (it needs tools/ and tests/, "
                "which pip does not install): cd <repo> && python -m auditgym check")

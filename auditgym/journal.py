@@ -13,8 +13,9 @@ Before each write the evaluator reads the tail of the file and continues the cha
 line, so sessions that append to one journal one after another form one chain. `python -m
 auditgym verify-journal PATH` checks every signature and link and names the first bad line: an
 edited, inserted, reordered or deleted line is caught, and so is a line appended without the key.
-What a chain cannot show: lines cut from the END of the file (the shorter file is a valid chain),
-and two evaluators writing to one file at the same moment (their lines fork the chain; give each
+What a chain cannot show: lines cut from the END of the file (the shorter file is a valid chain;
+`verify-journal --expect-episodes N` fails when the file has fewer than N episode lines, so the
+harness that knows how many episodes it ran catches a cut tail), and two evaluators writing to one file at the same moment (their lines fork the chain; give each
 its own file). Without a key nothing is signed and verify-journal says so.
 """
 from __future__ import annotations
@@ -125,9 +126,24 @@ def verify_lines(lines: list[str], key: bytes | None) -> tuple[str, int | None, 
                         f"(lines cut from the end of the file cannot be detected); {secret_summary(parsed)}")
 
 
+def episode_rows(lines: list[str]) -> int:
+    """How many lines record an episode that ended or was abandoned: `finished` (or a journal row of
+    the time before `event` existed) and `abandoned`. Lines that are not JSON objects do not count."""
+    count = 0
+    for text in lines:
+        try:
+            row = json.loads(text)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(row, dict) and row.get("event", "finished") in ("finished", "abandoned"):
+            count += 1
+    return count
+
+
 def main(argv: list[str]) -> int:
-    """python -m auditgym verify-journal PATH [--secret-file F]: exit 0 valid, 1 bad line,
-    2 nothing to verify (unsigned journal, no key, unreadable file)."""
+    """python -m auditgym verify-journal PATH [--secret-file F] [--expect-episodes N]: exit 0 valid,
+    1 failed (a bad line; with a key, an unsigned or empty journal; fewer than N episode lines),
+    2 nothing to verify (no key and an unsigned journal, a signed one without a key, unreadable file)."""
     import argparse
     import sys
 
@@ -137,6 +153,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("path")
     parser.add_argument("--secret-file", default=None,
                         help="the evaluator secret file (else the journal key or secret from the environment)")
+    parser.add_argument("--expect-episodes", type=int, default=None, metavar="N",
+                        help="fail (1) if the journal has fewer than N finished or abandoned episode lines: "
+                             "a chain cannot show lines cut from its end, the count can")
     arguments = parser.parse_args(argv)
     try:
         secret = read_secret(secret_file=arguments.secret_file)
@@ -155,4 +174,15 @@ def main(argv: list[str]) -> int:
         print(f"verify-journal: line {number}: {message}")
         return 1
     print(f"verify-journal: {message}")
+    if status == "unsigned" and key is not None:
+        # The verifier holds the key, so it expects a signed journal: an empty or unsigned file is a
+        # journal that was stripped or never written under it, which is a failure and not "nothing to check".
+        print("verify-journal: FAILED: a key is configured but the journal is empty or unsigned")
+        return 1
+    if arguments.expect_episodes is not None:
+        found = episode_rows(lines)
+        if found < arguments.expect_episodes:
+            print(f"verify-journal: FAILED: {found} episode lines, expected at least "
+                  f"{arguments.expect_episodes} (lines cut from the end?)")
+            return 1
     return 0 if status == "ok" else 2

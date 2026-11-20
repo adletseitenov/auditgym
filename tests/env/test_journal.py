@@ -27,11 +27,11 @@ def play(evaluator, seed, steps=1):
         "episode_id": observation["manifest"]["episode_id"], "findings": []}})
 
 
-def verify_cli(path, environ):
+def verify_cli(path, environ, *extra):
     out = io.StringIO()
     with mock.patch.dict(os.environ, {**CLEAN_ENV, **environ}), contextlib.redirect_stdout(out), \
             contextlib.redirect_stderr(out):
-        code = cli(["verify-journal", str(path)])
+        code = cli(["verify-journal", str(path), *extra])
     return code, out.getvalue()
 
 
@@ -99,6 +99,20 @@ class SignedJournalTest(unittest.TestCase):
     def test_cutting_the_tail_is_the_documented_blind_spot(self):
         self.assertEqual(self.check(self.lines[:3])[0], "ok")
 
+    def test_expect_episodes_catches_a_cut_tail(self):
+        env = {JOURNAL_KEY_ENV: KEY.decode()}
+        self.assertEqual(verify_cli(self.path, env, "--expect-episodes", "4")[0], 0)
+        self.path.write_text("\n".join(self.lines[:3]) + "\n", encoding="utf-8")
+        self.assertEqual(verify_cli(self.path, env)[0], 0)  # still a valid chain
+        code, text = verify_cli(self.path, env, "--expect-episodes", "4")
+        self.assertEqual(code, 1)
+        self.assertIn("expected at least 4", text)
+
+    def test_expect_episodes_counts_abandoned_rows_too(self):
+        events = [json.loads(line)["event"] for line in self.lines]
+        self.assertEqual(sorted(events), ["abandoned", "finished", "finished", "finished"])
+        self.assertEqual(verify_cli(self.path, {JOURNAL_KEY_ENV: KEY.decode()}, "--expect-episodes", "5")[0], 1)
+
 
 class ShapedRewardStaysOutOfEvalTest(unittest.TestCase):
     def test_eval_with_shaped_reward_and_a_signed_journal_has_no_shaped_key(self):
@@ -129,6 +143,41 @@ class UnsignedJournalTest(unittest.TestCase):
             code, text = verify_cli(path, {})
         self.assertEqual(code, 2)
         self.assertIn("not signed", text)
+
+
+class KeyedVerifierTest(unittest.TestCase):
+    """With a key the verifier expects a signed journal: nothing to check is a failure (1), not a skip (2)."""
+
+    def run_on(self, text, environ, *extra):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            path.write_text(text, encoding="utf-8")
+            return verify_cli(path, environ, *extra)
+
+    def test_an_empty_journal_fails_with_a_key_and_is_nothing_without_one(self):
+        code, text = self.run_on("", {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 1)
+        self.assertIn("FAILED", text)
+        self.assertEqual(self.run_on("", {})[0], 2)
+
+    def test_an_unsigned_journal_fails_with_a_key_and_is_nothing_without_one(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, CLEAN_ENV):
+            path = pathlib.Path(directory) / "results.jsonl"
+            play(Evaluator(mode="eval", results_path=path), 1)
+            unsigned = path.read_text(encoding="utf-8")
+        code, text = self.run_on(unsigned, {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 1)
+        self.assertIn("unsigned", text)
+        self.assertEqual(self.run_on(unsigned, {})[0], 2)
+
+    def test_a_secret_file_counts_as_a_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            secret = pathlib.Path(directory) / "secret"
+            secret.write_text("some-secret\n", encoding="utf-8")
+            self.assertEqual(self.run_on("", {SECRET_FILE_ENV: str(secret)})[0], 1)
+
+    def test_expect_episodes_without_a_key_still_fails_on_too_few_lines(self):
+        self.assertEqual(self.run_on("", {}, "--expect-episodes", "1")[0], 1)
 
 
 class ProcessJournalTest(unittest.TestCase):
