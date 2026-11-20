@@ -1,7 +1,7 @@
 # Результаты базовых политик
 
 Файл целиком пишет `python -m tools.report` (`make report`); руками числа не правим.
-Генератор 0.1.0, схема 1, конфигурация 1, Python 3.11.15. Все политики идут через процесс среды в режиме train.
+Генератор 0.1.0, схема 1, конфигурация 1, Python 3.14.6. Все политики идут через процесс среды в режиме train.
 
 ## Наборы
 
@@ -33,15 +33,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 7 |
-| solver_policy | 15 |
-| reconcile | 14 |
-| random_explorer | 9 |
-| silence | 7 |
-| flag_all | 14 |
-| flag_all_cutoff | 14 |
-| flag_all_duplicates | 15 |
-| heuristic | 14 |
+| oracle | 5 |
+| solver_policy | 11 |
+| reconcile | 10 |
+| random_explorer | 6 |
+| silence | 4 |
+| flag_all | 10 |
+| flag_all_cutoff | 10 |
+| flag_all_duplicates | 10 |
+| heuristic | 10 |
 
 ## Dev (episodes/dev)
 
@@ -61,15 +61,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 7 |
-| solver_policy | 14 |
-| reconcile | 13 |
-| random_explorer | 9 |
-| silence | 7 |
-| flag_all | 13 |
-| flag_all_cutoff | 13 |
-| flag_all_duplicates | 14 |
-| heuristic | 13 |
+| oracle | 4 |
+| solver_policy | 10 |
+| reconcile | 9 |
+| random_explorer | 6 |
+| silence | 4 |
+| flag_all | 9 |
+| flag_all_cutoff | 9 |
+| flag_all_duplicates | 9 |
+| heuristic | 9 |
 
 ## Генерированный набор (200 эпизодов)
 
@@ -89,15 +89,15 @@
 
 | Политика | Время, мс |
 |---|---:|
-| oracle | 27 |
-| solver_policy | 34 |
-| reconcile | 33 |
-| random_explorer | 28 |
-| silence | 27 |
-| flag_all | 34 |
-| flag_all_cutoff | 33 |
-| flag_all_duplicates | 34 |
-| heuristic | 33 |
+| oracle | 25 |
+| solver_policy | 33 |
+| reconcile | 41 |
+| random_explorer | 37 |
+| silence | 36 |
+| flag_all | 44 |
+| flag_all_cutoff | 43 |
+| flag_all_duplicates | 48 |
+| heuristic | 52 |
 
 ## Полнота по типам ошибок
 
@@ -146,7 +146,7 @@
 ## Генератор
 
 - Эпизодов с повторной попыткой (attempt > 0): 0 из 200 (0.0 %), всего повторов 0.
-- Время генерации: среднее 24.8 мс, максимум 47.4 мс.
+- Время генерации: среднее 22.8 мс, максимум 59.7 мс.
 
 ## Проверки порядка
 
@@ -156,4 +156,4 @@
 - Лучший вариант flag_all минус silence на книгах с ошибками: train +0.064, dev +0.052, generated +0.031. Молчание там на нижней границе −1, поэтому любое случайное попадание атаки чуть выше него; на чистых книгах атака получает −1, молчание +1.
 - Режим eval: политика видит награду 0.0 и пустой info, журнал оценщика равен награде train — да.
 
-Время прогона отчёта: 107.9 с.
+Время прогона отчёта: 133.7 с.
