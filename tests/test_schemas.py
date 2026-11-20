@@ -302,7 +302,7 @@ class TrajectoriesTest(Checker):
 
     def test_every_baseline_policy_plays_and_every_episode_ends_with_metrics(self):
         rows = [json.loads(line) for line in (ROOT / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()]
-        self.assertEqual({row["policy"] for row in rows}, {"random_explorer", "reconcile", "flag_all"})
+        self.assertEqual({row["policy"] for row in rows}, {"random_explorer", "reconcile", "flag_all", "solver_policy"})
         final = [row for row in rows if row["terminated"] or row["truncated"]]
         starts = [row for row in rows if row["step"] == 0]
         self.assertEqual(len(final), len(starts))
@@ -317,11 +317,27 @@ class TrajectoriesTest(Checker):
             self.assertAlmostEqual(row["reward"], max(-1.0, min(1.0, 2 * metrics["f1"] - 1 - 0.002 * (row["step"] - 1))),
                                    places=6, msg=row["episode_id"])
 
+    def test_the_solver_plays_all_twenty_books_and_scores_high(self):
+        rows = [json.loads(line) for line in (ROOT / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()]
+        solver = [row for row in rows if row["policy"] == "solver_policy"]
+        final = [row for row in solver if row["terminated"] or row["truncated"]]
+        self.assertEqual(len(final), 20)
+        self.assertEqual({row["split"] for row in final}, {"train", "dev"})
+        self.assertEqual(sum(row["split"] == "train" for row in final), 10)
+        self.assertEqual(len({row["episode_id"] for row in final}), 20)
+        self.assertTrue(all(row["metrics"]["f1"] == 1.0 for row in final))
+        self.assertTrue(all(row["reward"] > 0.9 for row in final))
+        self.assertTrue(all("split" in row and row["split"] in ("train", "dev") for row in rows))
+        self.assertLess((ROOT / "trajectories.jsonl").stat().st_size, 5_300_000)
+
     def test_the_row_schema_wants_policy_and_closed_metrics(self):
-        row = {"episode_id": "e", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+        row = {"episode_id": "e", "policy": "p", "split": "dev", "step": 0, "action": None, "observation": {}, "reward": 0.0,
                "terminated": False, "truncated": False}
         self.ok(row, "trajectory_row")
         self.bad({key: value for key, value in row.items() if key != "policy"}, "trajectory_row")
+        self.bad({key: value for key, value in row.items() if key != "split"}, "trajectory_row")
+        self.bad(dict(row, split="test"), "trajectory_row")
+        self.ok(dict(row, split="train"), "trajectory_row")
         self.bad(dict(row, metrics={"precision": 1.0, "recall": 1.0}), "trajectory_row")
         self.bad(dict(row, metrics={"precision": 1.0, "recall": 1.0, "f1": 1.0, "tp": 1}), "trajectory_row")
         self.ok(dict(row, metrics={"precision": 1.0, "recall": 1.0, "f1": 1.0}), "trajectory_row")

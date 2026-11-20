@@ -37,7 +37,7 @@ class TrajectoriesTest(unittest.TestCase):
 
     def test_exact_fields_and_steps(self):
         self.assertTrue(self.lines)
-        for line in self.lines:  # the seven case fields and the policy; `metrics` only on the last line
+        for line in self.lines:  # the seven case fields, the policy and the split; `metrics` only on the last line
             ended = line["terminated"] or line["truncated"]
             self.assertEqual(tuple(line), trajectories.FINAL_FIELDS if ended else FIELDS)
         starts = [line for line in self.lines if line["step"] == 0]
@@ -69,7 +69,7 @@ class TrajectoriesTest(unittest.TestCase):
                 Recorder(env, writer, OracleSubmitPolicy({}))
         with TrajectoryWriter(self.tmp / "w.jsonl") as writer:
             with self.assertRaises(TrajectoryError):
-                writer.write({"episode_id": "x", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+                writer.write({"episode_id": "x", "policy": "p", "split": "dev", "step": 0, "action": None, "observation": {}, "reward": 0.0,
                               "terminated": False, "truncated": False, "info": {}})
 
     def test_scan_finds_planted_truth(self):
@@ -119,7 +119,7 @@ class TrajectoriesTest(unittest.TestCase):
 
     def test_the_writer_refuses_lines_without_policy_or_with_open_metrics(self):
         with TrajectoryWriter(self.tmp / "strict.jsonl") as writer:
-            line = {"episode_id": "x", "policy": "p", "step": 0, "action": None, "observation": {}, "reward": 0.0,
+            line = {"episode_id": "x", "policy": "p", "split": "dev", "step": 0, "action": None, "observation": {}, "reward": 0.0,
                     "terminated": False, "truncated": False}
             writer.write(line)
             with self.assertRaises(TrajectoryError):
@@ -167,20 +167,26 @@ class TrajectoriesTest(unittest.TestCase):
         shutil.copytree(TINY, default / "ep_01")
         out = self.tmp / "nodefault" / "trajectories.jsonl"
         with mock.patch.object(trajectories, "DEFAULT_EPISODES", (default,)), \
-                mock.patch.object(trajectories, "DEFAULT_PICK", {"train": ("ep_01",)}), \
+                mock.patch.object(trajectories, "POLICY_PICK", {}), \
                 contextlib.redirect_stdout(io.StringIO()):
             code = trajectories.main(["--out", str(out), "--policies", "solver"])
         self.assertEqual(code, 0)
         lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
         self.assertEqual({line["episode_id"] for line in lines}, {"ep_tiny0001"})
+        self.assertEqual({line["split"] for line in lines}, {"train"})
 
     def test_the_default_points_at_the_train_episodes_of_the_repository(self):
         self.assertEqual(trajectories.DEFAULT_EPISODES, (trajectories.ROOT / "episodes" / "train",
                                                          trajectories.ROOT / "episodes" / "dev"))
         for root in trajectories.DEFAULT_EPISODES:
             self.assertTrue((root / "ep_01" / "public").is_dir())
-            for name in trajectories.DEFAULT_PICK[root.name]:
-                self.assertTrue((root / name / "public").is_dir(), name)
+        for policy, picks in trajectories.POLICY_PICK.items():
+            self.assertIn(policy, trajectories.DEFAULT_POLICIES)
+            for split, names in picks.items():
+                for name in names:
+                    self.assertTrue((trajectories.ROOT / "episodes" / split / name / "public").is_dir(), name)
+        self.assertIn("solver_policy", trajectories.DEFAULT_POLICIES)
+        self.assertNotIn("solver_policy", trajectories.POLICY_PICK)  # the honest solver plays every book
         self.assertEqual(trajectories.DEFAULT_OUT, "trajectories.jsonl")
 
     def test_command_line_without_arguments_runs_in_another_directory(self):
@@ -196,7 +202,33 @@ class TrajectoriesTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         lines = (elsewhere / "trajectories.jsonl").read_text(encoding="utf-8").splitlines()
         episodes = {json.loads(line)["episode_id"] for line in lines}
-        self.assertEqual(len(episodes), sum(len(names) for names in trajectories.DEFAULT_PICK.values()))
+        self.assertEqual(len(episodes), 20)
+        self.assertEqual({json.loads(line)["split"] for line in lines}, {"train", "dev"})
+
+    def test_every_line_has_a_split_and_the_scan_catches_a_bad_or_changing_one(self):
+        self.assertEqual({line["split"] for line in self.lines}, {"train"})  # --seeds: the default label
+        line = next(l for l in self.lines if l["step"] == 1)
+        self.assertTrue(self._scan_lines([dict(line, split="test")]))
+        self.assertTrue(self._scan_lines([{key: value for key, value in line.items() if key != "split"}]))
+        self.assertTrue(any("two splits" in p for p in self._scan_lines([line, dict(line, split="dev", step=2)])))
+        with Env() as env, TrajectoryWriter(self.tmp / "badsplit.jsonl") as writer:
+            with self.assertRaises(TrajectoryError):
+                Recorder(env, writer, SolverPolicy(), split="test")
+
+    def test_split_comes_from_the_directory_and_restrict_limits_a_policy(self):
+        from tests.env.helpers import TINY
+
+        root = self.tmp / "sets"
+        for split in ("train", "dev"):
+            shutil.copytree(TINY, root / split / "ep_01")
+        out = self.tmp / "splits" / "t.jsonl"
+        record(out, episodes_dir=[root / "train", root / "dev"], policies=("solver", "random"),
+               restrict={"random": {"dev/ep_01"}})
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+        played = {(line["policy"], line["split"]) for line in lines}
+        self.assertEqual(played, {("solver", "train"), ("solver", "dev"), ("random", "dev")})
+        record(out, episodes_dir=root / "dev", policies=("solver",), split="train")  # dev wins over the label
+        self.assertEqual({json.loads(l)["split"] for l in out.read_text(encoding="utf-8").splitlines()}, {"dev"})
 
 
 if __name__ == "__main__":

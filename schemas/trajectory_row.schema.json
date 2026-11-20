@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "One line of trajectories.jsonl",
-  "description": "episode_id, policy, step, action, observation, reward, terminated, truncated; the last line of an episode of a train-mode run also has metrics {precision, recall, f1}. The observation validates against the observation-* schema of its type (step 0 is the reset observation).",
+  "description": "episode_id, policy, split, step, action, observation, reward, terminated, truncated; the last line of an episode of a train-mode run also has metrics {precision, recall, f1}. The observation validates against the observation-* schema of its type (step 0 is the reset observation).",
   "type": "object",
   "properties": {
     "episode_id": {
@@ -10,6 +10,13 @@
     "policy": {
       "type": "string",
       "description": "name of the policy that played the episode (policies/ or tools.trajectories)"
+    },
+    "split": {
+      "enum": [
+        "train",
+        "dev"
+      ],
+      "description": "the open split the episode comes from (episodes/train or episodes/dev)"
     },
     "step": {
       "type": "integer",
@@ -65,6 +72,7 @@
   "required": [
     "episode_id",
     "policy",
+    "split",
     "step",
     "action",
     "observation",

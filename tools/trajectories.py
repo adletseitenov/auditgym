@@ -4,14 +4,19 @@ terminated, truncated; «В наблюдениях обучающих траек
     python -m tools.trajectories [--out trajectories.jsonl] [--episodes DIR | --seeds 1 2 3]
                                  [--config JSON] [--policies random_explorer,reconcile,flag_all,oracle]
                                  [--policy module:Class ...] [--oracle-out PATH] [--mode train|eval]
+                                 [--split train|dev] [--all-episodes]
 
-With no arguments it records the four baseline policies (random_explorer, reconcile, flag_all,
-oracle; `policies/`) on the shipped train and dev episodes (`episodes/train`, `episodes/dev`) into
-`trajectories.jsonl` (`make trajectories`); the oracle goes to `trajectories.oracle.jsonl`. The output directory is
-created when it does not exist.
+With no arguments it records random_explorer, reconcile, flag_all, solver_policy and the oracle
+(`policies/`) on the shipped train and dev episodes (`episodes/train`, `episodes/dev`) into
+`trajectories.jsonl` (`make trajectories`); the oracle goes to `trajectories.oracle.jsonl`. The
+output directory is created when it does not exist. The successful policy (solver_policy, which reads
+only what the environment shows) plays all 20 episodes; the failing readers (reconcile, flag_all) play
+the books of DEFAULT_PICK only, so the file stays about 5 MB.
 
-Each line has the case fields plus `policy` (the name of the policy that played the episode), in
-this order: episode_id, policy, step, action, observation, reward, terminated, truncated. The last
+Each line has the case fields plus `policy` (the name of the policy that played the episode) and
+`split` (train or dev: the directory the episode came from; `--split` names it for episodes from
+elsewhere), in this order: episode_id, policy, split, step, action, observation, reward, terminated,
+truncated. The last
 line of an episode (terminated or truncated) also carries `metrics` {precision, recall, f1}, taken
 from the terminal info of a train-mode run (an eval-mode run has no metrics to give, so the key is
 absent). Step 0 is the reset: action null, reward 0.0, both flags false. Nothing else of `info`
@@ -20,7 +25,7 @@ is written.
 For other engineers' policies: wrap the Env in a Recorder and drive it as usual.
 
     with Env() as env, TrajectoryWriter("trajectories.jsonl") as writer:
-        recorder = Recorder(env, writer, policy)
+        recorder = Recorder(env, writer, policy, split=where)
         observation, info = recorder.reset(seed, config)
         observation, reward, terminated, truncated, info = recorder.step(action)
 
@@ -47,19 +52,22 @@ import sys
 
 from auditgym.rng import Rng
 
-FIELDS = ("episode_id", "policy", "step", "action", "observation", "reward", "terminated", "truncated")
+FIELDS = ("episode_id", "policy", "split", "step", "action", "observation", "reward", "terminated", "truncated")
 FINAL_FIELDS = FIELDS + ("metrics",)  # the last line of an episode of a train-mode run
 METRIC_KEYS = ("precision", "recall", "f1")
 BASELINES = ("random_explorer", "reconcile", "flag_all", "oracle")
+DEFAULT_POLICIES = ("random_explorer", "reconcile", "flag_all", "solver_policy", "oracle")
 TABLES = ("ledger", "invoices", "payments", "fx")
+SPLITS = ("train", "dev")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_EPISODES = (ROOT / "episodes" / "train", ROOT / "episodes" / "dev")
-# The three reading baselines page every table, about 0.4 MB per episode and policy, so all 20
-# episodes would not fit the size we keep for the file (about 5 MB). The default takes six books
-# of each split: every error type, both interactions, and clean books; the two biggest books of
-# each split (ep_10 and the largest mixed ones) are left out. `--all-episodes` records everything.
-DEFAULT_PICK = {"train": ("ep_01", "ep_04", "ep_05", "ep_06", "ep_07", "ep_08"),
-                "dev": ("ep_02", "ep_03", "ep_05", "ep_06", "ep_08", "ep_09")}
+# Every reading policy pages every table, about 0.2 MB per episode, so 20 episodes of one policy are
+# 4 MB and several would not fit the size we keep for the file (about 5 MB). The honest solver plays all
+# 20 books; random_explorer is cheap (0.6 MB for all 20) and plays all too; the failing readers
+# (reconcile, flag_all) play two dev books, one with errors and one clean (the smallest of each kind), and the
+# oracle (its own private file) plays everything. `--all-episodes` records every policy on every episode.
+POLICY_PICK = {"reconcile": {"dev": ("ep_05", "ep_09")},
+               "flag_all": {"dev": ("ep_05", "ep_09")}}
 DEFAULT_OUT = "trajectories.jsonl"
 
 
@@ -104,17 +112,21 @@ class TrajectoryWriter:
 class Recorder:
     """An Env with the same reset/step API that writes every transition (never `info`)."""
 
-    def __init__(self, env, writer: TrajectoryWriter, policy=None) -> None:
+    def __init__(self, env, writer: TrajectoryWriter, policy=None, split: str = "train") -> None:
         if policy is not None and is_privileged(policy) and not writer.privileged:
             raise TrajectoryError("a privileged policy must write to a separate oracle file")
+        if split not in SPLITS:
+            raise TrajectoryError(f"split must be one of {SPLITS}")
         self.env = env
         self.writer = writer
+        self.split = split
         self.policy_name = str(getattr(policy, "name", None) or type(policy).__name__)
         self.episode_id = None
         self.step_number = 0
 
     def _write(self, action, observation, reward, terminated, truncated, info=None) -> None:
-        line = {"episode_id": self.episode_id, "policy": self.policy_name, "step": self.step_number,
+        line = {"episode_id": self.episode_id, "policy": self.policy_name, "split": self.split,
+                "step": self.step_number,
                 "action": action, "observation": observation, "reward": reward, "terminated": terminated,
                 "truncated": truncated}
         if (terminated or truncated) and info and all(key in info for key in METRIC_KEYS):
@@ -283,6 +295,7 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
     words = ("truth", "provenance", "pre_ledger", "pre_invoices", "pre_payments", "id_map", "evidence_sets",
              "expected_amount", "issue_id", "generator_version", "surface_seed", "traceback")
     expected_step: dict[tuple, int] = {}
+    splits: dict[str, str] = {}
     seen: dict[tuple, set] = {}
     for number, raw in enumerate(pathlib.Path(path).read_text(encoding="utf-8").splitlines(), 1):
         where = f"line {number}"
@@ -301,6 +314,10 @@ def scan_file(path, episodes: dict, paths: tuple = (), training: bool = True) ->
             problems.append(f"{where}: metrics on a line that does not end an episode")
         if "metrics" in line and (not isinstance(line["metrics"], dict) or tuple(line["metrics"]) != METRIC_KEYS):
             problems.append(f"{where}: metrics shape")
+        if line["split"] not in SPLITS:
+            problems.append(f"{where}: split {line['split']!r}")
+        elif splits.setdefault(episode_id, line["split"]) != line["split"]:
+            problems.append(f"{where}: one episode in two splits")
         run = (episode_id, line["policy"])  # one policy plays one episode at a time
         if step != expected_step.get(run, 0) and step != 0:
             problems.append(f"{where}: step {step} out of order")
@@ -380,10 +397,18 @@ def _builtin(name: str, episode: dict):
     return make_policy(name, truth=episode["private"]["truth"] if name == "oracle" else None)
 
 
+def _split_of(path, default: str) -> str:
+    """train or dev when the episode directory sits in episodes/train or episodes/dev, else `default`."""
+    parent = pathlib.Path(path).resolve().parent.name
+    return parent if parent in SPLITS else default
+
+
 def record(out, *, seeds=(), episodes_dir=None, config=None, policies=BASELINES, external=(),
-           oracle_out=None, mode: str = "train") -> dict:
+           oracle_out=None, mode: str = "train", split: str = "train", restrict=None) -> dict:
     """Record every policy on every episode. `episodes_dir` is one directory or a list of them
-    (each holds episode directories or is one). Returns {"train": path, "oracle": path or None,
+    (each holds episode directories or is one). The split of an episode is its parent directory when that is
+    `train` or `dev`, else `split`. `restrict` maps a policy name to the set of episode directories
+    (`<split>/<name>`, as in POLICY_PICK) it plays; a policy not in it plays everything. Returns {"train": path, "oracle": path or None,
     "episodes": {...}}."""
     from auditgym import Env
     from auditgym.generate import generate
@@ -401,7 +426,14 @@ def record(out, *, seeds=(), episodes_dir=None, config=None, policies=BASELINES,
         for kind, source in sources:
             episode = generate(source, config) if kind == "seed" else load_episode(source)
             episodes[episode["public"]["manifest"]["episode_id"]] = episode
-            named = [(name, _builtin(name, episode)) for name in policies]
+            where = _split_of(source, split) if kind == "dir" else split
+            if kind == "dir":
+                label = f"{where}/{pathlib.Path(source).name}"
+                playing = [name for name in policies if restrict is None or name not in restrict
+                           or label in restrict[name]]
+            else:
+                playing = list(policies)
+            named = [(name, _builtin(name, episode)) for name in playing]
             named += [(spec, _load_policy(spec)) for spec in external]
             for name, policy in named:
                 privileged = is_privileged(policy)
@@ -410,7 +442,7 @@ def record(out, *, seeds=(), episodes_dir=None, config=None, policies=BASELINES,
                 writer = writers["oracle" if privileged else "train"]
                 env = Env(mode=mode) if kind == "seed" else Env.from_files(source, mode=mode)
                 with env:
-                    recorder = Recorder(env, writer, policy)
+                    recorder = Recorder(env, writer, policy, split=where)
                     run_policy(recorder, policy, source if kind == "seed" else None, config if kind == "seed" else None)
     finally:
         for writer in writers.values():
@@ -426,25 +458,28 @@ def main(argv: list[str] | None = None) -> int:
                         help="episode directories (default: DEFAULT_PICK of episodes/train and episodes/dev)")
     source.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--config", default=None, help="JSON config for --seeds")
-    parser.add_argument("--policies", default=",".join(BASELINES),
+    parser.add_argument("--policies", default=",".join(DEFAULT_POLICIES),
                         help="random, solver or a name of policies.runner.NAMES")
     parser.add_argument("--policy", action="append", default=[], help="module:Class with act(observation)")
     parser.add_argument("--oracle-out", default=None)
     parser.add_argument("--all-episodes", action="store_true",
-                        help="with the default directories: every episode, not DEFAULT_PICK")
+                        help="with the default directories: every policy on every episode, not POLICY_PICK")
+    parser.add_argument("--split", choices=SPLITS, default="train",
+                        help="split label for episodes that are not in a train/ or dev/ directory (and for --seeds)")
     parser.add_argument("--mode", choices=("train", "eval"), default="train")
     arguments = parser.parse_args(argv)
+    restrict = None
     if arguments.episodes is None and not arguments.seeds:
         arguments.episodes = [str(path) for path in DEFAULT_EPISODES]
         if not arguments.all_episodes:
-            arguments.episodes = [str(path / name) for path in DEFAULT_EPISODES
-                                  for name in DEFAULT_PICK.get(path.name, ())]
+            restrict = {name: {f"{part}/{book}" for part, books in picks.items() for book in books}
+                        for name, picks in POLICY_PICK.items()}
     policies = tuple(p for p in arguments.policies.split(",") if p)
     config = json.loads(arguments.config) if arguments.config else None
     try:
         written = record(arguments.out, seeds=arguments.seeds or (), episodes_dir=arguments.episodes, config=config,
                          policies=policies, external=arguments.policy, oracle_out=arguments.oracle_out,
-                         mode=arguments.mode)
+                         mode=arguments.mode, split=arguments.split, restrict=restrict)
     except TrajectoryError as exc:
         print(f"trajectories: {exc}", file=sys.stderr)
         return 2
