@@ -7,6 +7,8 @@ derived from the evaluator secret) every line gets three more keys:
     prev   the `mac` of the line before it ("0" * 64 for the first line of the file)
     mac    HMAC-SHA256(key, the line without `mac` as canonical JSON), hex
 
+Every line also says `secret`: "set" or "none" (never the value), and the mac covers it.
+
 Before each write the evaluator reads the tail of the file and continues the chain from its last
 line, so sessions that append to one journal one after another form one chain. `python -m
 auditgym verify-journal PATH` checks every signature and link and names the first bad line: an
@@ -79,6 +81,20 @@ def seal(key: bytes, line: dict, tail: bytes) -> dict:
     return sealed
 
 
+def secret_summary(rows: list[dict]) -> str:
+    """How many lines say the evaluator had a generation secret: `secret: set 3, none 0, not recorded 1`.
+    Lines of journals written before the flag existed count as not recorded."""
+    counts = {"set": 0, "none": 0}
+    unknown = 0
+    for row in rows:
+        flag = row.get("secret")
+        if flag in counts:
+            counts[flag] += 1
+        else:
+            unknown += 1
+    return f"secret: set {counts['set']}, none {counts['none']}, not recorded {unknown}"
+
+
 def verify_lines(lines: list[str], key: bytes | None) -> tuple[str, int | None, str]:
     """Check a journal. Returns (status, line number or None, message):
     "ok" | "bad" (line number of the first bad line) | "unsigned" | "no_key"."""
@@ -106,7 +122,7 @@ def verify_lines(lines: list[str], key: bytes | None) -> tuple[str, int | None, 
             return "bad", number, "broken chain (a line before it was removed, inserted or reordered)"
         prev, seq = row["mac"], seq + 1
     return "ok", None, (f"journal OK: {len(parsed)} signed lines, chain intact "
-                        f"(lines cut from the end of the file cannot be detected)")
+                        f"(lines cut from the end of the file cannot be detected); {secret_summary(parsed)}")
 
 
 def main(argv: list[str]) -> int:

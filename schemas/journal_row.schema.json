@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "One line of the evaluator's journal (runs/results.jsonl)",
-  "description": "Written in eval mode: one line per finished episode (event 'finished', or no event in journals written before it existed) and one per episode replaced by reset/load while running (event 'abandoned': no reward, the steps it spent). An episode still running when the input ends or a close arrives is a truncated 'finished' row with ended_by 'close'. episode_run counts the rows of the same episode_id in one evaluator session (1 for the first; a replayed seed shows as 2, 3, ...). With a journal key every line also carries seq, prev and mac (HMAC-SHA256 chain, auditgym/journal.py).",
+  "description": "Written in eval mode: one line per finished episode (event 'finished', or no event in journals written before it existed) and one per episode replaced by reset/load while running (event 'abandoned': no reward, the steps it spent). An episode still running when the input ends or a close arrives is a truncated 'finished' row with ended_by 'close'. episode_run counts the rows of the same episode_id in one evaluator session (1 for the first; a replayed seed shows as 2, 3, ...). With a journal key every line also carries seq, prev and mac (HMAC-SHA256 chain, auditgym/journal.py). `secret` is \"set\" when the evaluator had a generation secret and \"none\" when it had not (the value is never written); absent in older journals.",
   "type": "object",
   "properties": {
     "episode_id": {
@@ -63,6 +63,13 @@
       "minimum": 0,
       "maximum": 100,
       "description": "Every step taken, the submit included; inspection_steps counts the actions before the submit only. Absent in journals written before this field existed."
+    },
+    "secret": {
+      "type": "string",
+      "enum": [
+        "set",
+        "none"
+      ]
     },
     "reward": {
       "type": [

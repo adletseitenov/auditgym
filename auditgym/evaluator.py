@@ -407,6 +407,9 @@ class Evaluator:
         episode_id = line["episode_id"]
         self._episode_runs[episode_id] = self._episode_runs.get(episode_id, 0) + 1
         line["episode_run"] = self._episode_runs[episode_id]
+        # Whether a generation secret was set (never its value): a journal of episodes that anyone
+        # can regenerate from the seed says so on every line, and the signature covers it.
+        line["secret"] = "set" if self._secret else "none"
         if self._journal_key is not None:
             from .journal import seal
 

@@ -121,5 +121,51 @@ class SubmitFormTest(unittest.TestCase):
         self.assertEqual(results[0][1], 1.0)
 
 
+class SecretFlagTest(unittest.TestCase):
+    def rows(self, secret, key=b"k" * 32):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path, clock=FakeClock(), journal_key=key,
+                                  secret=secret)
+            evaluator.load(TINY)
+            evaluator.step({"action": "submit", "findings": {"episode_id": "x", "findings": []}})
+            evaluator.reset(5, {})
+            evaluator.step({"action": "calculator", "expression": "1"})
+            evaluator.reset(6, {})  # an abandoned row
+            return path.read_text(encoding="utf-8").splitlines()
+
+    def test_every_row_says_whether_a_secret_was_set_and_never_its_value(self):
+        for secret, flag in (("evaluator-only-secret", "set"), ("", "none")):
+            lines = self.rows(secret)
+            self.assertEqual(len(lines), 2)
+            for line in lines:
+                row = json.loads(line)
+                self.assertEqual(row["secret"], flag)
+                self.assertEqual(validate(row, load_schema("journal_row")), [], row)
+                if secret:
+                    self.assertNotIn(secret, line)
+
+    def test_the_signature_covers_the_flag(self):
+        from auditgym.journal import verify_lines
+
+        key = b"k" * 32
+        lines = self.rows("", key)
+        self.assertEqual(verify_lines(lines, key)[0], "ok")
+        row = json.loads(lines[0])
+        row["secret"] = "set"
+        forged = [json.dumps(row, sort_keys=True)] + lines[1:]
+        self.assertEqual(verify_lines(forged, key)[:2], ("bad", 1))
+
+    def test_verify_journal_prints_the_flag_counts(self):
+        from auditgym.journal import verify_lines
+
+        key = b"k" * 32
+        status, _, message = verify_lines(self.rows("evaluator-only-secret", key), key)
+        self.assertEqual(status, "ok")
+        self.assertIn("secret: set 2, none 0, not recorded 0", message)
+        status, _, message = verify_lines(self.rows("", key), key)
+        self.assertIn("secret: set 0, none 2, not recorded 0", message)
+
+
 if __name__ == "__main__":
     unittest.main()
