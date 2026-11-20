@@ -75,6 +75,24 @@ class SubmitFormsTest(unittest.TestCase):
             _, reward, terminated, _, _ = tiny().step(action)
             self.assertEqual((reward, terminated), (-1.0, True), action)
 
+    def test_bare_list_is_the_current_episode_but_an_object_without_episode_id_is_minus_one(self):
+        """Documented in CONTRACTS §5.2 and README: [..] is findings of this episode (also []); an object
+        without `episode_id` is a message missing a required field (CASE: invalid structure, -1)."""
+        bare = tiny().step({"action": "submit", "findings": self.FINDINGS})
+        documented = tiny().step({"action": "submit", "findings": CORRECT_TINY})
+        self.assertEqual((bare[1], bare[2]), (documented[1], documented[2]))
+        self.assertGreater(bare[1], 0.9)
+        no_id = tiny().step({"action": "submit", "findings": {"findings": self.FINDINGS}})
+        self.assertEqual((no_id[1], no_id[2]), (-1.0, True))
+        for answer, reward in (([], 1.0), ({"findings": []}, -1.0)):  # clean books: silence vs a broken message
+            clean = Evaluator(clock=FakeClock())
+            clean.reset(3, {"errors": {}})
+            self.assertEqual(clean.step({"action": "submit", "findings": answer})[1], reward, answer)
+        with Env.from_files(TINY) as env:  # the same through the process
+            self.assertGreater(env.step({"action": "submit", "findings": self.FINDINGS})[1], 0.9)
+            env.reset()
+            self.assertEqual(env.step({"action": "submit", "findings": {"findings": self.FINDINGS}})[1], -1.0)
+
     def test_broken_forms_are_invalid_structure(self):
         for findings in ("not json", "[1, 2", 7, True, {"episode_id": "ep_tiny0001"}, [5],
                          json.dumps({"episode_id": "ep_tiny0001", "findings": "[oops"})):

@@ -86,6 +86,8 @@ printf '%s\n' '{"op":"reset","seed":7,"config":{"errors":{"duplicate_invoice":1}
 
 Действия: `list_records(table, cursor, limit ≤ 50)`, `get_record(table, id)`, `get_document(doc_id)`, `calculator(expression)`, `submit(findings)`; таблицы `ledger`, `invoices`, `payments`, `fx`. Схемы — `schemas/`, полный договор — `docs/CONTRACTS.md`.
 
+Формат ответа в `submit`: сообщение `{"episode_id": ..., "findings": [...]}`. Голый список выводов `[...]` (в том числе пустой `[]`) принимается как выводы текущего эпизода. Объект без `episode_id` (например `{"findings": [...]}`) — не голый список, а сообщение без обязательного поля: неверная структура, награда −1 (CASE: неверная структура выводов).
+
 ## Конфигурация
 
 Все ключи необязательны, неизвестный ключ — ошибка `unknown_key`; схема — `schemas/config.schema.json`, проверки — `auditgym/config.py`.
