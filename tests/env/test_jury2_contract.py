@@ -7,6 +7,7 @@ import unittest
 
 from auditgym.evaluator import Evaluator
 from tests.env.helpers import TINY, FakeClock
+from tests.env.test_evaluator import CORRECT_TINY
 from tools.schema_lite import load_schema, validate
 
 
@@ -100,6 +101,24 @@ class LimitClampTest(unittest.TestCase):
 
     def test_the_clamp_does_not_change_the_page(self):
         self.assertEqual(self.page(limit=500)["records"], self.page(limit=50)["records"])
+
+
+class SubmitFormTest(unittest.TestCase):
+    def test_task_text_states_both_submit_forms(self):
+        text = task_text()
+        self.assertIn("объект {episode_id, findings}", text)
+        self.assertIn("голый список findings принимается как findings текущего эпизода", text)
+
+    def test_what_the_text_says_is_what_happens(self):
+        results = []
+        for findings in (CORRECT_TINY, CORRECT_TINY["findings"]):
+            evaluator = Evaluator(clock=FakeClock())
+            evaluator.load(TINY)
+            _, reward, terminated, _, info = evaluator.step({"action": "submit", "findings": findings})
+            self.assertTrue(terminated)
+            results.append((reward, info["f1"]))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0][1], 1.0)
 
 
 if __name__ == "__main__":

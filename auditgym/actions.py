@@ -300,7 +300,8 @@ TASK_TEXT = (
     f"не позже {MAX_STEPS}-го. Если {MAX_STEPS} шагов прошли без submit, эпизод обрезается "
     "и ответ считается пустым. В награду входит inspection_steps — число действий до submit; "
     "сам submit в него не считается (в журнале есть и steps_total — все шаги с submit). Ответ — findings по схеме, "
-    "episode_id из manifest; ложные выводы снижают награду."
+    "episode_id из manifest; submit принимает findings как объект {episode_id, findings}, "
+    "а голый список findings принимается как findings текущего эпизода; ложные выводы снижают награду."
 )
 
 

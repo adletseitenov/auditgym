@@ -194,7 +194,7 @@ observation, info = env.reset(seed=7, options={})   # options — синоним
 {"type": "error", "error": {"code": "unknown_id", "message": "Unknown id."}, "steps_remaining": 95}
 {"type": "final", "steps_remaining": 94}
 ```
-`next_cursor` равен `null` на последней странице. `task` содержит: текст задачи, перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски. Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
+`next_cursor` равен `null` на последней странице. `task` содержит: текст задачи (в нём же: `inspection_steps` не считает `submit`, граница `limit`, формы `submit` — объект `{episode_id, findings}` и голый список как findings текущего эпизода), перечень типов ошибок, схему findings, лимиты (30, 10, 1 000, 100 шагов), допуски. Больше в наблюдениях нет ничего: ни времени, ни seed, ни конфигурации, ни счётчиков сверх manifest.
 
 Коды ошибок (тексты фиксированные): `unknown_action`, `unknown_table`, `unknown_id`, `bad_cursor`, `bad_arguments`, `bad_expression`, `episode_over`, `not_reset`. Любая ошибка, кроме двух последних, расходует шаг.
 
