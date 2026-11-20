@@ -104,7 +104,7 @@ class CleanCompanyTest(unittest.TestCase):
 
     def test_largest_config_is_fast(self):
         config = {"size": {"invoices": [200, 200], "background_pairs": [430, 430]}, "currencies": ["USD", "EUR", "CNY"],
-                  "errors": {"duplicate_invoice": 6, "allocation_gap": 6, "fx_error": 6, "period_cutoff": 5},
+                  "errors": {"duplicate_invoice": 3, "allocation_gap": 3, "fx_error": 2, "period_cutoff": 2},
                   "interaction": "I1", "period": {"start": "2026-12-01", "months": 3}}
         started = time.perf_counter()
         episode = generate(4, config)

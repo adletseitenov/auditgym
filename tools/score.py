@@ -308,7 +308,8 @@ def main(argv: list[str]) -> int:
     allow_todo = "--allow-todo" in argv  # "--strict" is accepted and means the default
     MISSING_MODULES.clear()
     _load_zone_checks()
-    total = 0.0
+    checks_passed = 0
+    checks_total = 0
     failed_real = 0
     not_passed = 0
     print(f"{'Критерий':<34}{'Пройдено':>10}{'Баллы':>12}")
@@ -327,9 +328,11 @@ def main(argv: list[str]) -> int:
             details.append(f"  [{'TODO' if pending else 'FAIL'}] {name}: {check_name}"
                            + ("" if message == "TODO" else f" -- {message}"))
         earned = points * passed / len(checks)
-        total += earned
+        checks_passed += passed
+        checks_total += len(checks)
         print(f"{name:<34}{passed:>6}/{len(checks):<3}{earned:>8.1f}/{points:g}")
-    print(f"{'ИТОГО':<34}{'':>10}{total:>8.1f}/100")
+    percent = 100 * checks_passed / checks_total if checks_total else 0.0
+    print(f"Внутренние проверки (не оценка жюри): пройдено {checks_passed}/{checks_total} ({percent:.1f} %)")
     for module_name in MISSING_MODULES:
         details.append(f"  [MISSING] check module {module_name} does not exist")
     if details:

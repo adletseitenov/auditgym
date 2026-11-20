@@ -59,7 +59,7 @@ class ConfigTest(unittest.TestCase):
             "bad_distractors": {"distractors": 1},
             "bad_surface_seed": {"surface_seed": "7"},
             "needs_foreign_currency": {"currencies": [], "errors": {"fx_error": 1}},
-            "too_many_errors": {"errors": {"fx_error": 31}},
+            "too_many_errors": {"errors": {"fx_error": 13}},
             "too_dense": {"size": {"invoices": [40, 60]}, "errors": {"duplicate_invoice": 12}},
             "too_large": {"size": {"invoices": [200, 200], "background_pairs": [900, 900]}},
         }
@@ -185,7 +185,7 @@ class LimitBoundaryTest(unittest.TestCase):
         self.assertEqual(verify_module.MAX_LEDGER_ROWS, limits.MAX_LEDGER_ROWS)
         self.assertEqual(verify_module.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
         self.assertEqual(solver.MAX_EVIDENCE, limits.MAX_EVIDENCE_IDS)
-        self.assertEqual(config.MAX_FINDINGS, limits.MAX_FINDINGS)
+        self.assertEqual(config.MAX_ISSUES, limits.MAX_ISSUES)
 
     def test_ledger_rows(self):
         at = {"errors": {}, "size": {"invoices": [10, 10], "background_pairs": [975, 980]}}
@@ -199,10 +199,10 @@ class LimitBoundaryTest(unittest.TestCase):
         self.assertEqual(full_read_pages(2000, 250, 500), limits.MAX_PAGES)
         self.assertEqual(full_read_pages(2000, 250, 501), limits.MAX_PAGES + 1)
         # The largest accepted config still reads in at most MAX_PAGES pages.
-        worst = normalize_config({"errors": {"duplicate_invoice": 25}, "currencies": ["USD", "EUR", "CNY"],
+        worst = normalize_config({"errors": {"duplicate_invoice": 12}, "currencies": ["USD", "EUR", "CNY"],
                                   "size": {"invoices": [200, 200], "background_pairs": [0, 1000]},
                                   "period": {"start": "2026-10-01", "months": 3}})
-        documents = worst["size"]["invoices"][1] + 25
+        documents = worst["size"]["invoices"][1] + 12
         self.assertLessEqual(full_read_pages(limits.MAX_LEDGER_ROWS, documents, 3 * (31 * 3 + 10)), limits.MAX_PAGES)
 
     def test_months(self):
@@ -213,12 +213,14 @@ class LimitBoundaryTest(unittest.TestCase):
     def test_density(self):
         self.assertIsNone(self.code({"size": {"invoices": [32, 40]}, "errors": ALL_ONE}))
         self.assertEqual(self.code({"size": {"invoices": [31, 40]}, "errors": ALL_ONE}), "too_dense")
-        self.assertIsNone(self.code({"size": {"invoices": [200, 200]}, "errors": {"duplicate_invoice": 25}}))
-        self.assertEqual(self.code({"size": {"invoices": [200, 200]}, "errors": {"duplicate_invoice": 26}}), "too_dense")
+        self.assertIsNone(self.code({"size": {"invoices": [96, 96]}, "errors": {"duplicate_invoice": 12}}))
+        self.assertEqual(self.code({"size": {"invoices": [95, 95]}, "errors": {"duplicate_invoice": 12}}), "too_dense")
 
     def test_findings(self):
-        self.assertEqual(self.code({"errors": {"duplicate_invoice": limits.MAX_FINDINGS + 1}}), "too_many_errors")
-        self.assertNotEqual(self.code({"errors": {"duplicate_invoice": limits.MAX_FINDINGS}}), "too_many_errors")
+        self.assertEqual(self.code({"errors": {"duplicate_invoice": limits.MAX_ISSUES + 1}}), "too_many_errors")
+        self.assertIsNone(self.code({"errors": {"duplicate_invoice": limits.MAX_ISSUES}}))
+        self.assertIsNone(self.code({"interaction": "I2", "errors": {"duplicate_invoice": 10}}))
+        self.assertEqual(self.code({"interaction": "I2", "errors": {"duplicate_invoice": 11}}), "too_many_errors")
 
     def test_size_bounds(self):
         for name, (low, high) in (("invoices", (limits.MIN_INVOICES, limits.MAX_INVOICES)),

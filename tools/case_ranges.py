@@ -13,9 +13,10 @@ Checked: the default config (reset without config, reset with {}), the 20 shippe
 (configs/episodes.json) and every level (configs/levels.json), each over SEEDS seeds. Prints a table
 and PASS or FAIL per row; exit code 1 on any FAIL.
 
-An arbitrary config is NOT limited to these ranges: config.py allows up to 2 000 postings, 200 invoices
-(plus payments) and 30 issues, and the jury may pass its own configs. Leaving the case ranges is
-deliberate for a caller, and never happens by default, in an episode or in a level we ship.
+The number of issues IS limited: config.py refuses a config whose total (errors plus 2 for I1/I2) is above
+12 (limits.MAX_ISSUES, bad_config). Sizes are not: config.py allows up to 2 000 postings and 200 invoices
+(plus payments), and the jury may pass its own configs. Leaving the size ranges is deliberate for a
+caller, and never happens by default, in an episode or in a level we ship.
 """
 from __future__ import annotations
 

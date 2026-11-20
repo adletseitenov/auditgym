@@ -54,9 +54,10 @@ class ConfigSchemaTest(unittest.TestCase):
                 normalize_config({"surface_seed": value})
         self.assertEqual(validate({"errors": {"fx_error": 25}}, schema), [])
         self.assertNotEqual(validate({"errors": {"fx_error": 26}}, schema), [])
-        with self.assertRaises(ConfigError):  # 26 issues never fit: one per 8 invoices, 200 at most
-            normalize_config({"errors": {"duplicate_invoice": 26}, "size": {"invoices": [200, 200]}})
-        normalize_config({"errors": {"duplicate_invoice": 25}, "size": {"invoices": [200, 200],
+        # The schema bounds one count (25); the episode total is bounded by normalize_config (12, CASE 03).
+        with self.assertRaises(ConfigError):
+            normalize_config({"errors": {"duplicate_invoice": 13}, "size": {"invoices": [200, 200]}})
+        normalize_config({"errors": {"duplicate_invoice": 12}, "size": {"invoices": [200, 200],
                                                                         "background_pairs": [0, 0]}})
 
 

@@ -39,8 +39,9 @@ generation secret from a file (auditgym/secret.py; else $AUDITGYM_SECRET_FILE, e
 an unusable secret file stops the server with exit code 2 before the first request.
 
 A refused reset or load replies the same way with code `bad_config` (bad seed or config),
-`bad_request` (eval: a restart of the loaded episode after its first step) or `bad_episode`
-(directory unreadable). `not_loaded` is reserved: since audit C7 a reset without a seed always
+`bad_request` (a load that is not allowed, is not the first request or has no directory string; a reset in the
+middle of an episode is not refused in eval: the abandoned run goes to the journal as `abandoned`,
+docs/CONTRACTS.md section 5) or `bad_episode` (directory unreadable). `not_loaded` is reserved: since audit C7 a reset without a seed always
 starts an episode.
 In eval mode without `--results` and `--results-fd` the journal goes to $AUDITGYM_RESULTS or
 `runs/results.jsonl` (directory created, file mode 0600). Python's limit on the digits of an int is lifted in this

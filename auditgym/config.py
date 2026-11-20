@@ -10,8 +10,8 @@ import hashlib
 import json
 import re
 
-from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FINDINGS, MAX_FOREIGN_CURRENCIES,
-                     MAX_INVOICES, MAX_LEDGER_ROWS, MAX_PAGES, MAX_PERIOD_MONTHS, MAX_SEED_BITS, MAX_YEAR, MIN_BACKGROUND_PAIRS,
+from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FOREIGN_CURRENCIES,
+                     MAX_INVOICES, MAX_ISSUES, MAX_LEDGER_ROWS, MAX_PAGES, MAX_PERIOD_MONTHS, MAX_SEED_BITS, MAX_YEAR, MIN_BACKGROUND_PAIRS,
                      MIN_INVOICES, MIN_YEAR, ROWS_PER_INVOICE, ROWS_PER_ISSUE, pages)
 
 CONFIG_VERSION = "1"
@@ -177,8 +177,9 @@ def normalize_config(config: object) -> dict:
         raise ConfigError("needs_foreign_currency", "fx_error and I1 need at least one foreign currency")
 
     total_issues = _issue_count(out["errors"], interaction)
-    if total_issues > MAX_FINDINGS:
-        raise ConfigError("too_many_errors", f"at most {MAX_FINDINGS} issues fit into one answer")
+    if total_issues > MAX_ISSUES:
+        raise ConfigError("too_many_errors", f"at most {MAX_ISSUES} issues per episode (errors plus 2 for "
+                                             f"interaction I1/I2), got {total_issues}")
     if total_issues * INVOICES_PER_ERROR > out["size"]["invoices"][0]:
         raise ConfigError("too_dense", f"need at least {INVOICES_PER_ERROR} invoices per error")
     check_size(out["size"]["invoices"][1], out["size"]["background_pairs"][0], total_issues,

@@ -53,7 +53,9 @@ class CrashTest(unittest.TestCase):
         text = out.getvalue()
         self.assertEqual(code, 1)
         self.assertIn("[FAIL] A: breaks -- crashed: KeyError", text)
-        self.assertIn("ИТОГО", text)
+        self.assertIn("Внутренние проверки (не оценка жюри): пройдено 2/3 (66.7 %)", text)
+        self.assertNotIn("ИТОГО", text)
+        self.assertNotIn("/100", text)
         self.assertRegex(text, r"B\s+1/1\s+5\.0/5")
 
 
