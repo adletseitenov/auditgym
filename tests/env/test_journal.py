@@ -100,6 +100,25 @@ class SignedJournalTest(unittest.TestCase):
         self.assertEqual(self.check(self.lines[:3])[0], "ok")
 
 
+class ShapedRewardStaysOutOfEvalTest(unittest.TestCase):
+    def test_eval_with_shaped_reward_and_a_signed_journal_has_no_shaped_key(self):
+        from auditgym import shaped
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path, shaped_reward=True, journal_key=KEY, secret="")
+            observation, _ = evaluator.reset(3, {})
+            result = evaluator.step({"action": "submit", "findings": {
+                "episode_id": observation["manifest"]["episode_id"], "findings": []}})
+            text = path.read_text(encoding="utf-8")
+        self.assertEqual(result[1:], (0.0, True, False, {}))
+        row = json.loads(text)
+        self.assertIn("mac", row)
+        self.assertNotIn(shaped.INFO_KEY, row)
+        self.assertNotIn("shaped", text)
+        self.assertEqual(verify_lines(text.splitlines(), KEY)[0], "ok")
+
+
 class UnsignedJournalTest(unittest.TestCase):
     def test_without_a_key_nothing_is_signed_and_the_command_says_so(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, CLEAN_ENV):
