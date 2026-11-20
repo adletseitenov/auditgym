@@ -192,15 +192,27 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 
 
 def _table(rows: dict[str, list[dict]]) -> list[str]:
-    lines = ["| Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Шаги | Время, мс |",
-             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    """Machine-independent metrics only: README copies these rows and `check` compares them byte for
+    byte, so wall-clock time (different on every machine) lives in `_timing_table`."""
+    lines = ["| Политика | Эпизодов | P | R | F1 | Возврат: ошибки | Возврат: чистые | Возврат: все | Шаги |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for name in POLICIES:
         if name not in rows:
             continue
         s = summary(rows[name])
         lines.append(f"| {name} | {s['n']} | {_fmt(s['precision'])} | {_fmt(s['recall'])} | {_fmt(s['f1'])} | "
                      f"{_fmt(s['reward_errors'])} | {_fmt(s['reward_clean'])} | {_fmt(s['reward'])} | "
-                     f"{_fmt(s['steps'], 1)} | {_fmt(s['ms'], 0)} |")
+                     f"{_fmt(s['steps'], 1)} |")
+    return lines
+
+
+def _timing_table(rows: dict[str, list[dict]]) -> list[str]:
+    """Mean wall-clock time per episode; depends on the machine, so it is not copied to the README."""
+    lines = ["Время на эпизод (зависит от машины; в README не копируется):", "",
+             "| Политика | Время, мс |", "|---|---:|"]
+    for name in POLICIES:
+        if name in rows:
+            lines.append(f"| {name} | {_fmt(summary(rows[name])['ms'], 0)} |")
     return lines
 
 
@@ -255,7 +267,7 @@ def build_report(n: int, episodes_dir=None) -> str:
             "документ с датой вне периода и проводкой внутри как отсечка, расхождение с курсом напечатанной даты как "
             "курсовая ошибка; частичные оплаты, позиции, пояс компании и переплаты она не различает.", ""]
     for name, rows in sets.items():
-        out += [f"## {titles[name][0].upper() + titles[name][1:]}", ""] + _table(rows) + [""]
+        out += [f"## {titles[name][0].upper() + titles[name][1:]}", ""] + _table(rows) + [""] + _timing_table(rows) + [""]
         truncated = {policy: summary(policy_rows)["truncated"] for policy, policy_rows in rows.items()}
         if any(truncated.values()):
             out += ["Обрезано по лимиту шагов: " + ", ".join(f"{k} {v}" for k, v in truncated.items() if v), ""]
