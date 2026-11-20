@@ -7,3 +7,5 @@ out/
 runs/
 *.log
 *.oracle.jsonl
+build/
+*.egg-info/
