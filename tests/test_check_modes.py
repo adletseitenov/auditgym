@@ -42,6 +42,7 @@ class ModesTest(unittest.TestCase):
 
         out = io.StringIO()
         with mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
+                mock.patch.object(check_modes, "case_ranges_line", lambda: True), \
                 mock.patch.object(score, "main", fake_score), contextlib.redirect_stdout(out):
             self.assertEqual(check_modes.run(False), 0)
         self.assertEqual(out.getvalue().count("determinism lint:"), 1)
@@ -69,10 +70,26 @@ class ModesTest(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.dict(os.environ, {SECRET_ENV: "hunter2-value"}), \
                 mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
+                mock.patch.object(check_modes, "case_ranges_line", lambda: True), \
                 mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out):
             check_modes.run(False)
         self.assertEqual(out.getvalue().count(SECRET_ENV + ":"), 1)
         self.assertNotIn("hunter2-value", out.getvalue())
+
+    def test_check_fails_when_a_shipped_subject_leaves_the_case_ranges(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        from tools import case_ranges, score
+
+        bad = [{"label": "level x", "n": 1, "ok": False, "postings": (1, 1), "documents": (1, 1), "errors": (0, 0)}]
+        out = io.StringIO()
+        with mock.patch.object(check_modes, "suite", lambda full: unittest.TestSuite()), \
+                mock.patch.object(case_ranges, "run", lambda seeds: bad), \
+                mock.patch.object(score, "main", lambda arguments: 0), contextlib.redirect_stdout(out):
+            self.assertEqual(check_modes.run(False), 1)
+        self.assertIn("case ranges: FAIL (1 of 1: level x)", out.getvalue())
 
     def test_help_and_bad_arguments(self):
         done = subprocess.run([sys.executable, "-m", "auditgym", "--help"], capture_output=True, text=True)

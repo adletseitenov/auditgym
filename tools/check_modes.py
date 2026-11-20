@@ -78,6 +78,18 @@ def secret_line(environ=None) -> str:
             f"set it for a closed run, see README «Закрытая проверка»)")
 
 
+def case_ranges_line(seeds: int = 5) -> bool:
+    """One line: the default, the shipped episodes and the levels stay inside the case ranges
+    (docs/CASE.md section 03; python -m tools.case_ranges prints the table). Not a score row."""
+    from tools import case_ranges
+
+    started = time.perf_counter()
+    rows = case_ranges.run(seeds)
+    print(case_ranges.summary(rows), flush=True)
+    _phase("case ranges", started)
+    return all(row["ok"] for row in rows)
+
+
 def _phase(name: str, started: float) -> None:
     print(f"[{name}: {time.perf_counter() - started:.0f} s]", flush=True)
 
@@ -110,6 +122,8 @@ def run(full: bool = False) -> int:
     score_ok = score.main([] if strict else ["--allow-todo"]) == 0
     _phase("score table", started)
     ok = result.wasSuccessful() and score_ok  # the lint is a row of the score table: printed once
+    ranges_ok = case_ranges_line()
+    ok = ok and ranges_ok
     if full:
         for label, arguments in EXTRA_TOOLS:
             ok = _extra_tool(label, arguments) and ok
