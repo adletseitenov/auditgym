@@ -1,0 +1,140 @@
+"""Audit A3: the eval journal is an HMAC-SHA256 chain; verify-journal names the first bad line."""
+import contextlib
+import io
+import json
+import os
+import pathlib
+import tempfile
+import unittest
+from unittest import mock
+
+from auditgym import Env
+from auditgym.__main__ import main as cli
+from auditgym.evaluator import Evaluator
+from auditgym.journal import GENESIS, verify_lines
+from auditgym.secret import JOURNAL_KEY_ENV, JOURNAL_KEY_FILE_ENV, SECRET_ENV, SECRET_FILE_ENV
+from tools.schema_lite import load_schema, validate
+
+KEY = b"journal-test-key"
+CLEAN_ENV = {SECRET_ENV: "", SECRET_FILE_ENV: "", JOURNAL_KEY_ENV: "", JOURNAL_KEY_FILE_ENV: ""}
+
+
+def play(evaluator, seed, steps=1):
+    observation, _ = evaluator.reset(seed, {})
+    for _ in range(steps):
+        evaluator.step({"action": "calculator", "expression": "1"})
+    evaluator.step({"action": "submit", "findings": {
+        "episode_id": observation["manifest"]["episode_id"], "findings": []}})
+
+
+def verify_cli(path, environ):
+    out = io.StringIO()
+    with mock.patch.dict(os.environ, {**CLEAN_ENV, **environ}), contextlib.redirect_stdout(out), \
+            contextlib.redirect_stderr(out):
+        code = cli(["verify-journal", str(path)])
+    return code, out.getvalue()
+
+
+class SignedJournalTest(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.path = pathlib.Path(scratch.name) / "results.jsonl"
+        # Two sessions append to one file: the second continues the chain of the first.
+        first = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret="")
+        play(first, 1)
+        first.reset(2, {})
+        first.step({"action": "calculator", "expression": "1"})
+        first.reset(3, {})  # abandons episode 2 after one step: an 'abandoned' line is signed too
+        first.step({"action": "submit", "findings": {"episode_id": "x", "findings": []}})
+        second = Evaluator(mode="eval", results_path=self.path, journal_key=KEY, secret="")
+        play(second, 4, steps=2)
+        self.lines = self.path.read_text(encoding="utf-8").splitlines()
+
+    def check(self, lines):
+        return verify_lines(lines, KEY)
+
+    def test_an_intact_journal_verifies(self):
+        self.assertEqual(len(self.lines), 4)
+        rows = [json.loads(line) for line in self.lines]
+        self.assertEqual([row["seq"] for row in rows], [0, 1, 2, 3])
+        self.assertEqual(rows[0]["prev"], GENESIS)
+        self.assertEqual([row["event"] for row in rows], ["finished", "abandoned", "finished", "finished"])
+        for row in rows:
+            self.assertEqual(validate(row, load_schema("journal_row")), [], row)
+        self.assertEqual(self.check(self.lines)[0], "ok")
+        code, text = verify_cli(self.path, {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 0, text)
+        self.assertIn("journal OK", text)
+
+    def test_a_changed_line_is_caught(self):
+        row = json.loads(self.lines[2])
+        row["reward"] = 1.0
+        lines = self.lines[:2] + [json.dumps(row, sort_keys=True)] + self.lines[3:]
+        self.assertEqual(self.check(lines)[:2], ("bad", 3))
+        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, text = verify_cli(self.path, {JOURNAL_KEY_ENV: KEY.decode()})
+        self.assertEqual(code, 1)
+        self.assertIn("line 3", text)
+
+    def test_an_appended_line_is_caught(self):
+        forged = json.loads(self.lines[-1])
+        forged.update(seq=4, prev=forged["mac"], mac="0" * 64, reward=1.0)
+        self.assertEqual(self.check(self.lines + [json.dumps(forged)])[:2], ("bad", 5))
+        unsigned = {key: value for key, value in forged.items() if key not in ("seq", "prev", "mac")}
+        self.assertEqual(self.check(self.lines + [json.dumps(unsigned)])[:2], ("bad", 5))
+
+    def test_a_deleted_or_moved_line_is_caught(self):
+        self.assertEqual(self.check(self.lines[1:])[:2], ("bad", 1))
+        self.assertEqual(self.check(self.lines[:1] + self.lines[2:])[:2], ("bad", 2))
+        swapped = [self.lines[0], self.lines[2], self.lines[1], self.lines[3]]
+        self.assertEqual(self.check(swapped)[:2], ("bad", 2))
+
+    def test_a_wrong_key_fails_and_no_key_cannot_verify(self):
+        self.assertEqual(verify_lines(self.lines, b"other-key")[:2], ("bad", 1))
+        code, text = verify_cli(self.path, {})
+        self.assertEqual(code, 2)
+        self.assertIn("no journal key", text)
+
+    def test_cutting_the_tail_is_the_documented_blind_spot(self):
+        self.assertEqual(self.check(self.lines[:3])[0], "ok")
+
+
+class UnsignedJournalTest(unittest.TestCase):
+    def test_without_a_key_nothing_is_signed_and_the_command_says_so(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, CLEAN_ENV):
+            path = pathlib.Path(directory) / "results.jsonl"
+            play(Evaluator(mode="eval", results_path=path), 1)
+            row = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse({"seq", "prev", "mac"} & set(row))
+            code, text = verify_cli(path, {})
+        self.assertEqual(code, 2)
+        self.assertIn("not signed", text)
+
+
+class ProcessJournalTest(unittest.TestCase):
+    """Through Env: the journal descriptor is handed to the server, which reads its tail to chain."""
+
+    def test_env_sessions_under_a_secret_write_one_verifiable_chain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            secret = root / "secret"
+            secret.write_text("process-journal-secret\n", encoding="utf-8")
+            path = root / "results.jsonl"
+            with mock.patch.dict(os.environ, {**CLEAN_ENV, SECRET_FILE_ENV: str(secret)}):
+                for seed in (1, 2):
+                    with Env(mode="eval", results_path=path) as env:
+                        observation, _ = env.reset(seed, {})
+                        env.step({"action": "submit", "findings": {
+                            "episode_id": observation["manifest"]["episode_id"], "findings": []}})
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["seq"] for row in rows], [0, 1])
+            self.assertNotIn("process-journal-secret", path.read_text(encoding="utf-8"))
+            code, text = verify_cli(path, {SECRET_FILE_ENV: str(secret)})
+            self.assertEqual(code, 0, text)
+            code, _ = verify_cli(path, {SECRET_ENV: "some-other-secret"})
+            self.assertEqual(code, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

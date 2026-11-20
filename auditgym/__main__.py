@@ -4,7 +4,9 @@
     python -m auditgym check --full    everything: all tests, fuzz, leak scan, metamorphic pairs, attacks
     python -m auditgym serve [--mode train|eval] [--results PATH]    the evaluator process
     python -m auditgym export --seed N [--config JSON | --config-file PATH] --out DIR
-                                       write an episode directory under $AUDITGYM_SECRET (the oracle's reference)
+                                       write an episode directory under the evaluator secret (the oracle's reference)
+    python -m auditgym verify-journal PATH [--secret-file F]
+                                       check the signatures and the chain of a signed eval journal
 
 `AUDITGYM_STRICT=1 python -m auditgym check` also fails on any planned score check that is still a
 TODO, on a `pending:` check and on a missing check module (the default only lists them); `--full` is
@@ -14,7 +16,7 @@ from __future__ import annotations
 
 import sys
 
-USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR"
+USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR | verify-journal PATH"
 
 NO_CHECKOUT = ("check runs from the root of a clone of the repository (it needs tools/ and tests/, "
                "which pip does not install): cd <repo> && python -m auditgym check")
@@ -47,6 +49,10 @@ def main(argv: list[str]) -> int:
         from .export import main as export_main
 
         return export_main(argv[1:])
+    if argv[:1] == ["verify-journal"]:
+        from .journal import main as verify_main
+
+        return verify_main(argv[1:])
     print(USAGE, file=sys.stderr)
     return 2
 

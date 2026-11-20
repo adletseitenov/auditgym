@@ -118,7 +118,8 @@ class Env:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path = os.fspath(path)
                 if os.name == "posix":
-                    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                    # Read and append: a signed journal continues the chain from its last line.
+                    descriptor = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
                     os.fchmod(descriptor, 0o600)  # the results are not for the policy's user group
                     pass_fds = (descriptor,)
                     command += ["--results-fd", str(descriptor)]

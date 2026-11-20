@@ -92,7 +92,7 @@ def open_results_file(path) -> None:
 
 
 # The generation secret and its sources live in secret.py; SECRET_ENV stays importable from here.
-from .secret import SECRET_ENV, read_secret  # noqa: E402
+from .secret import SECRET_ENV, journal_key as _journal_key, read_secret  # noqa: E402
 
 
 def _seed_from_text(text: str) -> int:
@@ -119,13 +119,15 @@ class EvaluatorError(Exception):
 class Evaluator:
     def __init__(self, mode: str = "train", results_path=None, clock=None,
                  time_limit=DEFAULT_TIME_LIMIT, results_stream=None, shaped_reward=False,
-                 secret: str | None = None) -> None:
+                 secret: str | None = None, journal_key: bytes | None = None) -> None:
         """`results_stream` is an already open text stream (the server gets the results file as an
         inherited descriptor, so its path never appears in the process list); it wins over the path.
         `shaped_reward` adds the experimental partial-credit reward (auditgym/shaped.py) to the terminal
         `info` in train mode; it is off by default and ignored in eval mode, always.
         `secret` is the generation secret; None reads it once, now, from $AUDITGYM_SECRET_FILE or
-        $AUDITGYM_SECRET (auditgym/secret.py; an unusable secret file raises SecretError)."""
+        $AUDITGYM_SECRET (auditgym/secret.py; an unusable secret file raises SecretError).
+        `journal_key` signs the journal (auditgym/journal.py); None takes $AUDITGYM_JOURNAL_KEY_FILE,
+        $AUDITGYM_JOURNAL_KEY or a key derived from the secret, and no secret means no signature."""
         if mode not in MODES:
             raise ValueError("mode must be 'train' or 'eval'")
         self._mode = mode
@@ -135,6 +137,7 @@ class Evaluator:
         if self._results_path is not None:
             open_results_file(self._results_path)  # fail at start, not at the end of the first episode
         self._secret = read_secret() if secret is None else secret
+        self._journal_key = _journal_key(secret=self._secret) if journal_key is None else journal_key
         self._clock = clock if clock is not None else MonotonicClock()
         self._time_limit = time_limit
         self._loaded = None   # episode from load(); reset() without seed restarts it
@@ -367,6 +370,10 @@ class Evaluator:
     def _write_line(self, line: dict) -> None:
         if self._results_path is None and self._results_stream is None:
             return
+        if self._journal_key is not None:
+            from .journal import seal
+
+            line = seal(self._journal_key, line, self._journal_tail())
         text = json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n"
         try:
             if self._results_stream is not None:
@@ -377,6 +384,19 @@ class Evaluator:
                     handle.write(text)
         except OSError:  # a full disk must not turn a finished episode into a server error
             print("auditgym evaluator: cannot write the results file", file=sys.stderr)
+
+    def _journal_tail(self) -> bytes:
+        """The last bytes of the journal, read before every signed write so the chain continues
+        from whatever line is last now (another session may have appended since)."""
+        from .journal import read_tail_fd, read_tail_path
+
+        try:
+            if self._results_stream is not None:
+                self._results_stream.flush()
+                return read_tail_fd(self._results_stream.fileno())
+            return read_tail_path(self._results_path)
+        except (OSError, AttributeError, ValueError):  # not readable: a new chain, verify shows the break
+            return b""
 
     # --- read actions -----------------------------------------------------------------------
     @staticmethod
