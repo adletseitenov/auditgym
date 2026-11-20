@@ -47,18 +47,18 @@ def make_policy(name: str, truth: dict | None = None, **options):
     raise ValueError(f"unknown policy {name!r}")
 
 
-def _submitted(action: object):
-    """The findings payload of a submit action, flat or nested (CONTRACTS §5.2), else None."""
-    if not isinstance(action, dict):
+def _submitted(action: object, episode_id: str = ""):
+    """The findings message of a submit action, read exactly as the environment reads it
+    (`auditgym.actions.parse_action` + `submit_payload`, CONTRACTS §5.2: flat or nested, any
+    letter case, a bare list, a JSON string, under `findings.json`), else None. A submit the
+    environment cannot read is None here too: the report then counts no findings for it."""
+    from auditgym.actions import ActionError, parse_action, submit_payload
+
+    try:
+        name, arguments = parse_action(action)
+        return submit_payload(arguments, episode_id) if name == "submit" else None
+    except ActionError:
         return None
-    name = next((action[key] for key in ("action", "tool", "name", "type") if key in action), None)
-    if name != "submit":
-        return None
-    arguments = dict(action)
-    for key in ("args", "arguments", "params"):
-        if isinstance(action.get(key), dict):
-            arguments.update(action[key])
-    return arguments.get("findings")
 
 
 def run_episode(env, policy, seed=None, config=None, record: bool = False) -> dict:
@@ -74,8 +74,9 @@ def run_episode(env, policy, seed=None, config=None, record: bool = False) -> di
         if steps >= MAX_STEPS:
             raise RuntimeError("environment did not end the episode at the step limit")
         action = policy.act(observation)
-        if _submitted(action) is not None:
-            payload = _submitted(action)
+        submitted = _submitted(action, episode_id or "")
+        if submitted is not None:
+            payload = submitted
         observation, reward, terminated, truncated, info = env.step(action)
         steps += 1
         if record:
@@ -92,7 +93,18 @@ def run_episode(env, policy, seed=None, config=None, record: bool = False) -> di
     return result
 
 
-def read_results(path) -> list[dict]:
-    """Evaluator-side: the lines of a `--results` file (one JSON object per finished episode)."""
+def read_results(path, journal_key: bytes | None = None) -> list[dict]:
+    """Evaluator-side: the lines of a `--results` file (one JSON object per finished episode).
+
+    With `journal_key` (`auditgym.secret.journal_key(...)` of the evaluator's secret) the file
+    must be a signed, intact chain (`auditgym.journal.verify_lines`), else ValueError names the
+    first bad line: a row a policy wrote or edited is never read back as a result."""
     with open(path, encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        lines = [line for line in handle if line.strip()]
+    if journal_key is not None:
+        from auditgym.journal import verify_lines
+
+        status, number, message = verify_lines([line.rstrip("\n") for line in lines], journal_key)
+        if status != "ok":
+            raise ValueError(f"results journal not verified: {message}" + (f" (line {number})" if number else ""))
+    return [json.loads(line) for line in lines]

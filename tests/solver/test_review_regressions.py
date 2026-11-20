@@ -88,5 +88,21 @@ class AmbiguousKeyTest(unittest.TestCase):
         self.assertEqual(solve(repeated), solve(public))
 
 
+class DecimalContextTest(unittest.TestCase):
+    """The solver must not depend on the caller's decimal context (generate and verify pin theirs)."""
+
+    def test_answer_is_the_same_under_a_coarse_caller_context(self):
+        import decimal
+
+        config = {"currencies": ["USD", "EUR"], "errors": {"fx_error": 2, "allocation_gap": 1, "duplicate_invoice": 1}}
+        for seed in (1, 5, 9):
+            public = generate(seed, config)["public"]
+            expected = solve(public)
+            for prec, rounding in ((6, decimal.ROUND_DOWN), (9, decimal.ROUND_UP), (60, decimal.ROUND_FLOOR)):
+                with self.subTest(seed=seed, prec=prec), decimal.localcontext() as context:
+                    context.prec, context.rounding = prec, rounding
+                    self.assertEqual(solve(public), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

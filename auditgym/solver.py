@@ -35,10 +35,10 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 from .limits import MAX_EVIDENCE_IDS as MAX_EVIDENCE
-from .money import convert, fx_key, in_period, local_date, parse_time
+from .money import DECIMAL_CONTEXT, convert, fx_key, in_period, local_date, parse_time
 
 ROWS_PER_DUPLICATE_INVOICE = 4  # 2 docs + 2 x 4 rows = 10 at most
 
@@ -334,6 +334,14 @@ def _sort_key(finding: dict) -> tuple:
 
 
 def solve(public: dict) -> list[dict]:
+    """The findings the open records prove, in a fixed order. Decimal arithmetic runs in the pinned
+    context of the generator and verify (money.DECIMAL_CONTEXT), not in the caller's thread
+    context, so a library that changes decimal.getcontext() cannot move a conversion."""
+    with localcontext(DECIMAL_CONTEXT):
+        return _solve(public)
+
+
+def _solve(public: dict) -> list[dict]:
     try:
         books = _Books(public)
     except _MALFORMED:
