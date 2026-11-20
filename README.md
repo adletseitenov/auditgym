@@ -20,6 +20,8 @@ total 331 s (fast mode)
 CHECK: PASSED
 ```
 
+Вне быстрого режима: мутационные прогоны `python3 -m tools.mutants` (судья) и `python3 -m tools.mutate_gen` (генератор и проверка данных: 44 мутации, 41 убита, 3 эквивалентные) и фазз `python3 -m tools.fuzz --seeds 10000` (180 000 эпизодов, 0 сбоев); подробности в `docs/DESIGN.md` §4.2.
+
 Быстрый режим занимает несколько минут: 314–349 с на двухъядерной машине GitHub Actions (Python 3.11, 3.12 и Docker с `--network none`; число печатает сама команда в строке «total»). `python3 -m auditgym check --full` (в контейнере: `docker run --rm --network none auditgym python -m auditgym check --full`) добавляет все пропущенные тесты и пять длинных инструментов: `tools.fuzz --seeds 100`, `tools.leakscan`, `tools.metamorph`, `tools.attack`, `tools.mutants`; в Docker на GitHub Actions он занял 736 с. Обе команды на каждый пуш запускает CI (`.github/workflows/check.yml`): Python 3.11 и 3.12, побайтная пересборка эпизодов и траекторий, сборка образа и запуск с `--network none`. Команда по умолчанию в Dockerfile — быстрая: полный режим помещается в разумное время, но проверяющему нужен один короткий запуск, а полный запускается явно. Что именно пропускает быстрый режим и почему — `tools/check_modes.py`. Код возврата 0 только при `CHECK: PASSED`. Образ закреплён по digest (`Dockerfile`), в сборке и при запуске ничего не скачивается.
 
 ## Что сдано (CASE §09)
