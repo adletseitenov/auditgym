@@ -35,6 +35,7 @@ EXTRA_TOOLS = (
     ("metamorphic pairs", "tools.metamorph"),
     ("reward attacks", "tools.attack"),
     ("judge mutants", "tools.mutants"),
+    ("decoys vs shortcuts, solver == truth, 300 seeds per config", "tools.tricks --seeds 300 --check"),
 )
 
 

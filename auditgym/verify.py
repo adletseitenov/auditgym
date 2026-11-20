@@ -20,7 +20,10 @@ What is checked:
 - before injection no error predicate fires; after injection the predicates fire exactly on
   the truth (type, affected ids, amount, currency), and every evidence set is sufficient;
 - the pre-injection snapshot plus the recorded steps gives the open records;
-- the generator's own rules (docs/DECISIONS.md B).
+- the generator's own rules (docs/DECISIONS.md B) and the decoys (docs/DESIGN.md): a resent copy
+  that shares its source's signature stays unposted, unpaid and dated just after the period; an
+  invoice of the period for another period's service is posted in it. Both before and after
+  injection.
 """
 from __future__ import annotations
 
@@ -708,11 +711,51 @@ def _check_truth(public: dict, private: dict) -> list[str]:
     return problems
 
 
-def _check_generator_rules(public: dict) -> list[str]:
-    counts = defaultdict(int)
-    for invoice in public["invoices"]:
-        counts[invoice_signature(invoice)] += 1
-    return ["rules: more than two invoices share a signature"] if any(n > 2 for n in counts.values()) else []
+def _service_outside(books: Books, invoice: dict) -> bool:
+    """Every line item bills a service that lies wholly outside the period (company-local dates)."""
+    zone = parse_offset(books.offset)
+    first = books.start.astimezone(zone).date().isoformat()
+    last = (books.end - dt.timedelta(seconds=1)).astimezone(zone).date().isoformat()
+    return bool(invoice["line_items"]) and all(item["service_end"] < first or item["service_start"] > last
+                                               for item in invoice["line_items"])
+
+
+def _check_generator_rules(public: dict, name: str = "rules") -> list[str]:
+    """docs/DECISIONS.md B, and the two decoys (docs/DESIGN.md): at most two invoices share a
+    signature; a pair with one unposted invoice is a resent copy, which is dated after the period
+    (at most four days), after its posted source, which is dated in the period, and nothing refers to
+    the copy; two unposted invoices never share a signature. An invoice dated in the period for
+    another period's service (decoy B) is posted in the period like any other."""
+    books = Books(public)
+    problems = []
+    groups = defaultdict(list)
+    for invoice in books.invoice_list:
+        groups[invoice_signature(invoice)].append(invoice)
+    for group in groups.values():
+        if len(group) > 2:
+            problems.append(f"{name}: more than two invoices share a signature")
+            continue
+        if len(group) < 2:
+            continue
+        unposted = [inv for inv in group if not books.own.get(inv["invoice_id"])]
+        if len(unposted) == 2:
+            problems.append(f"{name}: two unposted invoices share a signature")
+        elif len(unposted) == 1:
+            copy, = unposted
+            source = group[0] if group[1] is copy else group[1]
+            issued = parse_time(copy["issued_at"])
+            if not books.end <= issued < books.end + dt.timedelta(days=CUTOFF_MAX_DAYS):
+                problems.append(f"{name}: a resent copy {copy['doc_id']} is not dated just after the period")
+            if not books.inside(source["issued_at"]) or issued <= parse_time(source["issued_at"]):
+                problems.append(f"{name}: a resent copy {copy['doc_id']} does not follow a source dated in the period")
+            if books.paid_by.get(copy["invoice_id"]):
+                problems.append(f"{name}: a resent copy {copy['doc_id']} is referred to by a payment")
+    for invoice in books.invoice_list:
+        if books.inside(invoice["issued_at"]) and _service_outside(books, invoice) \
+                and not books.own.get(invoice["invoice_id"]):
+            problems.append(f"{name}: invoice {invoice['doc_id']} of the period for another period's service "
+                            f"is not posted")
+    return problems
 
 
 def _check_manifest(public: dict, private: dict) -> list[str]:
@@ -760,6 +803,7 @@ def _verify(episode: dict) -> list[str]:
     if not books_problems:
         problems += _check_truth(public, private)
     problems += _check_generator_rules(public)
+    problems += _check_generator_rules(pre_public, "pre rules")
     if private["truth"]["episode_id"] != public["manifest"]["episode_id"]:
         problems.append("truth: episode_id differs from the manifest")
     return problems

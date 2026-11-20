@@ -52,6 +52,16 @@ def issues_of(episode, kind=None):
     return [i for i in episode["private"]["truth"]["issues"] if kind is None or i["type"] == kind]
 
 
+def resent_copies(public):
+    """invoice_ids of resent copies (decoy A, docs/DECISIONS.md K): unposted invoices that share their
+    signature with another invoice. They are copies of invoices of the period, never paid, and not
+    part of the pool of neighbouring-period invoices."""
+    posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
+    shared = Counter(invoice_signature(inv) for inv in public["invoices"])
+    return {inv["invoice_id"] for inv in public["invoices"]
+            if inv["invoice_id"] not in posted and shared[invoice_signature(inv)] > 1}
+
+
 def posted_payments(public):
     """invoice_id -> number of posted payments referring to it."""
     posted = {r["payment_id"] for r in public["ledger"] if r["payment_id"]}
@@ -254,17 +264,26 @@ class RulingTest(unittest.TestCase):
         for seed in range(30):
             public = generate(seed, {"errors": {}, "currencies": ["USD"]})["public"]
             policy = public["policy"]
-            self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
+            self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; a duplicate_invoice is two invoices with this signature that are both posted in the ledger (an unposted invoice is never part of one); service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
             first, last = "2026-10-01", "2026-10-31"
+            neighbours = {("2026-09-01", "2026-09-30"), ("2026-11-01", "2026-11-30")}
             posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
-            loose = Counter()
+            loose, shifted = Counter(), []
             for invoice in public["invoices"]:
                 if invoice["invoice_id"] not in posted:
                     continue
+                key = (invoice["entity_id"], invoice["total_minor"],
+                       json.dumps(sorted((x["description"], x["quantity"]) for x in invoice["line_items"])))
+                services = {(item["service_start"], item["service_end"]) for item in invoice["line_items"]}
+                if services <= neighbours:  # decoy B: billed in the period for a whole neighbouring month
+                    self.assertEqual(len(services), 1, invoice)
+                    shifted.append(key)
+                    continue
                 for item in invoice["line_items"]:
                     self.assertTrue(first <= item["service_start"] <= item["service_end"] <= last, item)
-                loose[(invoice["entity_id"], invoice["total_minor"],
-                       json.dumps(sorted((x["description"], x["quantity"]) for x in invoice["line_items"])))] += 1
+                loose[key] += 1
+            for key in shifted:  # each decoy B repeats a posted invoice of the period with its own service
+                self.assertGreaterEqual(loose[key], 1, key)
             twins += sum(1 for n in loose.values() if n == 2)
             self.assertEqual(predicate_issues(public), ([], []))
         self.assertGreater(twins, 20)
@@ -366,8 +385,11 @@ class InteractionTest(unittest.TestCase):
             public, policy = episode["public"], episode["public"]["policy"]
             copy_id = issues_of(episode, "period_cutoff")[0]["affected_ids"][0]
             refs = Counter(ref for p in public["payments"] for ref in p["invoice_refs"] or [])
+            decoys = resent_copies(public)
             for invoice in public["invoices"]:
                 if in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
+                    continue
+                if invoice["invoice_id"] in decoys:
                     continue
                 if invoice["doc_id"] == copy_id:
                     copies, paid_copies = copies + 1, paid_copies + bool(refs[invoice["invoice_id"]])
@@ -433,7 +455,10 @@ class LeakTest(unittest.TestCase):
                        invoices=episode["private"]["pre_invoices"], payments=episode["private"]["pre_payments"])
             policy = pre["policy"]
             refs = Counter(ref for p in pre["payments"] for ref in p["invoice_refs"] or [])
+            copies = resent_copies(pre)
             for invoice in pre["invoices"]:  # the pool: invoices of the neighbouring periods (D4)
+                if invoice["invoice_id"] in copies:
+                    continue
                 if not in_period(invoice["issued_at"], policy["period_start"], policy["period_end"]):
                     population += 1
                     paid_population += bool(refs[invoice["invoice_id"]])

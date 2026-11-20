@@ -18,7 +18,10 @@ With `config["distractors"]` the story also contains legitimate cases that look 
 satisfy no error definition (docs/SPEC.md): overpayments, advances, partial and split payments,
 refunds, recurring invoices that split the period's service in two halves, extra neighbouring-
 period invoices, documents at the period boundary, documents in other offsets, weekend rates
-equal to Friday's.
+equal to Friday's, and two decoys against shortcuts (docs/DESIGN.md): resent copies (an exact copy
+of a posted invoice dated just after the period, never posted or paid: not a duplicate, since only
+posted pairs are) and invoices dated and posted in the period for a neighbouring period's service
+(not a period_cutoff, since period_basis is the document date).
 
 The rates are drawn last, from a stream keyed by a digest of the whole story: the first rate of
 an episode cannot be computed from the seed without building the story (docs/AUDIT.md L1).
@@ -55,6 +58,10 @@ BOUNDARY_DAYS = 4  # documents outside the period stay this close to it (inside 
 # Overpayment excess and allocation gap: the same share of a document amount, converted the same
 # way, so their roundness does not tell them apart (docs/AUDIT.md L6).
 SHARE_PERCENT = (2, 30)
+# Decoys per story with distractors (docs/DESIGN.md): resent unposted copies (A) and invoices of the
+# period for a neighbouring period's service (B).
+RESENT_COPIES = (1, 2)
+SHIFTED_SERVICE = (1, 3)
 
 
 def period_bounds(config: dict) -> tuple[dt.datetime, dt.datetime]:
@@ -325,7 +332,14 @@ def build_world(rng: Rng, config: dict) -> dict:
     # Neighbouring-period invoices: one per configured cutoff (its pool), plus legitimate extras.
     outside_count = config["errors"]["period_cutoff"] + (plan.randint(1, 3) if distractors else 0)
     recurring_pairs = plan.randint(1, max(1, invoice_count // 20)) if distractors else 0
-    regular_count = invoice_count - outside_count - 2 * recurring_pairs
+    # Decoys (own stream, drawn only with distractors): resent copies and neighbouring-service
+    # invoices. They take their places from the regular invoices, at most half of them, so the
+    # invoice count and the document budget stay as configured.
+    decoys = rng.child("decoys")
+    room = invoice_count - outside_count - 2 * recurring_pairs
+    resent_count = min(decoys.randint(*RESENT_COPIES), room // 2) if distractors else 0
+    shifted_count = min(decoys.randint(*SHIFTED_SERVICE), room // 2 - resent_count) if distractors else 0
+    regular_count = room - resent_count - shifted_count
 
     invoices: list[dict] = []
     signatures: set = set()
@@ -391,6 +405,34 @@ def build_world(rng: Rng, config: dict) -> dict:
             if add(invoice):
                 break
 
+    # In the period, for a neighbouring period's service (prepaid or billed in arrears): the items of
+    # a regular invoice with the service moved by one period, dated and posted in the period like
+    # any invoice. Membership in the period is the document date (policy.period_basis), so this is
+    # not a period_cutoff, although its service is outside the period (docs/DESIGN.md, decoy B).
+    regular = invoices[:regular_count]
+    for _ in range(shifted_count):
+        while True:
+            source = decoys.choice(regular)
+            service = service_period(world, -1 if decoys.chance(1, 2) else 1)
+            items = [dict(item, service_start=service[0], service_end=service[1]) for item in source["line_items"]]
+            invoice = inside_invoice(decoys, source["entity"], source["currency"], items)
+            invoice["decoy"] = "shifted_service"
+            if add(invoice):
+                break
+
+    # Resent copies: an exact copy of a regular invoice (signature included) sent again just after
+    # the period, never posted and never paid. Only a pair of posted invoices is a duplicate
+    # (policy.duplicate_signature), and an unposted document is no period_cutoff (decoy A). Its
+    # source is never the target of duplicate_invoice or I2 (at most two invoices per signature).
+    sources = decoys.sample(regular, resent_count)
+    for source in sorted(sources, key=lambda inv: int(inv["key"][1:])):
+        source["has_copy"] = True
+        issued = outside_moment(decoys, world, before=False).astimezone(doc_zone(decoys, world, numerator=10))
+        invoice = new_invoice(world, f"I{len(invoices)}", source["entity"], source["currency"], issued,
+                              decoys.choice(TERMS_DAYS), [dict(item) for item in source["line_items"]])
+        invoice["decoy"] = "resent_copy"
+        invoices.append(invoice)
+
     world["invoices"] = invoices
     world["payments"] = _payments(rng.child("payments"), world, invoice_count)
     order_postings(world)
@@ -437,7 +479,7 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
 
     # Invoices of the neighbouring periods first: their payment chance must not depend on the budget.
     for invoice in world["invoices"]:
-        if invoice["posted_at"] is None:
+        if invoice["posted_at"] is None and invoice.get("decoy") != "resent_copy":
             moment = paid_outside(stream, world, invoice["issued_at"])
             if moment is not None:
                 add(new_payment("", invoice["entity"], invoice["currency"], moment, invoice["total_minor"],

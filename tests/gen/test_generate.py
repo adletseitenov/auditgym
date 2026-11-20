@@ -68,10 +68,24 @@ class CleanCompanyTest(unittest.TestCase):
             self.assertEqual(row["currency"], manifest["base_currency"])
             self.assertTrue(row["timestamp"].endswith("-11:00"))
 
-    def test_no_two_invoices_share_a_signature(self):
-        episode = generate(11, GRID[6])
-        signatures = {invoice_signature(inv) for inv in episode["public"]["invoices"]}
-        self.assertEqual(len(signatures), len(episode["public"]["invoices"]))
+    def test_no_two_posted_invoices_share_a_signature(self):
+        """A clean company has no duplicate; a shared signature is only a resent copy (decoy A): a posted
+        invoice of the period and its unposted copy dated just after the period (docs/DECISIONS.md K)."""
+        for config in (GRID[6], GRID[0]):
+            public = generate(11, config)["public"]
+            posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"] and not r["payment_id"]}
+            end = parse_time(public["policy"]["period_end"])
+            groups = {}
+            for invoice in public["invoices"]:
+                groups.setdefault(invoice_signature(invoice), []).append(invoice)
+            shared = [group for group in groups.values() if len(group) > 1]
+            self.assertTrue(shared, "a story with distractors has a resent copy")
+            for group in shared:
+                self.assertEqual(len(group), 2)
+                copy_, = [inv for inv in group if inv["invoice_id"] not in posted]
+                self.assertTrue(end <= parse_time(copy_["issued_at"]) < end + dt.timedelta(days=4))
+        public = generate(11, GRID[7])["public"]  # without distractors every signature is unique
+        self.assertEqual(len({invoice_signature(inv) for inv in public["invoices"]}), len(public["invoices"]))
 
     def test_seed_and_config_do_not_appear_in_open_records(self):
         episode = generate(918273645, CLEAN)
@@ -389,7 +403,7 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(policy["period_interval"], "[start, end)")
         self.assertIn("booked", policy["payment_rule"])
         self.assertNotIn("\n", policy["payment_rule"])
-        self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
+        self.assertEqual(policy["duplicate_signature"], "entity, currency, total, line items incl. service period; a duplicate_invoice is two invoices with this signature that are both posted in the ledger (an unposted invoice is never part of one); service_start/service_end only identify duplicates and never affect period_cutoff, which uses the document date alone (period_basis)")
 
     def test_payment_rule_text_orders_by_document_date_as_the_books_do(self):
         """Audit B1: the rule said "earlier posted payments", the books order by document date. Read

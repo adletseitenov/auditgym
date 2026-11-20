@@ -42,7 +42,9 @@ Surface statistics on what the agent can read, in three views. For each error ty
   pairs      the two invoices of a duplicate_invoice against other pairs of invoices of one entity
              with one total (the legitimate repeats): gap in days, order by position and by id,
              id distance, same time of day, same items, same service period, which one is paid and
-             posted.
+             posted. Only pairs of two posted invoices are compared: a pair with an unposted invoice
+             (such as a resent copy, decoy A) is ruled out by the definition itself, so its
+             features would "find" the definition, not a leak.
 The separation measure is the AUC (Mann-Whitney, ties averaged; a boolean is 0/1). A row FAILs only
 when it is both large and significant: |AUC - 0.5| >= MIN_EFFECT (0.10) and the two-sided p-value of
 the Mann-Whitney z statistic (normal approximation, tie-corrected variance) is below
@@ -267,8 +269,13 @@ def check_shape(reply: dict | None, kind: str, mode: str) -> list[str]:
     if not isinstance(reply, dict):
         return ["reply is not a JSON object"]
     observation = reply.get("observation")
-    if not isinstance(observation, dict) or set(observation) != OBS_KEYS.get(observation.get("type"), set()):
-        return [f"observation keys {sorted(observation) if isinstance(observation, dict) else observation}"]
+    if not isinstance(observation, dict):
+        return [f"observation keys {observation}"]
+    keys = set(observation)
+    if observation.get("type") == "records" and observation.get("limit_clamped") is True:
+        keys.discard("limit_clamped")  # the documented flag of a list_records limit above the page size
+    if keys != OBS_KEYS.get(observation.get("type"), set()):
+        return [f"observation keys {sorted(observation)}"]
     problems = []
     if observation["type"] == "error":
         error = observation["error"]
@@ -610,7 +617,7 @@ def surface_statistics(episodes: list[dict]) -> list[dict]:
         duplicates = {frozenset(issue["affected_ids"]) for issue in episode["private"]["truth"]["issues"]
                       if issue["type"] == "duplicate_invoice"}
         for pair, values in pairs.items():
-            if pair not in duplicates and pair & touched:
+            if pair not in duplicates and (pair & touched or not values["earlier_posted"] or not values["later_posted"]):
                 continue
             for name, value in values.items():
                 add(("duplicate_invoice", "pairs", name), value, pair in duplicates)
