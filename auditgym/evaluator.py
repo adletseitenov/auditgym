@@ -135,6 +135,7 @@ class Evaluator:
         self._loaded = None   # episode from load(); reset() without seed restarts it
         self._next_seed = DEFAULT_SEED  # seed of the next reset() without a seed and without files
         self._episode = None  # the running episode, public and private
+        self._resets_abandoned = 0  # episodes of this session replaced by reset/load while running
         self._clear()
 
     @property
@@ -202,13 +203,23 @@ class Evaluator:
     def _swap_in(self, episode: dict) -> tuple[dict, dict]:
         """Start `episode`; if that fails, the previous state is put back untouched."""
         saved = dict(self.__dict__)
+        # A reset of a running episode is allowed (the jury may test that reset isolates the
+        # episode), but it is never silent: the abandoned episode goes to the journal with the
+        # steps it spent, so a restart cannot hide 99 inspection steps (audit A2). An episode that
+        # has not spent a step (Env.from_files loads, then reset() restarts it) showed nothing but
+        # the reset observation and is not journaled.
+        abandoned = (self._episode, self._steps) if self.running and self._steps > 0 else None
         self._clear()
         try:
-            return self._start(episode)
+            started = self._start(episode)
         except BaseException:
             self.__dict__.clear()
             self.__dict__.update(saved)
             raise
+        if abandoned is not None:
+            self._resets_abandoned += 1
+            self._write_abandoned(*abandoned)
+        return started
 
     def _start(self, episode: dict) -> tuple[dict, dict]:
         public = episode["public"]
@@ -332,12 +343,26 @@ class Evaluator:
             return -1.0
 
     def _write_result(self, result: dict, inspection_steps: int, truncated: bool) -> None:
-        if self._results_path is None and self._results_stream is None:
-            return
         line = {"episode_id": self._episode["public"]["manifest"]["episode_id"], "mode": self._mode,
-                "terminated": not truncated, "truncated": truncated, "inspection_steps": inspection_steps}
+                "event": "finished", "terminated": not truncated, "truncated": truncated,
+                "inspection_steps": inspection_steps}
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
+        self._write_line(line)
+
+    def _write_abandoned(self, episode: dict, steps: int) -> None:
+        """The journal row of an episode replaced by reset/load before it ended: no reward, the
+        steps it spent, and how many episodes this session has abandoned so far."""
+        line = {"episode_id": episode["public"]["manifest"]["episode_id"], "mode": self._mode,
+                "event": "abandoned", "terminated": False, "truncated": False,
+                "inspection_steps": steps, "abandoned_in_session": self._resets_abandoned}
+        for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
+            line[key] = None
+        self._write_line(line)
+
+    def _write_line(self, line: dict) -> None:
+        if self._results_path is None and self._results_stream is None:
+            return
         text = json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n"
         try:
             if self._results_stream is not None:

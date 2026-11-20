@@ -577,6 +577,63 @@ class RewardTest(unittest.TestCase):
         self.assertEqual(lines[1]["reward"], -1.0)
         self.assertIsNotNone(lines[1]["structure_error"])
 
+    def test_reset_mid_episode_logs_the_abandoned_episode_with_its_steps(self):
+        """Audit A2: 99 steps, reset to the same seed, a correct submit. The journal must show the
+        abandoned episode and its 99 steps, not only a clean 1.0 with zero inspection steps."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path)
+            evaluator.reset(5, {"errors": {"duplicate_invoice": 1}})
+            for _ in range(99):
+                evaluator.step({"action": "calculator", "expression": "1"})
+            self.assertEqual(evaluator.steps_remaining(), 1)
+            observation, _ = evaluator.reset(5, {"errors": {"duplicate_invoice": 1}})
+            self.assertEqual(observation["steps_remaining"], 100)  # reset still isolates the episode
+            episode_id = observation["manifest"]["episode_id"]
+            evaluator.step({"action": "submit", "findings": {"episode_id": episode_id, "findings": []}})
+            lines = [json.loads(line) for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([line["event"] for line in lines], ["abandoned", "finished"])
+        abandoned, finished = lines
+        self.assertEqual(abandoned["episode_id"], episode_id)
+        self.assertEqual(abandoned["inspection_steps"], 99)
+        self.assertEqual(abandoned["abandoned_in_session"], 1)
+        self.assertEqual((abandoned["terminated"], abandoned["truncated"], abandoned["reward"]),
+                         (False, False, None))
+        self.assertEqual(finished["inspection_steps"], 0)
+        from tools.schema_lite import load_schema, validate
+        for line in lines:
+            self.assertEqual(validate(line, load_schema("journal_row")), [], line)
+
+    def test_a_refused_reset_abandons_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path)
+            evaluator.reset(5, {})
+            evaluator.step({"action": "calculator", "expression": "1"})
+            with self.assertRaises(EvaluatorError):
+                evaluator.reset("not a seed", {})
+            self.assertEqual(path.read_text(encoding="utf-8"), "")
+            self.assertEqual(evaluator.steps_remaining(), 99)
+
+    def test_reset_before_the_first_step_abandons_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path)
+            evaluator.reset(5, {})
+            evaluator.reset(6, {})
+            self.assertEqual(path.read_text(encoding="utf-8"), "")
+
+    def test_reset_after_the_end_abandons_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "results.jsonl"
+            evaluator = Evaluator(mode="eval", results_path=path)
+            observation, _ = evaluator.reset(5, {})
+            evaluator.step({"action": "submit", "findings": {
+                "episode_id": observation["manifest"]["episode_id"], "findings": []}})
+            evaluator.reset(5, {})
+            lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([line["event"] for line in lines], ["finished"])
+
     def test_eval_truncation_is_logged_and_hidden(self):
         with tempfile.TemporaryDirectory() as directory:
             path = f"{directory}/results.jsonl"

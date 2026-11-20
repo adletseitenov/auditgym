@@ -411,7 +411,7 @@ class JournalTest(unittest.TestCase):
         first, second = [json.loads(line) for line in path.read_text().splitlines()]
         self.assertEqual((first["terminated"], first["truncated"]), (True, False))
         self.assertEqual((second["terminated"], second["truncated"]), (False, True))
-        self.assertEqual(set(first), {"episode_id", "mode", "terminated", "truncated", "inspection_steps", "reward",
+        self.assertEqual(set(first), {"episode_id", "mode", "event", "terminated", "truncated", "inspection_steps", "reward",
                                       "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"})
 
     def test_judge_exception_is_minus_one_and_logged_never_a_win(self):
