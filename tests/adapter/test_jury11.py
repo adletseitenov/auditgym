@@ -1,5 +1,6 @@
 """Eleventh blind jury (DECISIONS Z): the default journal of make_env() when the working directory is not
-writable, and invoice_id/payment_id of a document cited in evidence_ids."""
+writable. The invoice_id/payment_id evidence alias of Z was withdrawn in DECISIONS AA: such an id is exact-compared
+and is not an evidence id (FP)."""
 from __future__ import annotations
 
 import copy
@@ -87,7 +88,7 @@ class DefaultJournalFallbackTest(unittest.TestCase):
                 self.assertEqual(judge_adapter.make_env()._journal, target)
 
 
-class DocumentIdAliasTest(unittest.TestCase):
+class DocumentIdIsExactTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from auditgym.storage import load_episode
@@ -131,29 +132,18 @@ class DocumentIdAliasTest(unittest.TestCase):
         self.assertEqual((row["tp"], row["fp"], row["fn"]), (score["tp"], score["fp"], score["fn"]))
         return score["tp"], score["fp"], score["fn"]
 
-    def test_evidence_with_invoice_or_payment_id_is_a_true_positive(self):
+    def test_evidence_with_invoice_or_payment_id_is_a_false_positive(self):
+        """DECISIONS AA: ids are compared exactly; an invoice_id in evidence_ids names no evidence record."""
         total = len(self.answer["findings"])
         self.assertEqual(self.counts(self.answer), (total, 0, 0))
-        self.assertEqual(self.counts(self.aliased("evidence_ids")), (total, 0, 0))
+        tp, fp, fn = self.counts(self.aliased("evidence_ids"))
+        self.assertEqual((tp, fp, fn), (0, total, total))
 
     def test_affected_ids_with_invoice_id_stay_exact_and_are_false_positives(self):
         total = len(self.answer["findings"])
         tp, fp, fn = self.counts(self.aliased("affected_ids"))
         self.assertEqual(tp, 0)
         self.assertEqual((fp, fn), (total, total))
-
-    def test_aliases_are_learnt_from_read_records_when_the_episode_is_generated(self):
-        env, _ = new_env("learn")
-        with env:
-            env.reset(1, {"mode": "train", "team_config": {"errors": {"duplicate_invoice": 1}}})
-            observation, *_ = env.step({"name": "list_records", "args": {"table": "invoices"}})
-            document = observation["result"]["records"][0]
-            message = {"findings": [{"evidence_ids": [document["invoice_id"], document["doc_id"]]}]}
-            translated = judge_adapter._translate_fx_message(message, env._aliases)
-            self.assertEqual(translated["findings"][0]["evidence_ids"], [document["doc_id"]])
-            other = judge_adapter._translate_fx_message(
-                {"findings": [{"affected_ids": [document["invoice_id"]]}]}, env._aliases)
-            self.assertEqual(other["findings"][0]["affected_ids"], [document["invoice_id"]])
 
 
 if __name__ == "__main__":
