@@ -51,7 +51,8 @@
           "affected_ids",
           "claimed_amount_minor",
           "currency",
-          "evidence_ids"
+          "evidence_ids",
+          "explanation"
         ],
         "additionalProperties": true
       },

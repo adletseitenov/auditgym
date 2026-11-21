@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import copy
 
-from .limits import MAX_EVIDENCE_IDS, MAX_FINDINGS
+from .limits import MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS
 
 GENERAL = [
     "Вывод — TP, только если совпали все пять признаков: type; множество affected_ids (порядок не важен, "
@@ -34,6 +34,8 @@ GENERAL = [
     "(limits.max_findings). Достаточно одного набора из one_of; все четыре набора дубля вместе — шесть ID.",
     "ID: affected_ids — doc_id документов (таблицы invoices, payments); строки — row_id таблицы ledger; "
     "ключ курса — ID таблицы fx вида «дата|ИСТ|ЦЕЛЬ».",
+    f"Все шесть полей вывода обязательны, в том числе explanation (строка до {MAX_EXPLANATION_CHARS} кодовых "
+    "точек, пустая допустима; на сопоставление не влияет): без любого поля вся отправка — неверная структура, −1.",
 ]
 
 EVIDENCE_ROLES = {

@@ -92,6 +92,12 @@ def _finding_null_explanation(raw):
     return _ORIGINAL_FINDING(raw)
 
 
+def _finding_missing_explanation_ok(raw):
+    if isinstance(raw, dict) and "explanation" not in raw:
+        raw = dict(raw, explanation="")
+    return _ORIGINAL_FINDING(raw)
+
+
 def _amount_accepts_floats(value):
     return int(value) if type(value) is float and value.is_integer() else _ORIGINAL_AMOUNT(value)
 
@@ -183,6 +189,7 @@ MUTANTS: list[tuple[str, list]] = [
     ("structure: a negative integer amount is a structure error, not an FP", [(findings, "_amount", _amount_rejects_negative)]),
     ("structure: foreign episode_id accepted", [(judge, "parse_findings", _parse_any_episode)]),
     ("structure: explanation null accepted", [(findings, "_finding", _finding_null_explanation)]),
+    ("structure: a missing explanation accepted as empty", [(findings, "_finding", _finding_missing_explanation_ok)]),
     ("structure: a float amount with an integral value accepted", [(findings, "_amount", _amount_accepts_floats)]),
     ("structure: a repeated affected id is a structure error",
      [(findings, "_finding", _finding_repeat_in_affected_is_an_error)]),

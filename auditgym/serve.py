@@ -151,7 +151,7 @@ class Server:
         if line.ops - {b"step"}:  # names a reset, load or close: not a step of the episode
             return protocol_error("bad_request", self._remaining())
         try:
-            return _step_reply(self.evaluator.reject(submit=line.submit))
+            return _step_reply(self.evaluator.reject(submit=line.submit, oversize=line.oversize))
         except EvaluatorError:  # nothing is running: a plain bad request
             return protocol_error("bad_request", self._remaining())
 
@@ -160,9 +160,10 @@ class Unreadable:
     """A request line that could not be taken as JSON: the "op" values seen in it, and whether it
     names a submit action."""
 
-    def __init__(self, ops: set, submit: bool) -> None:
+    def __init__(self, ops: set, submit: bool, oversize: bool = False) -> None:
         self.ops = ops
         self.submit = submit
+        self.oversize = oversize  # longer than MAX_LINE_BYTES (the structure error is message_too_large)
 
 
 _OP = re.compile(rb'"op"\s*:\s*"([A-Za-z_]{1,16})"')
@@ -199,7 +200,7 @@ def _read_line(stream):
         chunk = stream.readline(MAX_LINE_BYTES)
         if not chunk:
             break
-    return Unreadable(ops, submit)
+    return Unreadable(ops, submit, oversize=True)
 
 
 def serve(evaluator: Evaluator, stdin=None, stdout=None, allow_load: bool = True) -> int:

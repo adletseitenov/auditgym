@@ -229,12 +229,12 @@ def invalid_structure_is_minus_one() -> Optional[str]:
 
 
 def official_conventions_are_exact() -> Optional[str]:
-    """DECISIONS R: ids, type and currency compare exactly; affected_ids is a set; a missing explanation is empty."""
+    """DECISIONS R: ids, type and currency compare exactly; affected_ids is a set; a missing explanation is a structure error."""
     return _rows(("lower-case currency is not the code (M06)", "currency with spaces is not the code (M06)",
                   "type in capitals with spaces is an unknown type: an FP",
                   "unknown type string is unmatchable: an FP, not a structure error",
                   "affected_ids repeated: still the set (M01)", "affected_ids repeated with a stranger",
-                  "missing explanation is the empty string",
+                  "missing explanation is a structure error (CASE 05, CHECKS rule 8)",
                   "negative amount is a well-formed FP, not a structure error"))
 
 

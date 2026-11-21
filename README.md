@@ -108,7 +108,7 @@ print(reward, info)   # 0.964 {'f1': 1.0, 'inspection_steps': 18, 'precision': 1
 - Один секрет, seed и конфигурация дают побайтно один эпизод; секрет не попадает в наблюдения, журналы и траектории.
 - Граница — оценщик под отдельным пользователем или в отдельном контейнере; `Env()` под тем же пользователем границей не является.
 - `Env(mode="eval", server_command=[...])` подключается к такому оценщику; `Env` секрет из окружения не наследует и в `eval` без явного секрета отказывает (`bad_secret_file`).
-- Журнал оценщика подписан (HMAC-цепочка): `python3 -m auditgym verify-journal PATH --secret-file SECRET`. Строки `eval`, записанные без секрета оценщика (`"secret": "none"`) или без подписи, дают код 1: такой закрытый прогон не засчитывается.
+- Журнал оценщика подписан (HMAC-цепочка): `python3 -m auditgym verify-journal PATH --secret-file SECRET`. Строки `eval`, записанные без секрета оценщика (`"secret": "none"`) или без подписи, дают код 1: журнал не подтверждён подписью; без `secret_file` у адаптера это ожидаемо, а награду даёт `score_episode` (`docs/ADAPTER.md`).
 - Эталон для oracle под секретом: `python3 -m auditgym export --secret-file ...`.
 
 Рецепты (`sudo`, Docker), коды возврата `verify-journal`, экспорт — [docs/CLOSED-RUN.md](docs/CLOSED-RUN.md).

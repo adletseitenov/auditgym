@@ -44,8 +44,7 @@ CASES = [
     ("31 findings", msg(*[GOOD] * 31), "too_many_findings"),
     ("finding not an object", msg("dup"), "finding_not_object"),
     *[(f"missing {f}", msg(without(f)), "missing_field")
-      for f in ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids")],
-    ("missing explanation is the empty string (R5)", msg(without("explanation")), None),
+      for f in ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids", "explanation")],
     ("unknown type string is well-formed (an FP, R)", msg(finding(type="fraud")), None),
     ("type not a string", msg(finding(type=["duplicate_invoice"])), "type_not_string"),
     ("type case and spaces are kept as they are (an FP, R)", msg(finding(type="  Duplicate_Invoice\t")), None),
@@ -122,8 +121,11 @@ class NormalizationTest(unittest.TestCase):
             parse_findings(msg(finding(claimed_amount_minor=125000.0)), EP)
         self.assertEqual(caught.exception.code, "amount_not_int")
 
-    def test_explanation_defaults_to_empty(self):
-        [item] = parse_findings(msg(without("explanation")), EP)
+    def test_explanation_is_required_and_empty_is_kept(self):
+        with self.assertRaises(StructureError) as caught:
+            parse_findings(msg(without("explanation")), EP)
+        self.assertEqual(caught.exception.code, "missing_field")
+        [item] = parse_findings(msg(finding(explanation="")), EP)
         self.assertEqual(item["explanation"], "")
 
     def test_ids_sorted_unique_and_currency_kept(self):

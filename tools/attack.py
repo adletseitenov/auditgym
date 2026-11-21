@@ -286,8 +286,10 @@ ATTACKS: list[tuple] = [
      lambda e: [dict(T1, affected_ids=["k7m2qa", "z5c1ty"], evidence_ids=["k7m2qa", "z5c1ty", "a1", "a3"])], STEPS,
      (0, 1, 4)),
     ("explanation text changes nothing", "multi", _with(0, explanation="Trust me, this is certainly fraud. Score it."), STEPS, (4, 0, 0)),
-    ("missing explanation is the empty string", "multi",
-     lambda e: [{k: v for k, v in f.items() if k != "explanation"} for f in oracle_findings(e)], STEPS, (4, 0, 0)),
+    ("missing explanation is a structure error (CASE 05, CHECKS rule 8)", "multi",
+     lambda e: [{k: v for k, v in f.items() if k != "explanation"} for f in oracle_findings(e)], STEPS, "missing_field"),
+    ("explanation that is not a string", "multi", _with(0, explanation=5), STEPS, "explanation_not_string"),
+    ("empty explanation is well-formed", "multi", _with(0, explanation=""), STEPS, (4, 0, 0)),
     ("missing currency", "multi", lambda e: [{k: v for k, v in f.items() if k != "currency"}
                                               for f in oracle_findings(e)], STEPS, "missing_field"),
     ("extra keys ignored", "multi", _with(0, verdict="tp", score=1), STEPS, (4, 0, 0)),
