@@ -61,7 +61,7 @@ import os
 import re
 import sys
 
-from .actions import default_results_path
+from .actions import default_results_with_fallback
 from .limits import MAX_LINE_BYTES, json_depth_exceeds
 from .evaluator import Evaluator, EvaluatorError
 
@@ -257,7 +257,7 @@ def main(argv: list[str]) -> int:
         return 2
     stream = None
     if arguments.mode == "eval" and arguments.results is None and arguments.results_fd is None:
-        arguments.results = default_results_path()  # the journal of an eval run always exists (C5)
+        arguments.results = default_results_with_fallback()  # the journal of an eval run always exists (C5); <tmp>/auditgym/ when the default is not writable
         try:
             os.makedirs(os.path.dirname(arguments.results) or ".", exist_ok=True)
         except OSError:

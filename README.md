@@ -9,6 +9,7 @@
 docker build -t auditgym . && docker run --rm --network none auditgym
 python3 -m auditgym check          # то же без Docker: Python ≥ 3.11, зависимостей нет
 python3 -m auditgym check --full   # полный режим: все тесты и шесть длинных инструментов
+docker run --rm --network none --cpus 2 --memory 4g --user 65534 --read-only --tmpfs /tmp auditgym python -m auditgym check --full   # усиленный запуск (не root, файловая система только для чтения), проверен: CHECK: PASSED
 ```
 
 Запускает юнит-тесты, линтер детерминизма и таблицу `tools/score.py` (наше зеркало критериев кейса §10, это не оценка жюри); хвост вывода: `Внутренние проверки (не оценка жюри): пройдено N/M (…%)`, `total N s`, `CHECK: PASSED`. Быстрый режим занимает около 4–7 минут в зависимости от машины, полный (`--full`) около 10–14 минут; код возврата 0 только при `CHECK: PASSED`. Измерения по машинам, состав режимов и CI — [docs/USAGE.md](docs/USAGE.md), «Проверка: подробности».

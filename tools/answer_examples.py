@@ -90,8 +90,8 @@ def render() -> str:
         finding["evidence_ids"] = [_colon(i) for i in finding["evidence_ids"]]
         out += [f"**{kind}.** {NOTES[kind][0]}", "", "```json", json.dumps(finding, ensure_ascii=False, indent=2),
                 "```", ""]
-    out += [f"Ключ курса в примере `fx_error` — `{fx_example}`. Весь ответ — "
-            '`{"episode_id": "' + episode_id + '", "findings": [ ...выводы... ]}` или голый список выводов; '
+    out += [f"Ключ курса в примере `fx_error` — `{fx_example}`. Весь ответ — JSON-объект "
+            '`{"episode_id": "' + episode_id + '", "findings": [ ...выводы... ]}` (п. 14: строка JSON и голый список в адаптере — неверная структура); '
             "порядок выводов и ID в списках значения не имеет.", END]
     return "\n".join(out)
 

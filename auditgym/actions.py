@@ -8,6 +8,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 
 from .answer_rules import answer_rules
 from .limits import (MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
@@ -113,6 +114,22 @@ class ActionError(Exception):
         super().__init__(code)
         self.code = code
         self.action = action  # the action name when it was recognised before the error
+
+
+def default_results_with_fallback() -> str:
+    """Journal path of an eval run without an explicit one, always absolute: `default_results_path()`; when that
+    cannot be opened for append (non-root user, read-only file system) the same file name under
+    <system temporary directory>/auditgym/. When neither opens, the primary path is returned and the caller
+    refuses it (bad_results_path). Client, server and adapter use this one rule; an explicit path never falls back."""
+    primary = os.path.abspath(default_results_path())
+    for path in (primary, os.path.join(tempfile.gettempdir(), "auditgym", os.path.basename(primary))):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.close(open_results(path))
+            return path
+        except OSError:
+            continue
+    return primary
 
 
 def error(code: str) -> dict:

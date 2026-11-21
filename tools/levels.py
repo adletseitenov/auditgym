@@ -15,7 +15,7 @@ import sys
 
 from auditgym import levels as levels_module
 from auditgym.config import interaction_issue_count
-from auditgym.limits import INVOICES_PER_ERROR, MAX_PAGES, MAX_STEPS, pages
+from auditgym.limits import INVOICES_PER_ERROR, MAX_ISSUES, MAX_PAGES, MAX_STEPS, pages
 from policies.base import TABLES
 
 GRID_SEEDS = 5
@@ -23,9 +23,8 @@ LEVEL_SEEDS = 20
 SEED_BASE = 60_000
 TABLE_POLICIES = ("solver_policy", "reconcile", "heuristic", "flag_all")
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
-MAX_GRID_ISSUES = 12
 # (label, size.invoices, size.background_pairs, currencies, months, interaction). Errors: as many as
-# the density limit allows (up to MAX_GRID_ISSUES), spread over the four types in turn.
+# the density limit allows (errors plus the 2 issues of I1/I2 stay within limits.MAX_ISSUES), spread over the four types in turn.
 GRID = [
     ("small", [24, 32], [30, 60], 1, 1, "none"),
     ("default", [64, 100], [150, 300], 1, 1, "none"),
@@ -40,7 +39,8 @@ CURRENCIES = ("USD", "EUR", "RUB")
 
 
 def spread_errors(invoices_low: int, interaction: str) -> dict:
-    room = min(invoices_low // INVOICES_PER_ERROR - interaction_issue_count(interaction), MAX_GRID_ISSUES)
+    extra = interaction_issue_count(interaction)
+    room = min(invoices_low // INVOICES_PER_ERROR, MAX_ISSUES) - extra  # the cap counts I1/I2 too
     errors = dict.fromkeys(ERROR_TYPES, 0)
     for k in range(max(room, 0)):
         errors[ERROR_TYPES[k % len(ERROR_TYPES)]] += 1

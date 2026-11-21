@@ -168,37 +168,44 @@ class ExplanationRequiredTest(unittest.TestCase):
 
 
 class ScoreEpisodeShapesTest(unittest.TestCase):
-    def test_bare_list_scores_like_the_adapter_submit(self):
+    """DECISIONS AC: the adapter accepts only the findings.json object; score_episode and submit agree."""
+
+    def test_only_the_object_is_valid_in_score_episode_and_submit(self):
         fx = episode_with_errors()
         answer = helpers.oracle_findings(fx)
         log = str(helpers.scratch() / "log9b.jsonl")
         steps = 4
-        by_score = {
-            "object": judge_adapter.score_episode(fx["dir"], answer, steps, journal_path=log),
-            "list": judge_adapter.score_episode(fx["dir"], answer["findings"], steps, journal_path=log),
-            "json text": judge_adapter.score_episode(fx["dir"], json.dumps(answer["findings"]), steps, journal_path=log),
-        }
-        self.assertEqual(by_score["object"]["fn"], 0)
-        self.assertEqual(by_score["list"], by_score["object"])
-        self.assertEqual(by_score["json text"], by_score["object"])
-        for label, payload in (("object", answer), ("list", answer["findings"])):
-            env, path = new_env("shape-" + label)
+        good = judge_adapter.score_episode(fx["dir"], answer, steps, journal_path=log)
+        self.assertEqual(good["fn"], 0)
+        bad = {"list": answer["findings"], "json text": json.dumps(answer["findings"]),
+               "json text object": json.dumps(answer), "no episode_id": {"findings": answer["findings"]},
+               "inner json text": {"episode_id": answer["episode_id"], "findings": json.dumps(answer["findings"])}}
+        for label, payload in bad.items():
+            result = judge_adapter.score_episode(fx["dir"], payload, steps, journal_path=log)
+            self.assertEqual(result["return"], -1, label)
+            self.assertIsNone(result["tp"], label)
+        for label, payload in (("object", answer),) + tuple(bad.items()):
+            env, path = new_env("shape-" + label.replace(" ", "-"))
             with env:
                 env.reset(0, closed(fx["dir"]))
                 for _ in range(steps):
                     env.step(helpers.list_action())
                 observation, *_ = env.step(submit_action(payload))
-            self.assertEqual(observation["result"], {"accepted": True}, label)
             row = helpers.finished(path)[-1]
-            expected = by_score["object"]
-            self.assertEqual((row["tp"], row["fp"], row["fn"], row["reward"]),
-                             (expected["tp"], expected["fp"], expected["fn"], expected["return"]), label)
+            if label == "object":
+                self.assertEqual(observation["result"], {"accepted": True})
+                self.assertEqual((row["tp"], row["fp"], row["fn"], row["reward"]),
+                                 (good["tp"], good["fp"], good["fn"], good["return"]))
+            else:  # the policy and the journal get the same verdict as score_episode
+                self.assertEqual(observation["error"]["code"], "invalid_findings", label)
+                self.assertEqual(row["reward"], -1.0, label)
+                self.assertIsNotNone(row["structure_error"], label)
 
     def test_empty_bare_list_and_bad_shapes(self):
         fx = helpers.fixture("C")
         log = str(helpers.scratch() / "log9c.jsonl")
-        empty = judge_adapter.score_episode(fx["dir"], [], 0, journal_path=log)
-        self.assertEqual((empty["tp"], empty["fp"]), (0, 0))
+        self.assertEqual(judge_adapter.score_episode(fx["dir"], [], 0, journal_path=log)["return"], -1)
+        self.assertEqual(judge_adapter.score_episode(fx["dir"], helpers.empty_findings(fx), 0, journal_path=log)["return"], 1.0)
         self.assertEqual(judge_adapter.score_episode(fx["dir"], {"findings": []}, 0, journal_path=log)["return"], -1)
         self.assertEqual(judge_adapter.score_episode(fx["dir"], 7, 0, journal_path=log)["return"], -1)
 
