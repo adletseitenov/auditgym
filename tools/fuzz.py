@@ -60,6 +60,14 @@ def grid() -> list[tuple[str, dict]]:
                                       "size": {"invoices": [96, 100], "background_pairs": [400, 420]},
                                       "currencies": ["USD", "EUR", "CNY"], "timezone": "-11:00",
                                       "period": {"start": "2026-12-01", "months": 2}}))
+    # The other variants of an allocation_gap (docs/DECISIONS.md S): fully missing, and a per-issue mix.
+    for mode, count, currencies in (("missing", 1, ["USD"]), ("missing", 2, []), ("mixed", 3, ["USD", "EUR"])):
+        out.append((f"gap_{mode}_x{count}", {"errors": {"allocation_gap": count}, "allocation_gap_mode": mode,
+                                              "size": {"invoices": [40, 60], "background_pairs": [0, 40]},
+                                              "currencies": currencies, "timezone": "+05:30"}))
+    out.append(("gap_missing_I1+all", {"errors": _errors(*TYPES), "allocation_gap_mode": "missing", "interaction": "I1",
+                                       "size": {"invoices": [64, 80], "background_pairs": [50, 100]},
+                                       "currencies": ["USD"]}))
     return out
 
 

@@ -126,6 +126,15 @@
         "I2"
       ]
     },
+    "allocation_gap_mode": {
+      "type": "string",
+      "enum": [
+        "partial",
+        "missing",
+        "mixed"
+      ],
+      "description": "Variant of an allocation_gap: partial (default), missing (the whole closing moved to unallocated) or mixed (drawn per issue)."
+    },
     "distractors": {
       "type": "boolean"
     },

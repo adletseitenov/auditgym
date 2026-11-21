@@ -477,7 +477,11 @@ def _check_postings(books: Books, name: str, deviations) -> list[str]:
             # Part of the closing sits on unallocated instead: one row, a positive gap, and the
             # receivable plus unallocated still add up to what the rule gives.
             gap = unallocated - expected["unallocated"]
-            if (len(actual) != len(receivable) or set(actual) != set(expected["closes"])
+            # "missing": the whole closing of one invoice moved, so that receivable row is absent and
+            # the gap equals the closing the rule gives.
+            absent = set(expected["closes"]) - set(actual)
+            if (len(actual) != len(receivable) or not set(actual) <= set(expected["closes"]) or len(absent) > 1
+                    or any(gap != expected["closes"][ref] for ref in absent)
                     or len(by_account[acc["unallocated"]]) != 1 or gap <= 0
                     or sum(actual.values()) + unallocated != sum(expected["closes"].values()) + expected["unallocated"]):
                 problems.append(f"{name}: payment {doc} splits its closing other than by the payment rule and one gap")
@@ -589,9 +593,9 @@ def _evidence_problem(books: Books, issue: dict) -> str | None:
                    and r["invoice_id"] == invoice["invoice_id"] and r["credit_minor"] > 0]
         debit = [r["row_id"] for r in books.own.get(invoice["invoice_id"], [])
                  if r["account"] == acc["receivable"] and r["debit_minor"] > 0]
-        ok = len(unallocated) == len(closing) == len(debit) == 1
+        ok = len(unallocated) == len(debit) == 1 and len(closing) <= 1  # none when the whole closing moved
         return None if ok and sets == [sorted(affected + unallocated + debit + closing)] \
-            else "allocation_gap needs [payment, invoice, unallocated row, invoice receivable debit, payment receivable credit]"
+            else "allocation_gap needs [payment, invoice, unallocated row, invoice receivable debit, payment receivable credit, absent when the whole closing moved]"
     doc = docs[0]
     key = rate_key(doc) if kind == "fx_error" else None
     if kind == "fx_error" and key not in books.rates:

@@ -112,9 +112,11 @@ def _fx_evidence_key(world: dict, currency: str, moment: dt.datetime) -> str:
     return "FX:" + fx_key(date, currency, world["base_currency"])
 
 
-def _gap_evidence(payment_key: str, invoice_key: str) -> list[list[str]]:
-    return [sorted([doc_key(payment_key), doc_key(invoice_key)]) + [
-        f"R:{payment_key}:un", f"R:{invoice_key}:dr", f"R:{payment_key}:ar:{invoice_key}"]]
+def _gap_evidence(payment_key: str, invoice_key: str, keep_closing: bool = True) -> list[list[str]]:
+    """Both documents, the unallocated row, the invoice's receivable debit and, unless the whole
+    closing moved ("missing": the row does not exist), the payment's receivable credit."""
+    rows = [f"R:{payment_key}:un", f"R:{invoice_key}:dr"] + ([f"R:{payment_key}:ar:{invoice_key}"] if keep_closing else [])
+    return [sorted([doc_key(payment_key), doc_key(invoice_key)]) + rows]
 
 
 def _mark_with_payments(world: dict, used: set, invoice_key: str) -> None:
@@ -281,7 +283,13 @@ def _gap(rng: Rng, world: dict, payment: dict, closing: int) -> int:
     return max(1, min(closing - 1, share))
 
 
-def allocation_gap(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, dict]:
+def allocation_gap(rng: Rng, world: dict, order: list[str], used: set,
+                   mode: str = "partial") -> tuple[dict, dict]:
+    """`mode` is the config's allocation_gap_mode. "mixed" is drawn from its own child stream, so
+    the draws of the "partial" variant are the same in every mode."""
+    if mode == "mixed":
+        mode = "missing" if rng.child("variant").chance(1, 2) else "partial"
+    missing = mode == "missing"
     parts = None
     for key in order:
         if key in used or not key.startswith("P"):
@@ -297,15 +305,16 @@ def allocation_gap(rng: Rng, world: dict, order: list[str], used: set) -> tuple[
             continue
         parts = parts or payment_parts(world)
         closing = parts[key]["closes"][invoice["key"]]
-        if closing < 2:
+        if closing < (1 if missing else 2):
             continue
-        gap = _gap(rng, world, payment, closing)
+        gap = closing if missing else _gap(rng, world, payment, closing)
         world = _copy_world(world)
         _payment(world, key)["gap_minor"] = gap
         used.update({key, invoice["key"]})
         docs = sorted([doc_key(key), doc_key(invoice["key"])])
         return world, {"type": "allocation_gap", "affected": docs, "amount_minor": gap, "currency": world["base_currency"],
-                       "evidence": _gap_evidence(key, invoice["key"]), "params": {"closing_before_minor": closing}}
+                       "evidence": _gap_evidence(key, invoice["key"], keep_closing=not missing),
+                       "params": dict({"closing_before_minor": closing}, **({"variant": "missing"} if missing else {}))}
     raise NoTarget("allocation_gap")
 
 
@@ -446,7 +455,8 @@ def inject_errors(root: Rng, world: dict, config: dict) -> tuple[dict, list[dict
         stream = root.child(f"inject:{name}")
         order = _order(stream.child("targets"), story_docs)
         for case in range(count):
-            world, injection = OPERATORS[name](stream.child(f"case:{case}"), world, order, used)
+            extra = {"mode": config.get("allocation_gap_mode", "partial")} if name == "allocation_gap" else {}
+            world, injection = OPERATORS[name](stream.child(f"case:{case}"), world, order, used, **extra)
             record(world, injection)
     scenario = config["interaction"]
     if scenario != "none":

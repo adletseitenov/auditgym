@@ -71,14 +71,16 @@ TYPES = {
     },
     "allocation_gap": {
         "affected_ids": "doc_id платежа и doc_id счёта, на который платёж ссылается (ровно два): "
-                        "часть платежа лежит на unallocated, а счёт остаётся открытым.",
+                        "часть платежа (или весь платёж) лежит на unallocated, а счёт остаётся открытым.",
         "claimed_amount_minor": "credit_minor строки unallocated платежа, как записано в ledger (без "
                                 "пересчёта), в базовой валюте; допуск policy.amount_tolerance_minor.allocation_gap.",
         "currency": "policy.base_currency (валюта ledger), не валюта платежа.",
         "evidence": {
             "one_of": [["doc(payment)", "doc(invoice)", "unallocated_row(payment)", "receivable_debit(invoice)",
                         "receivable_credit(payment)"]],
-            "subjects": "payment и invoice — два документа из affected_ids; набор один, нужны все пять ID.",
+            "subjects": "payment и invoice — два документа из affected_ids; набор один. receivable_credit(payment) "
+                        "входит в него, только если такая строка есть в ledger: когда платёж не разнесён вовсе "
+                        "(config allocation_gap_mode = missing), её нет, и набор — оставшиеся четыре ID.",
         },
     },
     "fx_error": {

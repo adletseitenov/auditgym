@@ -30,6 +30,9 @@ CONFIGS = [
     {"errors": {"fx_error": 2, "period_cutoff": 2}, "currencies": ["CNY"], "timezone": "+14:00", "size": SMALL},
     {"errors": {"duplicate_invoice": 1, "allocation_gap": 1}, "currencies": ["RUB"], "base_currency": "USD",
      "timezone": "+05:45", "size": SMALL, "distractors": False},
+    {"errors": {"allocation_gap": 2, "fx_error": 1}, "currencies": ["USD"], "allocation_gap_mode": "missing", "size": SMALL},
+    {"errors": {"allocation_gap": 3, "duplicate_invoice": 1}, "currencies": ["EUR"], "allocation_gap_mode": "mixed",
+     "timezone": "+05:45", "size": SMALL},
 ]
 INTERACTION_CONFIGS = [
     {"errors": {}, "interaction": "I1", "currencies": ["USD"], "size": SMALL},
@@ -166,7 +169,8 @@ def _sufficient(kind: str, affected: list, extra: set, rows_of, rates: dict, bas
         invoice = next(d for d in affected if "line_items" in d)
         want = ids(payment, "unallocated", "credit_minor") | ids(invoice, "receivable", "debit_minor") \
             | ids(payment, "receivable", "credit_minor", invoice["invoice_id"])
-        return len(want) == 3 and extra == want
+        # three ids; two when the whole closing moved (allocation_gap_mode "missing": no payment credit row)
+        return len(want) in (2, 3) and extra == want
     doc = affected[0]
     moment = doc.get("issued_at", doc.get("timestamp"))
     key = f"{dt.datetime.fromisoformat(moment).astimezone(zone).date().isoformat()}|{doc['currency']}|{base}"
@@ -223,6 +227,11 @@ def each_error_type_configurable_alone() -> Optional[str]:
             problems = verify(episode)
             if problems:
                 return f"{name} x{count}: {problems[0]}"
+    for mode in ("missing", "mixed"):  # the other variants of an allocation_gap (docs/DECISIONS.md S)
+        episode = generate(7, {"errors": {"allocation_gap": 3}, "currencies": ["USD"], "allocation_gap_mode": mode})
+        issues = episode["private"]["truth"]["issues"]
+        if len(issues) != 3 or any(issue["type"] != "allocation_gap" for issue in issues) or verify(episode):
+            return f"allocation_gap_mode {mode}: not three valid allocation_gap issues"
     return None
 
 
@@ -239,7 +248,8 @@ def any_seed_and_valid_config_gives_valid_episode() -> Optional[str]:
     if problem:
         return problem
     for bad in ({"seed": 1}, {"errors": {"fx_error": "1"}}, {"timezone": "+05:00\n"}, {"currencies": [["USD"]]},
-                {"period": {"start": "1999-01-01", "months": 1}}, [], {"errors": {"fx_error": 31}}):
+                {"period": {"start": "1999-01-01", "months": 1}}, [], {"errors": {"fx_error": 31}},
+                {"allocation_gap_mode": "full"}, {"allocation_gap_mode": None}, {"allocation_gap_mode": ["missing"]}):
         try:
             normalize_config(bad)
         except ConfigError:

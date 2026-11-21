@@ -110,6 +110,8 @@ def payment_parts(world: dict) -> dict[str, dict]:
             ref = refs[0]
             closes[ref] -= payment["gap_minor"]
             unallocated += payment["gap_minor"]
+            if closes[ref] == 0:  # the whole closing moved: the payment is not applied to the invoice
+                del closes[ref]
         parts[payment["key"]] = {"cash": cash, "correct_cash": correct, "closes": closes, "unallocated": unallocated}
     return parts
 
