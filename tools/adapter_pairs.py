@@ -111,11 +111,12 @@ def _both(*checks):
 # id, what it is, config, predicate. The config is the team config of auditgym/config.py.
 MATRIX = (
     ("D01", "clean, plain reconciliation (no distractors)", {"errors": {}, "distractors": False}, _clean),
-    ("D02", "clean, a correctly split payment", {"errors": {}, "currencies": ["USD", "EUR"]}, _split_payment),
-    ("D03", "clean, a correct refund", {"errors": {}, "currencies": ["EUR"]}, _refund),
-    ("D04", "clean, legitimately repeated amounts", {"errors": {}, "currencies": ["USD"]}, _repeated_sums),
+    ("D02", "clean, a correctly split payment", {"errors": {}, "currencies": ["USD", "EUR"], "distractors": {"split_payments": True}}, _split_payment),
+    ("D03", "clean, a correct refund", {"errors": {}, "currencies": ["EUR"], "distractors": {"refunds": True}}, _refund),
+    ("D04", "clean, legitimately repeated amounts", {"errors": {}, "currencies": ["USD"], "distractors": {"repeated_amounts": True}}, _repeated_sums),
     ("D05", "clean, a period/offset boundary by policy",
-     {"errors": {}, "timezone": "-11:00", "currencies": ["USD"]}, _zone_boundary),
+     {"errors": {}, "timezone": "-11:00", "currencies": ["USD"],
+      "distractors": {"boundary_dates": True, "weekend_fx": True, "other_offsets": True}}, _zone_boundary),
     ("D06", "duplicate invoice", {"errors": {"duplicate_invoice": 1}}, _issue_types("duplicate_invoice")),
     ("D07", "duplicate invoice, EUR", {"errors": {"duplicate_invoice": 1}, "currencies": ["EUR"]},
      _issue_types("duplicate_invoice")),
