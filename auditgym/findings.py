@@ -30,7 +30,9 @@ a reasonable oracle built slightly differently would otherwise get -1):
   limited on the raw list first. A repeated finding is a separate FP, never merged.
 - `affected_ids` and `evidence_ids` may be empty: such a finding is well-formed but never
   matches, because every truth issue has at least one affected id and a non-empty evidence set.
-- Absurdly large non-negative integers are well-formed amounts (they simply never match);
+- Any JSON integer is a well-formed amount, a negative one too (official definitions: the amount must be a
+  JSON integer, nothing more; the matcher compares |claimed - expected| <= tau, so -5 is an FP, DECISIONS U);
+  absurdly large integers are well-formed too (they simply never match);
   the 256 KiB limit bounds them. Their size is computed without converting them to a string.
 - Every id must be a string; the empty string is allowed and matches nothing.
 """
@@ -161,9 +163,7 @@ def _id_list(value: object, limit: int | None) -> list[str]:
 def _amount(value: object) -> int:
     if type(value) is not int:  # rejects bool, float (even 125000.0), str, int subclasses
         raise StructureError("amount_not_int")
-    if value < 0:
-        raise StructureError("negative_amount")
-    return value
+    return value  # a negative JSON integer is the right type: a finding that matches nothing (an FP)
 
 
 def _finding(raw: object) -> dict:

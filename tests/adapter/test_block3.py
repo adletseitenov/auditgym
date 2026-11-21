@@ -373,6 +373,12 @@ class OpenExamplesTest(AdapterBlock):
         self.structure(a, self.submit(a, [self.f(a, amount="10000")]), "amount_not_int")
         self.structure(a, self.submit(a, [self.f(a, amount=True)]), "amount_not_int")
 
+    def test_negative_amount_is_a_false_positive_not_a_structure_error(self):
+        # "claimed_amount_minor must be a JSON integer": -5 is the right type, so it only fails to match (DECISIONS U)
+        a = pair_a()
+        self.check(a, [self.f(a), self.f(a, amount=-5)], 1, 1, 0, formula(1, 1, 0, 10), env=True)
+        self.check(a, [self.f(a, amount=-5)], 0, 1, 1, -1)
+
     def test_M10_maximum_matching_beats_greedy(self):
         b = pair_ab("d12", "d13", "pair_m10")  # A needs {D1, D2}, B needs {D1, D3}
         d1, d2, d3 = b.D[:3]

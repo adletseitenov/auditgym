@@ -42,8 +42,11 @@ def _f1(tp, fp, fn):
     return 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
 
 
-def _amount_allows_negative(value):
-    return value if type(value) is int else _ORIGINAL_AMOUNT(value)
+def _amount_rejects_negative(value):
+    result = _ORIGINAL_AMOUNT(value)
+    if result < 0:
+        raise findings.StructureError("negative_amount")
+    return result
 
 
 def _parse_any_episode(payload, episode_id):
@@ -177,7 +180,7 @@ MUTANTS: list[tuple[str, list]] = [
     ("structure: no limit of 10 evidence ids", [(findings, "MAX_EVIDENCE_IDS", HUGE)]),
     ("structure: no limit of 1000 explanation characters", [(findings, "MAX_EXPLANATION_CODE_POINTS", HUGE)]),
     ("structure: no message size limit", [(findings, "MAX_MESSAGE_BYTES", HUGE)]),
-    ("structure: negative amount accepted", [(findings, "_amount", _amount_allows_negative)]),
+    ("structure: a negative integer amount is a structure error, not an FP", [(findings, "_amount", _amount_rejects_negative)]),
     ("structure: foreign episode_id accepted", [(judge, "parse_findings", _parse_any_episode)]),
     ("structure: explanation null accepted", [(findings, "_finding", _finding_null_explanation)]),
     ("structure: a float amount with an integral value accepted", [(findings, "_amount", _amount_accepts_floats)]),
