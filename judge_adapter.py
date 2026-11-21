@@ -503,16 +503,42 @@ def _strict_message(args: dict):
     return message
 
 
+def _refused_code(args: dict, episode_id: str) -> str:
+    """The structure error code score_episode logs for this malformed answer (missing_field when there is
+    no single answer to parse: nothing, or two different ones)."""
+    given = [args[key] for key in SUBMIT_FINDINGS_KEYS if args.get(key) is not None]
+    if not given or any(value != given[0] for value in given[1:]):
+        return "missing_field"
+    try:
+        parse_findings(given[0], episode_id)
+    except StructureError as error:
+        return error.code
+    return "missing_field"
+
+
+def _refused_payload(args: dict, episode_id: str):
+    """A findings value the evaluator's parser refuses with `_refused_code` and its payload repair
+    (JSON text, bare list, flat episode_id) leaves alone."""
+    code = _refused_code(args, episode_id)
+    if code == "not_object":
+        return 0
+    if code == "wrong_episode_id":
+        return {"episode_id": 0, "findings": []}
+    if code == "findings_not_list":
+        return {"episode_id": episode_id, "findings": 0}
+    return {}
+
+
 def _prepare_submit(args: dict, episode_id: str) -> tuple[dict, bool]:
     """(arguments for the evaluator, structure valid). The raw submitted answer is validated first by the
     evaluator's own parser; the same verdict is what the policy is told. An invalid one is passed on
     untouched (the evaluator refuses it with its own code); a valid one with its FX keys renamed."""
     message = _strict_message(args)
     if message is None:
-        # a JSON text, a bare list, two different answers or nothing: no repair. The evaluator is given
-        # an object without episode_id, which its own parser refuses, so the journal and the policy
-        # get the same verdict (a structure error, -1).
-        return {"findings": {}}, False
+        # a JSON text, a bare list, two different answers or nothing: no repair. The evaluator repairs
+        # some of these forms itself, so it is given a payload that its own parser refuses with the code
+        # score_episode logs for the same answer (verdict and -1 unchanged).
+        return {"findings": _refused_payload(args, episode_id)}, False
     try:
         parse_findings(message, episode_id)
     except StructureError:
