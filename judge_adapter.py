@@ -24,13 +24,17 @@ import contextlib
 import json
 import os
 import pathlib
+import re
 import sys
+import tempfile
 import warnings
 
 from auditgym.actions import ACTIONS, ActionError, build_task, default_results_path, open_results, submit_payload
 from auditgym.client import Env, EnvError
+from auditgym.evaluator import _directory_sha256
 from auditgym.findings import StructureError, parse_findings
 from auditgym.judge import judge
+from auditgym.limits import json_depth_exceeds
 from auditgym.secret import SECRET_ENV, SECRET_FILE_ENV
 
 __all__ = ["generate_episode", "make_env", "score_episode", "AdapterEnv", "AdapterError", "TABLES"]
@@ -83,11 +87,27 @@ def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None)
 
 # ------------------------------------------------------------------------------------ scoring
 def _score_log_path(journal_path) -> str:
-    return os.fspath(journal_path) if journal_path is not None else os.path.abspath(
-        os.environ.get(SCORE_LOG_ENV) or DEFAULT_SCORE_LOG)
+    """Explicit `journal_path`, else $AUDITGYM_SCORE_LOG, else <cwd>/runs/score_errors.jsonl made
+    absolute at call time, and, when that directory cannot be written, the same file name under the
+    system temporary directory (auditgym/ there). Always absolute."""
+    if journal_path is not None:
+        return os.path.abspath(os.fspath(journal_path))
+    if os.environ.get(SCORE_LOG_ENV):
+        return os.path.abspath(os.environ[SCORE_LOG_ENV])
+    primary = os.path.abspath(DEFAULT_SCORE_LOG)
+    directory = os.path.dirname(primary)
+    try:
+        os.makedirs(directory, exist_ok=True)
+        if os.access(directory, os.W_OK):
+            return primary
+    except OSError:
+        pass
+    return os.path.join(tempfile.gettempdir(), "auditgym", os.path.basename(primary))
 
 
 def _log_score_error(path: str, episode_id: str, code: str) -> None:
+    """Append the score_error row. A failure is loud: AdapterError("score_log_unwritable") (the log is
+    the only place the structure error code goes; losing it silently would hide it from the jury)."""
     line = json.dumps({"event": "score_error", "episode_id": episode_id, "structure_error": code},
                       ensure_ascii=False, sort_keys=True) + "\n"
     try:
@@ -95,7 +115,8 @@ def _log_score_error(path: str, episode_id: str, code: str) -> None:
         with os.fdopen(open_results(path), "a", encoding="utf-8") as handle:
             handle.write(line)
     except OSError:
-        print("judge_adapter: cannot write the score log", file=sys.stderr)
+        print(f"judge_adapter: cannot write the score log {path}", file=sys.stderr)
+        raise AdapterError("score_log_unwritable") from None
 
 
 def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journal_path=None) -> dict:
@@ -103,13 +124,16 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
     (None means an empty answer: a truncated episode). A valid structure gives
     {"tp","fp","fn","precision","recall","f1","return"}; an invalid one gives return -1 and None in the
     other fields, and the error code goes to the evaluator's score log (`journal_path`, else
-    $AUDITGYM_SCORE_LOG, else runs/score_errors.jsonl); the log holds a fixed code, never agent data."""
+    $AUDITGYM_SCORE_LOG, else an absolute runs/score_errors.jsonl, else the same name under the system
+    temporary directory); the log holds a fixed code, never agent data. If the log cannot be written,
+    AdapterError("score_log_unwritable") is raised. FX keys of the contract `date:src:dst` in
+    evidence_ids/affected_ids are read as our `date|src|dst` (docs/ADAPTER.md)."""
     from auditgym.storage import load_episode
 
     episode = load_episode(episode_dir)
     if findings is None:
         findings = {"episode_id": episode["public"]["manifest"]["episode_id"], "findings": []}
-    result = judge(episode, findings, inspection_steps)
+    result = judge(episode, _translate_fx_message(findings), inspection_steps)
     if result.get("structure_error"):
         _log_score_error(_score_log_path(journal_path), episode["public"]["manifest"]["episode_id"],
                          str(result["structure_error"]))
@@ -131,6 +155,17 @@ def _without_secret_environment():
             yield
     finally:
         os.environ.update(saved)
+
+
+def _content_digest(directory):
+    """Hash of the files of an episode directory (the evaluator's own `source_sha256` function), or
+    None when it cannot be read: the evaluator then refuses the load with its own error code."""
+    if directory is None:
+        return None
+    try:
+        return _directory_sha256(directory)
+    except OSError:
+        return None
 
 
 def _error(code: str) -> dict:
@@ -176,7 +211,10 @@ class AdapterEnv:
         team_config = config.get("team_config")
         if team_config is not None and not isinstance(team_config, dict):
             raise AdapterError("bad_config")
-        key = (mode, os.path.abspath(os.fspath(episode_dir)) if episode_dir is not None else None)
+        directory = os.path.abspath(os.fspath(episode_dir)) if episode_dir is not None else None
+        # The content of the directory is part of the key: the jury may write another episode into the
+        # same path between two resets, and a reset must serve what is on disk now.
+        key = (mode, directory, _content_digest(directory))
         try:
             if self._env is None or key != self._key:
                 self._start(key)
@@ -196,7 +234,7 @@ class AdapterEnv:
 
     def _start(self, key) -> None:
         self._drop()
-        mode, directory = key
+        mode, directory, _ = key
         evaluator_mode = "eval" if mode == "closed" else "train"
         options = {"server_command": self._server_command}
         if self._server_command is None:
@@ -229,8 +267,7 @@ class AdapterEnv:
                 "remaining_steps": internal["steps_remaining"]}
 
     # --- step -------------------------------------------------------------------------------
-    @staticmethod
-    def _internal_action(action) -> tuple[str | None, object]:
+    def _internal_action(self, action) -> tuple[str | None, object]:
         """(name, internal action). An unknown or malformed envelope becomes an action the evaluator
         answers with a bounded error and a spent step (None is read as an unknown action)."""
         if not isinstance(action, dict):
@@ -241,9 +278,10 @@ class AdapterEnv:
         args = action.get("args", {})
         if args is None:
             args = {}
-        if not isinstance(args, dict):
-            return name, {"action": name, "args": []}  # not an object: bad_arguments (a submit: invalid structure)
-        return name, {"action": name, "args": _fx_id(name, args)}
+        if not isinstance(args, dict) or not _serialisable(args):
+            # not an object, or not JSON (a set, NaN, too deep): bad_arguments (a submit: invalid structure)
+            return name, {"action": name, "args": []}
+        return name, {"action": name, "args": _translate_fx_submit(name, _fx_id(name, args), self._episode_id)}
 
     def step(self, action):
         if self._env is None:
@@ -337,6 +375,59 @@ class AdapterEnv:
             self.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _serialisable(args: dict) -> bool:
+    try:
+        if json_depth_exceeds(args):
+            return False
+        json.dumps(args, ensure_ascii=True, allow_nan=False)
+    except Exception:  # noqa: BLE001 - a hostile object may raise anything
+        return False
+    return True
+
+
+_FX_COLON = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Z]{3}:[A-Z]{3}")
+
+
+def _fx_text(value):
+    """`date:src:dst` (exactly the contract's FX key shape) as our `date|src|dst`; anything else as is.
+    A key that names no fx record stays a non-existent id after the translation, as before it."""
+    if isinstance(value, str) and _FX_COLON.fullmatch(value):
+        return value.replace(":", "|")
+    return value
+
+
+def _translate_fx_message(message):
+    """The findings message with colon FX keys in evidence_ids and affected_ids translated; the same
+    object when nothing changes. Shapes the parser would refuse are returned untouched."""
+    if not isinstance(message, dict) or not isinstance(message.get("findings"), list):
+        return message
+    changed, findings = False, []
+    for finding in message["findings"]:
+        if isinstance(finding, dict):
+            update = {}
+            for field in ("evidence_ids", "affected_ids"):
+                values = finding.get(field)
+                if isinstance(values, list):
+                    translated = [_fx_text(value) for value in values]
+                    if translated != values:
+                        update[field] = translated
+            if update:
+                finding, changed = dict(finding, **update), True
+        findings.append(finding)
+    return dict(message, findings=findings) if changed else message
+
+
+def _translate_fx_submit(name: str, args: dict, episode_id: str) -> dict:
+    if name != "submit":
+        return args
+    try:
+        message = submit_payload(args, episode_id)
+    except ActionError:
+        return args
+    translated = _translate_fx_message(message)
+    return args if translated is message else {"findings": translated}
 
 
 def _fx_id(name: str, args: dict) -> dict:

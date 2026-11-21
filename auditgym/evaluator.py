@@ -396,6 +396,11 @@ class Evaluator:
             line["ended_by"] = ended_by
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
+        if result.get("structure_error"):
+            # An invalid structure has no score (as score_episode answers it): null counts, reward -1
+            # and the error code. The counts the judge holds for it (0/0/N) are not a result.
+            for key in ("precision", "recall", "f1", "tp", "fp", "fn"):
+                line[key] = None
         self._write_line(line)
 
     def _source_fields(self, from_loaded: bool) -> dict:

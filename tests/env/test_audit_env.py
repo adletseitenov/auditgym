@@ -430,7 +430,7 @@ class JournalTest(unittest.TestCase):
             self.assertEqual(stderr.getvalue(), "auditgym evaluator: judge raised RuntimeError\n")
             line = json.loads(path.read_text())
             self.assertEqual(line["structure_error"], "judge_exception")
-            self.assertEqual((line["reward"], line["tp"], line["fn"]), (-1.0, 0, 1))
+            self.assertEqual((line["reward"], line["tp"], line["fn"]), (-1.0, None, None))
             self.assertEqual((observation["type"], terminated, truncated), ("final", True, False))
             self.assertEqual(reward, -1.0 if mode == "train" else 0.0)
             if mode == "train":
