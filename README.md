@@ -25,6 +25,7 @@ python3 -m auditgym check --full   # полный режим: все тесты 
 | Базовые политики | `policies/` (`make report`) |
 | Траектории | `trajectories.jsonl` (`make trajectories`) |
 | Демо | `python3 -m tools.demo` (`make demo`) |
+| Адаптер жюри | `judge_adapter.py` (`python judge_adapter.py --demo`), [docs/ADAPTER.md](docs/ADAPTER.md) |
 
 Полная таблица с командами пересборки — [docs/SUBMISSION.md](docs/SUBMISSION.md).
 
@@ -60,6 +61,26 @@ print(reward, info)   # 0.964 {'f1': 1.0, 'inspection_steps': 18, 'precision': 1
 ```
 
 Эпизод из каталога: `Env.from_files("episodes/dev/ep_01")`; тот же оценщик по JSON-строкам — `python3 -m auditgym serve --mode train`; обёртка Gymnasium — `AuditGym-v0`. Действия: `list_records`, `get_record`, `get_document`, `calculator`, `submit`; конфигурация, уровни `easy`…`max`, ошибки — [docs/USAGE.md](docs/USAGE.md), полный договор — [docs/CONTRACTS.md](docs/CONTRACTS.md).
+
+## Адаптер жюри (judge_adapter.py)
+
+Тонкий адаптер лежит в корне репозитория (в контейнере `/app/judge_adapter.py`). Рабочая директория — корень репозитория (`cd /app`), зависимостей нет; жюри делает `sys.path.insert(0, "/app"); import judge_adapter`. Демонстрация: `python judge_adapter.py --demo` (четыре базовые политики только через адаптер, закрытый режим, по эпизодным каталогам; около секунды). Единая команда проверки та же: `python -m auditgym check`.
+
+- `generate_episode(seed, config, output_dir)`: обёртка над нашим генератором (`auditgym export`); пишет `public/` (manifest, policy, ledger.csv, invoices.jsonl, payments.jsonl, fx.csv) и `private/` (truth, provenance, `pre_*`). Одинаковые аргументы дают побайтно один каталог.
+- `make_env()`: объект с `reset(seed, config)` и `step(action)`. Оценщик остаётся отдельным процессом (`auditgym.client.Env`). `config` = `{"mode": "closed"|"train", "episode_dir": ..., "team_config": {...}}`: с `episode_dir` грузится именно этот эпизод (повторный `reset` начинает его заново), `train` без каталога генерирует по `seed` и `team_config`. В `closed` награда для вызывающего всегда `0.0`, `info = {}`; истинная награда у оценщика (журнал).
+- Действия `{"name": ..., "args": {...}}`: `list_records(table, cursor, limit)`, `get_record(table, id)`, `get_document(doc_id)`, `calculator(expression)`, `submit({"findings": <findings.json>})`; таблицы `ledger`, `invoices`, `payments`, `fx`. Наблюдения: первое `{"task", "manifest", "policy", "remaining_steps": 100}`, дальше `{"result", "error", "remaining_steps"}`; `submit` отвечает `{"accepted": true}` или ошибкой `invalid_findings`.
+- `score_episode(episode_dir, findings, inspection_steps)`: `{"tp", "fp", "fn", "precision", "recall", "f1", "return"}`; неверная структура — `return = -1`, остальные поля `null`, код ошибки пишется в журнал оценщика (`$AUDITGYM_SCORE_LOG`, по умолчанию `runs/score_errors.jsonl`).
+
+Соответствие наших четырёх типов ошибок типам кейса:
+
+| Наш тип | Тип кейса | Что именно размечено |
+|---|---|---|
+| `duplicate_invoice` | дубль счёта | два проведённых счёта с одной подписью (контрагент, валюта, сумма, позиции с периодом услуги) |
+| `allocation_gap` | пропущенное или частичное распределение платежа | часть платежа по ссылке на счёт осела на `unallocated` вместо закрытия дебиторки; сумма — эта строка в базовой валюте |
+| `fx_error` | неверная дата или курс конвертации | проводка по курсу не той даты (`wrong_date`) или по иному значению (`wrong_rate`); эталон считается по `policy` |
+| `period_cutoff` | ошибка отнесения к отчётному периоду | документ, дата которого (в часовом поясе компании) вне периода, но проведён; граница `[start, end)` |
+
+Подробности, таблица «проверка → наш тест», допущения и известные расхождения — [docs/ADAPTER.md](docs/ADAPTER.md).
 
 ## Результаты базовых политик
 
@@ -110,6 +131,7 @@ print(reward, info)   # 0.964 {'f1': 1.0, 'inspection_steps': 18, 'precision': 1
 | Файл | Назначение |
 |---|---|
 | [docs/USAGE.md](docs/USAGE.md) | проверка подробно, конфигурация, уровни, ошибки, JSON-протокол, Gymnasium, экспериментальная награда |
+| [docs/ADAPTER.md](docs/ADAPTER.md) | адаптер жюри: интерфейс, отображение действий и ответов, проверки C01–C20, пары, расхождения |
 | [docs/CLOSED-RUN.md](docs/CLOSED-RUN.md) | закрытая проверка: секрет, граница, рецепты, подписанный журнал, экспорт |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | ограничения полностью |
 | [docs/SUBMISSION.md](docs/SUBMISSION.md) | что сдано и требования кейса → код → тест, полные таблицы |
