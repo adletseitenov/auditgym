@@ -23,6 +23,10 @@ INTERACTIONS = ("none", "I1", "I2")
 # config, so configs, ids and episodes made before the setting existed stay byte-identical.
 GAP_MODES = ("partial", "missing", "mixed")
 DEFAULT_GAP_MODE = "partial"
+# Clean patterns that look suspicious but satisfy no error definition (docs/DECISIONS.md T).
+# `distractors` is true (all on), false (all off) or an object of these names (missing = off).
+DISTRACTOR_KINDS = ("split_payments", "overpayments", "advances", "refunds", "repeated_amounts",
+                    "boundary_dates", "other_offsets", "weekend_fx", "resent_copies", "shifted_service")
 # New currencies are appended: the first non-base currency is the default, so order must not change.
 CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY", "JPY", "KWD")
 # ISO 4217 minor-unit exponents: JPY has none, KWD has three (docs/DECISIONS.md M).
@@ -87,6 +91,14 @@ def valid_offset(text: object) -> bool:
         return False
     minutes = int(text[1:3]) * 60 + int(text[4:6])
     return minutes <= (14 * 60 if text[0] == "+" else 12 * 60)
+
+
+def distractor_flags(value: bool | dict) -> dict:
+    """The switches of a normalized `distractors` value: a bool sets every pattern, an object is
+    already complete (normalize_config fills missing names with false)."""
+    if isinstance(value, bool):
+        return {name: value for name in DISTRACTOR_KINDS}
+    return {name: bool(value.get(name, False)) for name in DISTRACTOR_KINDS}
 
 
 def interaction_issue_count(interaction: str) -> int:
@@ -175,9 +187,15 @@ def normalize_config(config: object) -> dict:
     else:
         out["errors"] = _default_errors(out["size"]["invoices"][0], interaction, bool(currencies))
 
-    if not isinstance(given("distractors"), bool):
-        raise ConfigError("bad_distractors", "distractors must be true or false")
-    out["distractors"] = given("distractors")
+    distractors = given("distractors")
+    if isinstance(distractors, bool):
+        out["distractors"] = distractors  # stored as given: episodes made before the object form stay byte-identical
+    elif (_str_keys(distractors) and all(isinstance(value, bool) for value in distractors.values())
+          and all(key in DISTRACTOR_KINDS for key in distractors)):
+        out["distractors"] = {name: distractors.get(name, False) for name in DISTRACTOR_KINDS}
+    else:
+        raise ConfigError("bad_distractors", "distractors must be true, false or an object whose keys are "
+                                             f"{', '.join(DISTRACTOR_KINDS)} with true/false values")
     surface_seed = given("surface_seed")
     if surface_seed is not None and not _is_int(surface_seed):
         raise ConfigError("bad_surface_seed", "surface_seed must be an integer or null")

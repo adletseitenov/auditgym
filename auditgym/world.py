@@ -14,7 +14,8 @@ service) are part of every story and are never posted by it: they are the pool p
 posts from (docs/AUDIT.md D4). They are paid with the usual probability, by payments dated on
 their own side of the period, which are not posted either.
 
-With `config["distractors"]` the story also contains legitimate cases that look suspicious but
+With `config["distractors"]` (true, or an object that switches single patterns on: docs/DECISIONS.md T)
+the story also contains legitimate cases that look suspicious but
 satisfy no error definition (docs/SPEC.md): overpayments, advances, partial and split payments,
 refunds, recurring invoices that split the period's service in two halves, extra neighbouring-
 period invoices, documents at the period boundary, documents in other offsets, weekend rates
@@ -33,7 +34,7 @@ import hashlib
 import json
 from decimal import Decimal
 
-from .config import CURRENCY_EXPONENTS, interaction_issue_count
+from .config import CURRENCY_EXPONENTS, distractor_flags, interaction_issue_count
 from .limits import MAX_LEDGER_ROWS, ROWS_PER_INVOICE, ROWS_PER_ISSUE
 from .money import parse_offset, round_rate
 from .rng import Rng
@@ -178,7 +179,7 @@ def share_of(rng: Rng, amount: int) -> int:
 
 def doc_zone(rng: Rng, world: dict, numerator: int = 3) -> dt.timezone:
     """The offset a document is written in: the company's, or with distractors sometimes another."""
-    if world["distractors"] and rng.chance(numerator, 20):
+    if world["flags"]["other_offsets"] and rng.chance(numerator, 20):
         return parse_offset(rng.choice([o for o in OFFSETS if o != world["timezone"]]))
     return world["zone"]
 
@@ -191,6 +192,7 @@ def _rates(rng: Rng, config: dict, start: dt.datetime, end: dt.datetime) -> list
     """Daily rates foreign -> base, FX_MARGIN_DAYS beyond both ends. With distractors, Saturday and
     Sunday repeat Friday's rate; without, every day differs from the day before."""
     base = config["base_currency"]
+    weekend = distractor_flags(config["distractors"])["weekend_fx"]
     first_day = start.date() - dt.timedelta(days=FX_MARGIN_DAYS)
     days = (end.date() - first_day).days + FX_MARGIN_DAYS
     table = []
@@ -201,9 +203,9 @@ def _rates(rng: Rng, config: dict, start: dt.datetime, end: dt.datetime) -> list
         rate = None
         for day in range(days):
             date = first_day + dt.timedelta(days=day)
-            if not (config["distractors"] and date.weekday() >= 5 and rate is not None):
+            if not (weekend and date.weekday() >= 5 and rate is not None):
                 step = stream.randint(-80, 80)
-                while step == 0 and not config["distractors"]:
+                while step == 0 and not weekend:
                     step = stream.randint(-80, 80)
                 level = level * Decimal(10000 + step) / 10000
                 rate = round_rate(level)
@@ -318,7 +320,7 @@ def build_world(rng: Rng, config: dict) -> dict:
     base = config["base_currency"]
     world = {"base_currency": base, "timezone": config["timezone"], "zone": start.tzinfo,
              "period_start": start, "period_end": end, "months": config["period"]["months"],
-             "distractors": config["distractors"],
+             "flags": distractor_flags(config["distractors"]), "selective": isinstance(config["distractors"], dict),
              "currency_exponents": {c: CURRENCY_EXPONENTS[c] for c in [base, *config["currencies"]]}}
 
     low, high = config["size"]["invoices"]
@@ -327,18 +329,19 @@ def build_world(rng: Rng, config: dict) -> dict:
     customers = [f"E{i}" for i in range(shape.randint(*CUSTOMERS))]
     vendors = [f"E{len(customers) + i}" for i in range(shape.randint(3, 6))]
     world["entities"], world["customers"] = customers + vendors, customers
-    distractors = config["distractors"]
+    flags = world["flags"]
     plan = rng.child("distractor_plan")
     # Neighbouring-period invoices: one per configured cutoff (its pool), plus legitimate extras.
-    outside_count = config["errors"]["period_cutoff"] + (plan.randint(1, 3) if distractors else 0)
-    recurring_pairs = plan.randint(1, max(1, invoice_count // 20)) if distractors else 0
+    outside_count = config["errors"]["period_cutoff"] + (plan.randint(1, 3) if flags["boundary_dates"] else 0)
+    recurring_pairs = plan.randint(1, max(1, invoice_count // 20)) if flags["repeated_amounts"] else 0
     # Decoys (own stream, drawn only with distractors): resent copies and neighbouring-service
     # invoices. They take their places from the regular invoices, at most half of them, so the
     # invoice count and the document budget stay as configured.
     decoys = rng.child("decoys")
     room = invoice_count - outside_count - 2 * recurring_pairs
-    resent_count = min(decoys.randint(*RESENT_COPIES), room // 2) if distractors else 0
-    shifted_count = min(decoys.randint(*SHIFTED_SERVICE), room // 2 - resent_count) if distractors else 0
+    resent_count = min(decoys.randint(*RESENT_COPIES), room // 2) if flags["resent_copies"] else 0
+    shifted_count = (min(decoys.randint(*SHIFTED_SERVICE), room // 2 - resent_count)
+                     if flags["shifted_service"] else 0)
     regular_count = room - resent_count - shifted_count
 
     invoices: list[dict] = []
@@ -370,7 +373,7 @@ def build_world(rng: Rng, config: dict) -> dict:
         while True:  # bounded in practice: the signature space is far larger than the invoice count
             currency = currency_of(stream)
             items = line_items(stream, currency, own_service)
-            edge = distractors and stream.chance(1, 12)
+            edge = flags["boundary_dates"] and stream.chance(1, 12)
             if add(inside_invoice(stream, stream.choice(customers), currency, items, edge)):
                 break
 
@@ -435,6 +438,8 @@ def build_world(rng: Rng, config: dict) -> dict:
 
     world["invoices"] = invoices
     world["payments"] = _payments(rng.child("payments"), world, invoice_count)
+    if world["selective"] and flags["other_offsets"]:
+        _ensure_other_offset(rng.child("offset_guarantee"), world)
     order_postings(world)
     issues = sum(config["errors"].values()) + interaction_issue_count(config["interaction"])
     world["background"] = _background(rng.child("background"), config, vendors, start, end,
@@ -443,6 +448,25 @@ def build_world(rng: Rng, config: dict) -> dict:
     world["fx"] = _rates(fx_stream, config, start, end)
     world["rates"] = {(row["date"], row["source_currency"]): Decimal(row["rate"]) for row in world["fx"]}
     return world
+
+
+def _ensure_other_offset(stream: Rng, world: dict) -> None:
+    """Selective mode only: a story with other_offsets on holds at least one document written in
+    another offset whose naive date differs from the company-local date. If chance gave none, one
+    regular invoice is rewritten in such an offset (the same instant, so nothing else changes)."""
+    zone = world["zone"]
+    documents = [d for d in world["invoices"] + world["payments"] if _document_moment(d).utcoffset() != zone.utcoffset(None)]
+    if any(_document_moment(d).date() != _document_moment(d).astimezone(zone).date() for d in documents):
+        return
+    candidates = [inv for inv in world["invoices"] if inv["posted_at"] is not None and "decoy" not in inv]
+    stream.shuffle(candidates)
+    for invoice in candidates:
+        moment = invoice["issued_at"]
+        options = [o for o in OFFSETS if o != world["timezone"]
+                   and moment.astimezone(parse_offset(o)).date() != moment.astimezone(zone).date()]
+        if options:
+            invoice["issued_at"] = moment.astimezone(parse_offset(stream.choice(options)))
+            return
 
 
 def _background_cap(world: dict, issues: int) -> int:
@@ -458,7 +482,7 @@ def _background_cap(world: dict, issues: int) -> int:
 def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
     """Payments of the clean story. The ledger budget (ROWS_PER_INVOICE rows per invoice) and the
     document budget (no more payments than invoices) are kept by skipping distractors."""
-    end, base, distractors = world["period_end"], world["base_currency"], world["distractors"]
+    end, base, flags = world["period_end"], world["base_currency"], world["flags"]
     latest = end - EDGE_GAP
     posted = [inv for inv in world["invoices"] if inv["posted_at"] is not None]
     budget = {"rows": ROWS_PER_INVOICE * invoice_count - 2 * len(posted), "docs": invoice_count}
@@ -492,14 +516,19 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
             plans.append((invoice, moment))
     used: set[str] = set()
     kinds: dict[str, str] = {}
+    # Selective mode only: every enabled payment pattern gets one invoice that is certain to show it
+    # (the roll of an invoice is not left to chance there), so the pattern is in every episode. The
+    # targets are drawn from their own stream and are never merged into a two-invoice payment.
+    forced = _forced_targets(stream.child("forced"), world, plans, flags) if world["selective"] else {}
     for index, (invoice, moment) in enumerate(plans):
         if invoice["key"] in used:
             continue
         used.add(invoice["key"])
         # One payment for two invoices of the same customer and currency, both paid in full.
         partner = next((other for other, _ in plans[index + 1:] if other["key"] not in used
+                        and other["key"] not in forced
                         and other["entity"] == invoice["entity"] and other["currency"] == invoice["currency"]), None)
-        if partner is not None and stream.chance(1, 6):
+        if partner is not None and invoice["key"] not in forced and stream.chance(1, 6):
             used.add(partner["key"])
             moment = max(moment, partner["issued_at"] + PAY_AFTER)
             if moment >= latest:
@@ -508,14 +537,17 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
                             invoice["total_minor"] + partner["total_minor"], sorted([invoice["key"], partner["key"]])))
             kinds[invoice["key"]] = kinds[partner["key"]] = "multi"
             continue
-        roll = stream.below(100) if distractors else 99
+        if invoice["key"] in forced:
+            roll = forced[invoice["key"]]
+        else:
+            roll = stream.below(100) if flags["overpayments"] or flags["split_payments"] else 99
         total = invoice["total_minor"]
-        if roll < 6:  # overpayment: the excess legitimately stays on unallocated
+        if roll < 6 and flags["overpayments"]:  # overpayment: the excess legitimately stays on unallocated
             amount = total + share_of(stream, total)
             if add(new_payment("", invoice["entity"], invoice["currency"], moment, amount, [invoice["key"]]), True):
                 kinds[invoice["key"]] = "over"
                 continue
-        elif roll < 18:  # partial (and, for half of them, a second payment for the rest: split)
+        elif 6 <= roll < 18 and flags["split_payments"]:  # partial (and, for half of them, a second payment for the rest: split)
             first = max(1, total * stream.randint(20, 80) // 100)
             if add(new_payment("", invoice["entity"], invoice["currency"], moment, first, [invoice["key"]])):
                 kinds[invoice["key"]] = "partial"
@@ -528,12 +560,10 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
         if add(new_payment("", invoice["entity"], invoice["currency"], moment, total, [invoice["key"]])):
             kinds[invoice["key"]] = "full"
 
-    if not distractors:
-        return payments
     # Refunds of fully paid invoices (never of overpaid ones): negative amount, one reference.
     by_key = {inv["key"]: inv for inv in posted}
-    for key in sorted(kinds, key=lambda k: int(k[1:])):
-        if kinds[key] != "full" or not stream.chance(1, 12):
+    for key in sorted(kinds, key=lambda k: int(k[1:])) if flags["refunds"] else []:
+        if kinds[key] != "full" or not (forced.get(key) == REFUND_ROLL or stream.chance(1, 12)):
             continue
         paid_at = next(p["timestamp"] for p in payments if p["invoice_refs"] == [key])
         if paid_at + PAY_AFTER >= latest:
@@ -543,20 +573,34 @@ def _payments(stream: Rng, world: dict, invoice_count: int) -> list[dict]:
         add(new_payment("", invoice["entity"], invoice["currency"], moment_between(stream, paid_at + PAY_AFTER, latest),
                         amount, [key]))
     # Advances: no invoice reference, the whole amount on unallocated.
-    for _ in range(stream.randint(0, 2)):
+    for _ in range(stream.randint(1 if world["selective"] else 0, 2) if flags["advances"] else 0):
         currency = stream.choice([base, *sorted(set(world["currency_exponents"]) - {base})])
         moment = moment_between(stream, world["period_start"], latest)
         add(new_payment("", stream.choice(world["customers"]), currency, moment,
                         stream.randint(20, 900) * PRICE_UNIT[currency], None), True)
     # Payments just after the period for invoices still open in it: dated outside, not posted.
     unpaid = [inv for inv in posted if inv["key"] not in kinds]
-    for _ in range(stream.randint(0, 2)):
+    for _ in range(stream.randint(1 if world["selective"] else 0, 2) if flags["boundary_dates"] else 0):
         if not unpaid:
             break
         invoice = unpaid.pop(stream.below(len(unpaid)))
         moment = outside_moment(stream, world, before=False)
         add(new_payment("", invoice["entity"], invoice["currency"], moment, invoice["total_minor"], [invoice["key"]]))
     return payments
+
+
+REFUND_ROLL = 99  # a forced "paid in full" roll that is also certain to be refunded
+
+
+def _forced_targets(stream: Rng, world: dict, plans: list, flags: dict) -> dict[str, int]:
+    """Invoice key -> roll for the invoices that must show an enabled payment pattern: an
+    overpayment (roll 0), a split payment (12) and a refund (REFUND_ROLL). An invoice qualifies when
+    its payment leaves room for a second document (an hour before the end of the period)."""
+    latest = world["period_end"] - EDGE_GAP
+    pool = [inv["key"] for inv, moment in plans if moment + PAY_AFTER < latest]
+    stream.shuffle(pool)
+    wanted = [(flags["overpayments"], 0), (flags["split_payments"], 12), (flags["refunds"], REFUND_ROLL)]
+    return {key: roll for key, (on, roll) in zip(pool, [w for w in wanted if w[0]])}
 
 
 def _background(stream: Rng, config: dict, vendors: list[str], start: dt.datetime, end: dt.datetime,

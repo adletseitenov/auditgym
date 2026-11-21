@@ -136,7 +136,21 @@
       "description": "Variant of an allocation_gap: partial (default), missing (the whole closing moved to unallocated) or mixed (drawn per issue)."
     },
     "distractors": {
-      "type": "boolean"
+      "description": "Clean patterns that look suspicious but are not errors: true (all), false (none) or an object that switches single patterns on (missing names are false; docs/DECISIONS.md T).",
+      "type": ["boolean", "object"],
+      "additionalProperties": false,
+      "properties": {
+        "split_payments": {"type": "boolean"},
+        "overpayments": {"type": "boolean"},
+        "advances": {"type": "boolean"},
+        "refunds": {"type": "boolean"},
+        "repeated_amounts": {"type": "boolean"},
+        "boundary_dates": {"type": "boolean"},
+        "other_offsets": {"type": "boolean"},
+        "weekend_fx": {"type": "boolean"},
+        "resent_copies": {"type": "boolean"},
+        "shifted_service": {"type": "boolean"}
+      }
     },
     "surface_seed": {
       "type": [

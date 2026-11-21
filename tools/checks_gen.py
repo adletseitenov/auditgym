@@ -286,7 +286,35 @@ def distractors_satisfy_no_definition() -> Optional[str]:
         posted = {r["invoice_id"] for r in public["ledger"] if r["invoice_id"]}
         seen["outside"] += sum(i["invoice_id"] not in posted for i in public["invoices"])
     missing = [kind for kind, count in seen.items() if not count]
-    return f"distractors never generated: {', '.join(missing)}" if missing else None
+    if missing:
+        return f"distractors never generated: {', '.join(missing)}"
+    return _toggles_are_independent()
+
+
+def _toggles_are_independent() -> Optional[str]:
+    """Each clean pattern of `distractors` switched on alone shows itself and none of the others, in
+    every episode; an object with all names shows all of them, `false` and an empty object none (`true`
+    keeps its old chance-based mix, covered by the seen-counts above); every episode verifies
+    and no predicate fires on it (docs/DECISIONS.md T)."""
+    from auditgym.config import DISTRACTOR_KINDS
+    from auditgym.generate import generate
+    from auditgym.verify import predicate_issues, verify
+    from tools.patterns import distractor_patterns
+
+    cases = [(kind, {kind: True}, {kind}) for kind in DISTRACTOR_KINDS]
+    cases += [("false", False, set()), ("{}", {}, set()),
+              ("all", {kind: True for kind in DISTRACTOR_KINDS}, set(DISTRACTOR_KINDS))]
+    for name, value, expected in cases:
+        for seed in range(6):
+            config = {"errors": {}, "currencies": [["USD"], ["EUR", "CNY"]][seed % 2],
+                      "timezone": ["+05:00", "-11:00", "+14:00"][seed % 3], "distractors": value}
+            episode = generate(seed, config)
+            problems = verify(episode) or [p for part in predicate_issues(episode["public"]) for p in part]
+            found = distractor_patterns(episode["public"])
+            if problems or episode["private"]["truth"]["issues"] or found != expected:
+                return (f"distractors {name}, seed {seed}: {problems[:1] or sorted(found ^ expected)} "
+                        "(patterns seen differ from the switches)")
+    return None
 
 
 def interactions_are_unambiguous() -> Optional[str]:
