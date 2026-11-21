@@ -1,8 +1,9 @@
 # The one-command check on every push, the way the jury runs it:
 #  - plain Python 3.11 (the case's version) and 3.12: `python -m auditgym check`, then the shipped
 #    episodes and trajectories must rebuild byte for byte;
-#  - the Docker image, built from the pinned digest and run with `--network none`: the fast check
-#    (the image's default command) and the full one.
+#  - the Docker image, built from the pinned digest and run the way the jury runs it (`--network
+#    none`, 2 CPUs, 4 GB): the fast check (the image's default command), the full one, and the
+#    judge_adapter entry points of the official 20.11 checks (demo of the four baselines, 20 pairs).
 name: check
 
 on:
@@ -41,7 +42,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker build
         run: docker build -t auditgym .
-      - name: docker run --network none (default command, fast check)
-        run: docker run --rm --network none auditgym
-      - name: docker run --network none, full check
-        run: docker run --rm --network none auditgym python -m auditgym check --full
+      - name: docker run with the jury limits (default command, fast check)
+        run: docker run --rm --network none --cpus 2 --memory 4g auditgym
+      - name: judge_adapter in the container with the jury limits (import from /app, four baselines)
+        run: docker run --rm --network none --cpus 2 --memory 4g -w /tmp auditgym python -c "import sys; sys.path.insert(0, '/app'); import judge_adapter; raise SystemExit(judge_adapter.main(['--demo']))"
+      - name: judge_adapter paired checks P01-P20 in the container with the jury limits
+        run: docker run --rm --network none --cpus 2 --memory 4g auditgym python -m tools.adapter_pairs
+      - name: docker run with the jury limits, full check
+        run: docker run --rm --network none --cpus 2 --memory 4g auditgym python -m auditgym check --full
