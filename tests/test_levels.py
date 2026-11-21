@@ -56,5 +56,19 @@ class LevelsTest(unittest.TestCase):
                         self.assertGreaterEqual(result["reward"], floor)
 
 
+class GridTest(unittest.TestCase):
+    def test_every_grid_row_is_a_valid_config_within_the_issue_cap(self) -> None:
+        from auditgym.config import interaction_issue_count
+        from auditgym.limits import MAX_ISSUES
+        from tools import levels as tool
+
+        for row in tool.GRID:
+            with self.subTest(row=row[0]):
+                config = tool.grid_config(row)
+                normalize_config(config)  # ConfigError (too_many_errors) before DECISIONS AC for 14 issues
+                self.assertLessEqual(sum(config["errors"].values()) + interaction_issue_count(config["interaction"]),
+                                     MAX_ISSUES)
+
+
 if __name__ == "__main__":
     unittest.main()

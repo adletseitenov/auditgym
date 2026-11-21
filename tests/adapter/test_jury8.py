@@ -96,8 +96,7 @@ class ColonFxKeyTest(unittest.TestCase):
         self.assertGreater(result["tp"], 0)
 
     def test_step_reads_colon_keys_in_every_submit_form(self):
-        forms = {"message": self.colon, "bare list": self.colon["findings"],
-                 "json string": json.dumps(self.colon)}
+        forms = {"message": self.colon}  # the adapter takes only the object (DECISIONS AC)
         for name, payload in forms.items():
             env, _ = new_env("fx")
             with env:

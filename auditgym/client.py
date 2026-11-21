@@ -40,7 +40,7 @@ import subprocess
 import sys
 import threading
 
-from .actions import default_results_path, open_results
+from .actions import default_results_with_fallback, open_results
 from .limits import MAX_LINE_BYTES, json_depth_exceeds
 from .secret import SECRET_ENV, SECRET_FILE_ENV
 
@@ -113,7 +113,7 @@ class Env:
         else:
             command = [sys.executable, "-m", "auditgym", "serve"]
             if mode == "eval" and results_path is None:
-                results_path = default_results_path()
+                results_path = default_results_with_fallback()
         command += ["--mode", mode]
         if not _files:
             command.append("--no-load")

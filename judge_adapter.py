@@ -34,7 +34,7 @@ import re
 import tempfile
 import warnings
 
-from auditgym.actions import ACTIONS, ActionError, build_task, default_results_path, open_results, submit_payload
+from auditgym.actions import ACTIONS, SUBMIT_FINDINGS_KEYS, build_task, default_results_path, open_results
 from auditgym.client import Env, EnvError
 from auditgym.evaluator import _directory_sha256
 from auditgym.findings import StructureError, parse_findings
@@ -47,6 +47,11 @@ __all__ = ["generate_episode", "make_env", "score_episode", "AdapterEnv", "Adapt
 TABLES = ("ledger", "invoices", "payments", "fx")  # canonical table names of the contract = ours
 MAX_STEPS = 100
 _CLAMP_PROMISE = " (ответ тогда содержит limit_clamped: true)"
+# The internal task text promises a bare list; the adapter takes only the findings.json object (DECISIONS AC).
+_BARE_LIST_PROMISE = ("submit принимает findings как объект {episode_id, findings}, "
+                      "а голый список findings принимается как findings текущего эпизода; ")
+_STRICT_SUBMIT = ("submit принимает findings только как JSON-объект {episode_id, findings: [...]}: "
+                  "строка JSON, голый список и объект без episode_id — неверная структура, награда −1; ")
 ADAPTER_SECRET_FILE_ENV = "AUDITGYM_ADAPTER_SECRET_FILE"  # signing secret for the eval evaluator (make_env)
 SCORE_LOG_ENV = "AUDITGYM_SCORE_LOG"
 DEFAULT_SCORE_LOG = "runs/score_errors.jsonl"
@@ -154,9 +159,9 @@ def _log_score_error(path: str, episode_id: str, code: str) -> None:
 
 
 def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journal_path=None) -> dict:
-    """The closed evaluator call. `findings` is the findings.json object {"episode_id", "findings": [...]}
-    or a bare list of findings (the current episode), exactly the shapes a submit step accepts
-    (None means an empty answer: a truncated episode). A valid structure gives
+    """The closed evaluator call. `findings` is the findings.json object {"episode_id": str, "findings": [...]},
+    the same strict form a submit step accepts: a JSON text, a bare list or a missing episode_id is a
+    structure error (-1). None means an empty answer: a truncated episode. A valid structure gives
     {"tp","fp","fn","precision","recall","f1","return"}; an invalid one gives return -1 and None in the
     other fields, and the error code goes to the evaluator's score log (`journal_path`, else
     $AUDITGYM_SCORE_LOG, else an absolute runs/score_errors.jsonl, else the same name under the system
@@ -170,12 +175,9 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
     episode = load_episode(episode_dir)
     if findings is None:
         findings = {"episode_id": episode["public"]["manifest"]["episode_id"], "findings": []}
-    # the same input shapes as a submit step (bare list, JSON text, findings.json object): one reading
+    # strict, as a submit step: only the findings.json object {episode_id, findings: [...]} is a valid
+    # structure; a JSON text or a bare list reaches the parser as it is and is refused (not_object)
     episode_id = episode["public"]["manifest"]["episode_id"]
-    try:
-        findings = submit_payload({"findings": findings}, episode_id)
-    except ActionError:
-        pass  # not readable as any accepted shape: the parser names the structure error
     result = judge(episode, _checked_message(findings, episode_id), inspection_steps)
     if result.get("structure_error"):
         _log_score_error(_score_log_path(journal_path), episode["public"]["manifest"]["episode_id"],
@@ -313,7 +315,7 @@ class AdapterEnv:
         task = internal["task"]
         # The adapter's list_records result is the official {records, next_cursor}: it has no limit_clamped,
         # so the internal task text must not promise it (DECISIONS Y).
-        base_text = task["text"].replace(_CLAMP_PROMISE, "")
+        base_text = task["text"].replace(_CLAMP_PROMISE, "").replace(_BARE_LIST_PROMISE, _STRICT_SUBMIT)
         text = (base_text + "\n\nerror_types: " + json.dumps(task["error_types"])
                 + "\nlimits: " + json.dumps(task["limits"], sort_keys=True)
                 + "\nfindings_schema: " + json.dumps(task["findings_schema"], ensure_ascii=False, sort_keys=True)
@@ -486,14 +488,31 @@ def _checked_message(message, episode_id: str):
     return translated
 
 
+def _strict_message(args: dict):
+    """The submitted findings.json object, or None when the answer is not one. The adapter accepts only
+    the documented payload {"findings": {"episode_id": str, "findings": [...]}} (also under the aliases
+    `findings.json` / `findings_json`): no JSON text, no bare list, no flat episode_id filling in a
+    missing one, no JSON text in the inner `findings`."""
+    given = [args[key] for key in SUBMIT_FINDINGS_KEYS if args.get(key) is not None]
+    if not given or any(value != given[0] for value in given[1:]):
+        return None
+    message = given[0]
+    if not (isinstance(message, dict) and isinstance(message.get("episode_id"), str)
+            and isinstance(message.get("findings"), list)):
+        return None
+    return message
+
+
 def _prepare_submit(args: dict, episode_id: str) -> tuple[dict, bool]:
     """(arguments for the evaluator, structure valid). The raw submitted answer is validated first by the
     evaluator's own parser; the same verdict is what the policy is told. An invalid one is passed on
     untouched (the evaluator refuses it with its own code); a valid one with its FX keys renamed."""
-    try:
-        message = submit_payload(args, episode_id)
-    except ActionError:
-        return args, False
+    message = _strict_message(args)
+    if message is None:
+        # a JSON text, a bare list, two different answers or nothing: no repair. The evaluator is given
+        # an object without episode_id, which its own parser refuses, so the journal and the policy
+        # get the same verdict (a structure error, -1).
+        return {"findings": {}}, False
     try:
         parse_findings(message, episode_id)
     except StructureError:
