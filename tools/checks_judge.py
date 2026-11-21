@@ -222,7 +222,7 @@ def wrong_fields_are_not_tp() -> Optional[str]:
 def invalid_structure_is_minus_one() -> Optional[str]:
     # The judge side: reward -1 and a structure_error code for the evaluator's log.
     return _rows(("wrong episode_id", "payload is a list", "findings is a dict", "type that is not a string",
-                  "negative amount", "bool amount", "float amount 125000.5", "string amount",
+                  "bool amount", "float amount 125000.5", "string amount",
                   "float amount 125000.0 is not a JSON integer",
                   "missing currency", "id that is not a string", "huge payload in an ignored key",
                   "NaN in an ignored key"))
@@ -234,7 +234,8 @@ def official_conventions_are_exact() -> Optional[str]:
                   "type in capitals with spaces is an unknown type: an FP",
                   "unknown type string is unmatchable: an FP, not a structure error",
                   "affected_ids repeated: still the set (M01)", "affected_ids repeated with a stranger",
-                  "missing explanation is the empty string"))
+                  "missing explanation is the empty string",
+                  "negative amount is a well-formed FP, not a structure error"))
 
 
 def limits_30_10_1000() -> Optional[str]:

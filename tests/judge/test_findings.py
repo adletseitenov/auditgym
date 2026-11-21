@@ -58,7 +58,7 @@ CASES = [
     ("amount Infinity", msg(finding(claimed_amount_minor=float("inf"))), "non_finite"),
     ("amount string", msg(finding(claimed_amount_minor="100")), "amount_not_int"),
     ("amount None", msg(finding(claimed_amount_minor=None)), "amount_not_int"),
-    ("amount negative", msg(finding(claimed_amount_minor=-1)), "negative_amount"),
+    ("amount negative is well-formed (an FP, DECISIONS U)", msg(finding(claimed_amount_minor=-1)), None),
     ("amount zero", msg(finding(claimed_amount_minor=0)), None),
     ("amount 10**30", msg(finding(claimed_amount_minor=10 ** 30)), None),
     ("amount 10**70000 fits in 256 KiB", msg(finding(claimed_amount_minor=10 ** 70000)), None),
@@ -258,8 +258,7 @@ class RepeatedAffectedIdIsTheSetTest(unittest.TestCase):
         self.assertEqual(over["structure_error"], "too_many_findings")
 
     def test_other_structure_rules_still_apply_next_to_a_repeat(self):
-        for bad, code in ((dict(GOOD, claimed_amount_minor=-1), "negative_amount"),
-                          (dict(GOOD, explanation="x" * 1001), "explanation_too_long"),
+        for bad, code in ((dict(GOOD, explanation="x" * 1001), "explanation_too_long"),
                           (dict(GOOD, affected_ids=["a", "a", 1]), "id_not_string")):
             with self.subTest(code), self.assertRaises(StructureError) as caught:
                 parse_findings(msg(finding(affected_ids=["a", "a"]), bad), EP)

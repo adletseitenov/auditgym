@@ -37,6 +37,7 @@ __all__ = ["generate_episode", "make_env", "score_episode", "AdapterEnv", "Adapt
 
 TABLES = ("ledger", "invoices", "payments", "fx")  # canonical table names of the contract = ours
 MAX_STEPS = 100
+ADAPTER_SECRET_FILE_ENV = "AUDITGYM_ADAPTER_SECRET_FILE"  # signing secret for the eval evaluator (make_env)
 SCORE_LOG_ENV = "AUDITGYM_SCORE_LOG"
 DEFAULT_SCORE_LOG = "runs/score_errors.jsonl"
 
@@ -64,17 +65,20 @@ class AdapterError(RuntimeError):
 
 
 # ------------------------------------------------------------------------------------ generation
-def generate_episode(seed: int, config: dict, output_dir: str) -> None:
+def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None) -> None:
     """Write the episode of (seed, config) into `output_dir`: public/{manifest,policy,ledger,invoices,
     payments,fx} and private/{truth,provenance,pre_*}. The same generator and writer as
     `python -m auditgym export`; the same arguments always give the same bytes. `config` is the
     team config (auditgym/config.py; None or {} is the default). The evaluator secret of the calling
-    environment ($AUDITGYM_SECRET_FILE / $AUDITGYM_SECRET) is mixed in exactly as `export` does it;
-    without a secret the episode is reproducible from seed and config."""
+    environment ($AUDITGYM_SECRET_FILE / $AUDITGYM_SECRET), or the explicit optional `secret_file`
+    (it wins), is mixed in exactly as `export` does it. Without a secret the episode is reproducible
+    from seed and config, and so a policy that has this package can recover a hidden episode's seed
+    from its episode_id by trying seeds (measured: seed 7600 in 2.8 s): for hidden episodes the jury
+    should pass a secret (docs/ADAPTER.md, docs/LIMITATIONS.md)."""
     from auditgym.export import build_episode
     from auditgym.storage import write_episode
 
-    write_episode(build_episode(seed, config), output_dir)
+    write_episode(build_episode(seed, config, secret_file=secret_file), output_dir)
 
 
 # ------------------------------------------------------------------------------------ scoring
@@ -143,10 +147,13 @@ class AdapterEnv:
     "closed" without an episode_dir generates in the eval evaluator the same way. In closed mode the
     reward is always 0.0 and `info` is {}; the true reward is in the evaluator's journal."""
 
-    def __init__(self, journal_path=None, server_command=None) -> None:
+    def __init__(self, journal_path=None, server_command=None, secret_file=None) -> None:
         self._journal = os.path.abspath(os.fspath(journal_path) if journal_path is not None
                                         else default_results_path())
         self._server_command = list(server_command) if server_command is not None else None
+        if secret_file is None and server_command is None:
+            secret_file = os.environ.get(ADAPTER_SECRET_FILE_ENV) or None
+        self._secret_file = os.fspath(secret_file) if secret_file is not None else None
         self._env = None
         self._key = None
         self._closed_mode = False
@@ -194,6 +201,10 @@ class AdapterEnv:
         options = {"server_command": self._server_command}
         if self._server_command is None:
             options = {"results_path": self._journal if evaluator_mode == "eval" else None}
+            if evaluator_mode == "eval" and self._secret_file is not None:
+                # signing only: a loaded episode is not regenerated from the secret; a reset without
+                # episode_dir does generate under it (that is what the secret is for)
+                options["secret_file"] = self._secret_file
         with _without_secret_environment():
             if directory is not None:
                 self._env = Env.from_files(directory, mode=evaluator_mode, **options)
@@ -338,12 +349,15 @@ def _fx_id(name: str, args: dict) -> dict:
     return args
 
 
-def make_env(journal_path=None, server_command=None) -> AdapterEnv:
+def make_env(journal_path=None, server_command=None, secret_file=None) -> AdapterEnv:
     """The environment object. `journal_path`: the evaluator journal of closed runs (default
     $AUDITGYM_RESULTS or runs/results.jsonl, as for `python -m auditgym serve --mode eval`);
     `server_command`: argv of an evaluator started elsewhere (README «Закрытая проверка»), which then
-    owns its journal."""
-    return AdapterEnv(journal_path=journal_path, server_command=server_command)
+    owns its journal (and its secret). `secret_file` (else $AUDITGYM_ADAPTER_SECRET_FILE; the generic
+    $AUDITGYM_SECRET_FILE is still stripped): the evaluator secret file given to the `eval` evaluator
+    only, so that journal rows are HMAC-signed and `verify-journal --secret-file` exits 0. Without it
+    official rows are unsigned and verify-journal exits 1 by design (docs/ADAPTER.md)."""
+    return AdapterEnv(journal_path=journal_path, server_command=server_command, secret_file=secret_file)
 
 
 def main(argv: list[str]) -> int:

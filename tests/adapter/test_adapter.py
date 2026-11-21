@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -234,6 +235,60 @@ class BaselineTest(unittest.TestCase):
         done = subprocess.run([sys.executable, "judge_adapter.py", "--demo"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("demo: ok", done.stdout)
+
+
+class SecretTest(unittest.TestCase):
+    """Signed official journal (DECISIONS U): the adapter strips the secret from the environment, so rows are
+    unsigned (verify-journal exit 1 by design) unless the jury passes secret_file to make_env."""
+
+    SECRET = "adapter-test-secret-value"
+
+    def run_one(self, journal, **options):
+        fx = fixture("E")
+        env = judge_adapter.make_env(journal_path=journal, **options)
+        try:
+            env.reset(0, closed(fx["dir"]))
+            env.step(submit_action(helpers.oracle_findings(fx)))
+        finally:
+            env.close()
+
+    def verify(self, journal, *extra):
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("AUDITGYM_")}
+        return subprocess.run([sys.executable, "-m", "auditgym", "verify-journal", str(journal), *extra],
+                              cwd=ROOT, env=environment, capture_output=True, text=True, timeout=60)
+
+    def test_without_a_secret_file_rows_are_unsigned_and_verify_journal_fails_clearly(self):
+        _, journal = new_env("unsigned")
+        self.run_one(journal)
+        done = self.verify(journal)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("eval rows without evaluator secret", done.stdout)
+
+    def test_with_a_secret_file_rows_are_signed_and_verify_journal_passes(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            secret = pathlib.Path(scratch, "secret")
+            secret.write_text(self.SECRET + "\n", encoding="utf-8")
+            journal = pathlib.Path(scratch, "journal.jsonl")
+            self.run_one(journal, secret_file=secret)
+            done = self.verify(journal, "--secret-file", str(secret))
+            self.assertEqual((done.returncode, done.stderr), (0, ""), done.stdout)
+            self.assertNotIn(self.SECRET, done.stdout)
+            other = pathlib.Path(scratch, "other")
+            other.write_text("another-secret\n", encoding="utf-8")
+            self.assertEqual(self.verify(journal, "--secret-file", str(other)).returncode, 1)
+            row = [r for r in helpers.journal(journal) if r.get("event") == "finished"][-1]
+            self.assertEqual(row["reward"], 1.0)  # a loaded episode is not regenerated from the secret
+
+    def test_generate_episode_with_a_secret_file_differs_from_the_open_one(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            secret = pathlib.Path(scratch, "secret")
+            secret.write_text(self.SECRET + "\n", encoding="utf-8")
+            judge_adapter.generate_episode(5, {}, f"{scratch}/open")
+            judge_adapter.generate_episode(5, {}, f"{scratch}/closed", secret_file=secret)
+            judge_adapter.generate_episode(5, {}, f"{scratch}/closed2", secret_file=secret)
+            digest = adapter_pairs.tree_digest
+            self.assertNotEqual(digest(f"{scratch}/open"), digest(f"{scratch}/closed"))
+            self.assertEqual(digest(f"{scratch}/closed"), digest(f"{scratch}/closed2"))
 
 
 class ImportTest(unittest.TestCase):
