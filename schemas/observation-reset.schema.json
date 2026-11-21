@@ -87,16 +87,11 @@
             },
             "evidence_superset_allowed": {
               "type": "boolean"
-            },
-            "evidence_extra_max": {
-              "type": "integer",
-              "minimum": 0
             }
           },
           "required": [
             "amount_tolerance_minor",
-            "evidence_superset_allowed",
-            "evidence_extra_max"
+            "evidence_superset_allowed"
           ],
           "additionalProperties": false
         },

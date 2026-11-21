@@ -143,10 +143,11 @@ def unprotected_eval_rows(lines: list[str]) -> int:
 
 def loaded_eval_rows(lines: list[str]) -> int:
     """How many lines of mode `eval` record an episode read from a directory (`"source": "load"`).
-    The evaluator hides the truth only if it generated the episode itself; a directory is supplied by
-    whoever started the run, and a policy that could write `load` to the evaluator could have supplied
-    a forged one (empty truth, a hidden episode_id). A line without `source` (a journal written before
-    the field existed) counts as a seed episode: it cannot be told apart, and it is not flagged."""
+    Informational only (DECISIONS R): the official flow loads every closed episode from its `episode_dir`,
+    so such rows are the normal case and `verify-journal` reports them without failing. What keeps a
+    policy from loading a forged directory is the evaluator itself: `serve --mode eval` refuses `load`
+    unless `--allow-load` (DECISIONS P). A line without `source` (a journal written before the field
+    existed) counts as a seed episode: it cannot be told apart."""
     count = 0
     for text in lines:
         try:
@@ -174,7 +175,8 @@ def episode_rows(lines: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     """python -m auditgym verify-journal PATH [--secret-file F] [--expect-episodes N]: exit 0 valid,
-    1 failed (a bad line; a line of mode eval written without the evaluator secret or unsigned, or with source "load"; with a key, an unsigned or empty journal; fewer than N episode lines; a line of mode eval with source "load"),
+    1 failed (a bad line; a line of mode eval written without the evaluator secret or unsigned; with a key, an unsigned or empty journal; fewer than N episode lines;
+    eval rows with source "load" are only reported),
     2 nothing to verify (no key and an unsigned journal, a signed one without a key, unreadable file)."""
     import argparse
     import sys
@@ -218,9 +220,8 @@ def main(argv: list[str]) -> int:
         return 1
     loaded = loaded_eval_rows(lines)
     if loaded:
-        print(f"verify-journal: FAILED: eval rows of episodes loaded from a directory (source \"load\"): {loaded}; "
-              "an eval result counts only for an episode the evaluator generated (see docs/CLOSED-RUN.md)")
-        return 1
+        print(f"verify-journal: note: {loaded} eval rows of episodes loaded from a directory (source \"load\"); "
+              "expected when the closed run loads episode_dir, not a failure (see docs/CLOSED-RUN.md)")
     if arguments.expect_episodes is not None:
         found = episode_rows(lines)
         if found < arguments.expect_episodes:
