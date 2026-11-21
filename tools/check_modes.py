@@ -27,6 +27,7 @@ FULL_ONLY = (
     "tests.gen.test_inject.LeakTest",        # surface statistics on hundreds of episodes
     "tests.gen.test_inject.GridTest",        # = python -m tools.fuzz
     "tests.judge.test_mutants",              # = python -m tools.mutants
+    "tests.adapter.test_contract.RealTimeLimitTest",  # C18 at the real 60 s; the fast mode runs the 1 s variant
 )
 # (label, module arguments). Each runs as `python -m <args>` and must exit 0.
 EXTRA_TOOLS = (
