@@ -32,7 +32,8 @@ Rules decided here (docs/DECISIONS.md B and the orchestrator's rulings):
 - fx_error: targets are posted foreign invoices dated in the period and posted ordinary positive
   payments (not advances or refunds). The wrong rate is either another date's rate (up to 5 days
   away, or the document's naive date when its own offset changes the date) or the right rate
-  perturbed by 0.8-6 %; the posted value must differ from the policy value by >= 100 minor units
+  perturbed by 0.8-6 % (config fx_error_mode, docs/DECISIONS.md V: "date" only the first, "rate" only
+  the second, "mixed" the default draws one per issue; the choice is in params.mode); the posted value must differ from the policy value by >= 100 minor units
   and >= 0.5 %. Evidence: the document, a conversion row and the fx key of the document's date.
 - allocation_gap: a posted payment in the period with exactly one reference and a positive amount
   not above the open total, being the only payment document of an invoice posted in the period; a
@@ -201,8 +202,10 @@ def _far_enough(wrong: int, correct: int) -> bool:
 
 
 def wrong_rate(rng: Rng, world: dict, amount: int, currency: str, moment: dt.datetime,
-               prefer_naive: bool = False) -> tuple[Decimal, dict] | None:
-    """A rate that a careless bookkeeper could use, far enough from the policy value, or None."""
+               prefer_naive: bool = False, fx_mode: str = "mixed") -> tuple[Decimal, dict] | None:
+    """A rate that a careless bookkeeper could use, far enough from the policy value, or None.
+    `fx_mode` is the config's fx_error_mode: "date" tries only another date's rate, "rate" only a
+    perturbed one, "mixed" (the default) shuffles the two like before the setting existed."""
     exponents, base = world["currency_exponents"], world["base_currency"]
     right = rate_on(world, currency, moment)
     correct = convert(amount, right, exponents[currency], exponents[base])
@@ -217,7 +220,10 @@ def wrong_rate(rng: Rng, world: dict, amount: int, currency: str, moment: dt.dat
     if naive != local.isoformat():
         dates = [naive] + [d for d in dates if d != naive] if prefer_naive else dates
     modes = ["wrong_date", "wrong_rate"]
-    rng.shuffle(modes)
+    if fx_mode == "mixed":
+        rng.shuffle(modes)  # the only draw of the mode: "date" and "rate" take no extra draw
+    else:
+        modes = ["wrong_date"] if fx_mode == "date" else ["wrong_rate"]
     if prefer_naive and naive != local.isoformat():
         modes = ["wrong_date", "wrong_rate"]
     for mode in modes:
@@ -235,7 +241,7 @@ def wrong_rate(rng: Rng, world: dict, amount: int, currency: str, moment: dt.dat
     return None
 
 
-def fx_error(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, dict]:
+def fx_error(rng: Rng, world: dict, order: list[str], used: set, mode: str = "mixed") -> tuple[dict, dict]:
     base = world["base_currency"]
     for key in order:
         if key in used:
@@ -251,7 +257,7 @@ def fx_error(rng: Rng, world: dict, order: list[str], used: set) -> tuple[dict, 
                     or record["amount_minor"] <= 0):
                 continue
             amount, moment = record["amount_minor"], record["timestamp"]
-        chosen = wrong_rate(rng, world, amount, record["currency"], moment)
+        chosen = wrong_rate(rng, world, amount, record["currency"], moment, fx_mode=mode)
         if chosen is None:
             continue
         rate, params = chosen
@@ -455,7 +461,8 @@ def inject_errors(root: Rng, world: dict, config: dict) -> tuple[dict, list[dict
         stream = root.child(f"inject:{name}")
         order = _order(stream.child("targets"), story_docs)
         for case in range(count):
-            extra = {"mode": config.get("allocation_gap_mode", "partial")} if name == "allocation_gap" else {}
+            extra = {"allocation_gap": {"mode": config.get("allocation_gap_mode", "partial")},
+                     "fx_error": {"mode": config.get("fx_error_mode", "mixed")}}.get(name, {})
             world, injection = OPERATORS[name](stream.child(f"case:{case}"), world, order, used, **extra)
             record(world, injection)
     scenario = config["interaction"]
