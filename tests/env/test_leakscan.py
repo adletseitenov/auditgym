@@ -39,6 +39,40 @@ class ScannerSensitivityTest(unittest.TestCase):
         self.assertEqual(self.scan({"amount_minor": now - 86400}), [])
         self.assertTrue(self.scan({"amount_minor": now - 2 * 86400}))
 
+    def test_a_served_amount_equal_to_the_clock_is_data(self):
+        """A record amount that equals int(time.time()) (or its millisecond form) is served data: the
+        scan must not call it the clock, whatever the date the check is run on."""
+        now = int(time.time())
+        episode = generate(7_123_457, CONFIG)
+        episode["public"]["ledger"][0]["debit_minor"] = now
+        episode["public"]["ledger"][1]["credit_minor"] = now * 1000
+        episode["public"]["invoices"][0]["doc_id"] = str(now + 5)  # an all-digit id is data too
+        secret = leakscan.secrets(episode, ())
+        for value in (now, now * 1000, now + 5):
+            text = json.dumps({"observation": {"records": [{"debit_minor": value}]}})
+            self.assertEqual(leakscan.scan_text(text, secret, json.loads(text)), [], value)
+
+    def test_digits_inside_an_opaque_token_are_not_a_clock(self):
+        """Cursors and ids are hashes: a run of digits in one that lies near today's epoch seconds is
+        chance (the window moves with the calendar), not a leak."""
+        from unittest import mock
+
+        cursor = "3a9d28a51dc388016583"
+        text = json.dumps({"observation": {"next_cursor": cursor, "steps_remaining": 9}})
+        with mock.patch.object(leakscan.time, "time", return_value=388016583 + 3600):
+            self.assertTrue(leakscan._near_now(388016583))
+            self.assertEqual(leakscan.scan_text(text, self.secret, json.loads(text)), [])
+
+    def test_a_real_clock_value_is_still_found(self):
+        """Not served data, not inside a token: a bare number, one in a message, in milliseconds."""
+        now = int(time.time())
+        cases = [{"t": now}, {"t": now * 1000}, {"message": f"retry after {now} s"},
+                 {"message": f"at {now}."}, {"t": [now - 3600]}]
+        for case in cases:
+            self.assertTrue(any("epoch-like" in problem for problem in self.scan(case)), case)
+        problems = leakscan.scan_text(f"started {now}\n", self.secret)  # stderr / client text, unparsed
+        self.assertTrue(any("epoch-like" in problem for problem in problems), problems)
+
     def test_pre_injection_values_are_found(self):
         if not self.secret["strings"] and not self.secret["ints"]:
             self.skipTest("this episode has no pre-injection-only values")

@@ -25,8 +25,9 @@ seeds are >= 1 000 000), config-only key names, provenance and truth key names, 
 names, the episode directory and the repository path, values that exist only before injection
 (pre_* tables and provenance `before` records: strings absent from the public tables, integers
 >= 10 000 absent from the public tables), per-finding verdict keys (tp, fp, fn, pairs,
-structure_error), exception texts, and wall-clock time (epoch-like numbers near now; a repeat of
-the honest walk after 1.1 s must be byte-identical). Reply shapes are checked too: fixed error
+structure_error), exception texts, and wall-clock time (epoch-like numbers near now that stand on their own and are not served data; digit
+runs inside cursors and ids are chance, not a clock; a repeat of the honest walk after 1.1 s must be
+byte-identical). Reply shapes are checked too: fixed error
 texts, observation keys per type, info == {} before the end, the five metrics at the end in
 train, reward 0.0 and info {} everywhere in eval.
 
@@ -193,6 +194,8 @@ def secrets(episode: dict, paths: tuple[str, ...] = ()) -> dict:
     provenance = private["provenance"]
     public_strings, public_ints = set(), set()
     _leaves(episode["public"], public_strings, public_ints)
+    # An all-digit public string (an id) is served data that reads as a number once the digits are bounded.
+    public_ints |= {int(s) for s in public_strings if s.isascii() and s.isdigit() and len(s) <= 30}
     pre_strings, pre_ints = set(), set()
     for name in ("pre_ledger", "pre_invoices", "pre_payments"):
         _leaves(private.get(name, []), pre_strings, pre_ints)
@@ -206,6 +209,7 @@ def secrets(episode: dict, paths: tuple[str, ...] = ()) -> dict:
         "ints": {i for i in pre_ints - public_ints if i >= 10000},
         # Integers the agent may legitimately read (amounts, ...): one that happens to lie within ten
         # days of today's epoch seconds is data, not the clock. The 1.1 s repeat still catches a clock.
+        # (Digit runs inside opaque tokens, such as cursors, are excluded by the boundaries in scan_text.)
         "public_ints": public_ints,
         "seed": provenance.get("seed"),
         "paths": tuple(p for p in paths if p) + (str(ROOT),),
@@ -241,6 +245,9 @@ def scan_text(text: str, secret: dict, parsed=None) -> list[str]:
     for number in re.findall(r"(?<![0-9.])[0-9]{5,}(?![0-9])", text):
         if int(number) in secret["ints"]:
             problems.append(f"pre-injection amount {number}")
+    # Wall clock: a number standing on its own (not a digit run inside a hash-like token such as a cursor
+    # or an id, where the calendar window sweeps over chance digits) that is not served data.
+    for number in re.findall(r"(?<![0-9A-Za-z_.])[0-9]{5,}(?![0-9A-Za-z_])", text):
         if _near_now(int(number)) and int(number) not in secret.get("public_ints", ()):
             problems.append(f"epoch-like number {number}")
     if parsed is not None:
