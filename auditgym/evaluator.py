@@ -136,6 +136,7 @@ class Evaluator:
         self._clock = clock if clock is not None else MonotonicClock()
         self._time_limit = time_limit
         self._loaded = None   # episode from load(); reset() without seed restarts it
+        self._loaded_sha256 = None  # content hash of the directory given to load(), for the journal
         self._next_seed = DEFAULT_SEED  # seed of the next reset() without a seed and without files
         self._episode = None  # the running episode, public and private
         self._resets_abandoned = 0  # episodes of this session replaced by reset/load while running
@@ -201,6 +202,7 @@ class Evaluator:
         from .storage import load_episode
 
         try:
+            digest = _directory_sha256(directory)
             loaded = load_episode(directory)
             observation = self._swap_in(copy.deepcopy(loaded), from_loaded=True)
         except EvaluatorError:
@@ -208,6 +210,7 @@ class Evaluator:
         except Exception:  # files are outside input: any defect is one fixed error
             raise EvaluatorError("bad_episode") from None
         self._loaded = loaded
+        self._loaded_sha256 = digest
         return observation
 
     def _swap_in(self, episode: dict, from_loaded: bool = False) -> tuple[dict, dict]:
@@ -224,7 +227,7 @@ class Evaluator:
         # steps it spent, so a restart cannot hide 99 inspection steps (audit A2). An episode that
         # has not spent a step (Env.from_files loads, then reset() restarts it) showed nothing but
         # the reset observation and is not journaled.
-        abandoned = (self._episode, self._steps) if self.running and self._steps > 0 else None
+        abandoned = (self._episode, self._steps, self._from_loaded) if self.running and self._steps > 0 else None
         self._clear()
         try:
             started = self._start(episode)
@@ -387,19 +390,29 @@ class Evaluator:
                 "event": "finished", "terminated": not truncated, "truncated": truncated,
                 "inspection_steps": inspection_steps,
                 # every step taken, the submit included (inspection_steps stops before it)
-                "steps_total": inspection_steps if steps_total is None else steps_total}
+                "steps_total": inspection_steps if steps_total is None else steps_total,
+                **self._source_fields(self._from_loaded)}
         if ended_by is not None:
             line["ended_by"] = ended_by
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = result.get(key)
         self._write_line(line)
 
-    def _write_abandoned(self, episode: dict, steps: int) -> None:
+    def _source_fields(self, from_loaded: bool) -> dict:
+        """Where the episode came from, for the journal row (under the MAC): `source` is "seed" for an
+        episode generated here and "load" for one read from a directory, with the content hash of
+        that directory as `source_sha256`."""
+        if from_loaded:
+            return {"source": "load", "source_sha256": self._loaded_sha256}
+        return {"source": "seed"}
+
+    def _write_abandoned(self, episode: dict, steps: int, from_loaded: bool = False) -> None:
         """The journal row of an episode replaced by reset/load before it ended: no reward, the
         steps it spent, and how many episodes this session has abandoned so far."""
         line = {"episode_id": episode["public"]["manifest"]["episode_id"], "mode": self._mode,
                 "event": "abandoned", "terminated": False, "truncated": False,
-                "inspection_steps": steps, "steps_total": steps, "abandoned_in_session": self._resets_abandoned}
+                "inspection_steps": steps, "steps_total": steps, "abandoned_in_session": self._resets_abandoned,
+                **self._source_fields(from_loaded)}
         for key in ("reward", "precision", "recall", "f1", "tp", "fp", "fn", "structure_error"):
             line[key] = None
         self._write_line(line)
@@ -500,3 +513,22 @@ class Evaluator:
         except CalcError:
             raise ActionError("bad_expression") from None
         return {"type": "calculation", "result": result}
+
+
+def _directory_sha256(directory) -> str:
+    """SHA-256 over the files of an episode directory (sorted relative paths and contents), so the
+    journal says which files the loaded episode was read from. An unreadable directory raises OSError
+    (load turns it into bad_episode)."""
+    import hashlib
+    import pathlib
+
+    root = pathlib.Path(directory)
+    digest = hashlib.sha256()
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    if not files:
+        raise OSError("empty directory")
+    for path in files:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        content = path.read_bytes()
+        digest.update(str(len(content)).encode("ascii") + b"\0" + content)
+    return digest.hexdigest()

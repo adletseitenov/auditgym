@@ -31,8 +31,12 @@ it is a `bad_request` like any other bad line; after the end of the episode it g
     <- {"observation": {"type": "error", "error": {"code": "bad_request", "message": "Bad request."},
         "steps_remaining": N}, "reward": 0.0, "terminated": false, "truncated": false, "info": {}}
 
-`--no-load` refuses `load` altogether (Env() without files starts the server this way, so a
-policy writing to the pipe cannot point the server at a directory). `--results-fd N` (N >= 3)
+`load` is allowed by default only in train mode. In `--mode eval` it is refused (`bad_request`) unless
+`--allow-load` is given: a policy that writes first to the evaluator's stdin could otherwise load a
+forged directory (a hidden episode_id, empty truth) and get a signed row with reward 1.0. Rows of loaded
+episodes carry `"source": "load"` and `source_sha256` in the journal, and `verify-journal` fails on them
+in eval. `--no-load` refuses `load` in every mode and wins over `--allow-load` (Env() without files
+starts the server this way, so a policy writing to the pipe cannot point the server at a directory). `--results-fd N` (N >= 3)
 takes the results file as an inherited, already open descriptor instead of a path, so the path is
 not in the server's argv (the process list); Env uses it on POSIX. `--secret-file PATH` reads the
 generation secret from a file (auditgym/secret.py; else $AUDITGYM_SECRET_FILE, else $AUDITGYM_SECRET);
@@ -234,7 +238,11 @@ def main(argv: list[str]) -> int:
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--results", default=None)
     target.add_argument("--results-fd", type=int, default=None)
-    parser.add_argument("--no-load", action="store_true")
+    parser.add_argument("--no-load", action="store_true",
+                        help="refuse load in any mode (wins over --allow-load)")
+    parser.add_argument("--allow-load", action="store_true",
+                        help="eval mode: accept load (dev only: the journal marks such rows source=load and "
+                             "verify-journal fails on them); train mode allows load without it")
     parser.add_argument("--shaped-reward", action="store_true",
                         help="train mode only: add info['shaped_reward'] (experimental) to the terminal info")
     parser.add_argument("--secret-file", default=None,
@@ -265,7 +273,8 @@ def main(argv: list[str]) -> int:
         print("auditgym serve: cannot open the results file", file=sys.stderr)
         return 2
     try:
-        return serve(evaluator, allow_load=not arguments.no_load)
+        allow_load = (arguments.mode == "train" or arguments.allow_load) and not arguments.no_load
+        return serve(evaluator, allow_load=allow_load)
     finally:
         if stream is not None:
             stream.close()
