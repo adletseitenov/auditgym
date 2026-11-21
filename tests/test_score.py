@@ -56,7 +56,8 @@ class CrashTest(unittest.TestCase):
         self.assertIn("Внутренние проверки (не оценка жюри): пройдено 2/3 (66.7 %)", text)
         self.assertNotIn("ИТОГО", text)
         self.assertNotIn("/100", text)
-        self.assertRegex(text, r"B\s+1/1\s+5\.0/5")
+        self.assertRegex(text, r"B\s+1/1 проверок")
+        self.assertNotRegex(text, r"\d/(10|5|25)\b")
 
 
 class ExitCodeTest(unittest.TestCase):

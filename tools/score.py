@@ -314,9 +314,9 @@ def main(argv: list[str]) -> int:
     checks_total = 0
     failed_real = 0
     not_passed = 0
-    print(f"{'Критерий':<34}{'Пройдено':>10}{'Баллы':>12}")
+    print(f"{'Критерий (внутренние проверки)':<34}{'Пройдено':>20}")
     details = []
-    for name, points, checks in CRITERIA:
+    for name, _points, checks in CRITERIA:
         passed = 0
         for check_name, function in checks:
             message = run_check(function)
@@ -329,10 +329,9 @@ def main(argv: list[str]) -> int:
                 failed_real += 1
             details.append(f"  [{'TODO' if pending else 'FAIL'}] {name}: {check_name}"
                            + ("" if message == "TODO" else f" -- {message}"))
-        earned = points * passed / len(checks)
         checks_passed += passed
         checks_total += len(checks)
-        print(f"{name:<34}{passed:>6}/{len(checks):<3}{earned:>8.1f}/{points:g}")
+        print(f"{name:<34}{f'{passed}/{len(checks)} проверок':>20}")
     percent = 100 * checks_passed / checks_total if checks_total else 0.0
     print(f"Внутренние проверки (не оценка жюри): пройдено {checks_passed}/{checks_total} ({percent:.1f} %)")
     for module_name in MISSING_MODULES:
