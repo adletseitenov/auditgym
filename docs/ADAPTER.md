@@ -22,7 +22,7 @@
 | `{"mode": "train", "team_config": C}` | `Env(mode="train").reset(seed, C)`: наш генератор |
 | `{"mode": "closed"}` без каталога | генерация в оценщике `eval` по `seed` и `team_config` под секретом `secret_file` у `make_env` (или секретом оценщика, заданным через `server_command`, см. `docs/CLOSED-RUN.md`); без секрета `AdapterError("secret_required")` |
 
-Неверный `config`, неизвестный режим или нечитаемый каталог — `AdapterError(code)` на `reset` (код фиксированный, без пути). Секрет из окружения (`AUDITGYM_SECRET*`) адаптер оценщику не передаёт; передаётся только явный `secret_file` / `AUDITGYM_ADAPTER_SECRET_FILE`.
+`episode_dir` без ключа `mode` — `AdapterError("bad_mode")` (режим по умолчанию `train` с видимой наградой молча не выбирается); без `mode` и без `episode_dir` — `train`, открытый генератор. Неверный `config`, неизвестный режим или нечитаемый каталог — `AdapterError(code)` на `reset` (код фиксированный, без пути). Секрет из окружения (`AUDITGYM_SECRET*`) адаптер оценщику не передаёт; передаётся только явный `secret_file` / `AUDITGYM_ADAPTER_SECRET_FILE`.
 
 Закрытый режим: `reward` — `0.0`, `info` — `{}` на каждом шаге, включая завершение. Истинная награда, TP/FP/FN и `inspection_steps` — в журнале оценщика (`journal_path`, по умолчанию `$AUDITGYM_RESULTS` или `runs/results.jsonl`); для стороны жюри есть `env.last_result()` (последняя строка `finished` текущего эпизода) и `env.inspection_steps`. Политика в закрытом прогоне получает только возвращаемое `step`.
 
@@ -38,7 +38,7 @@
 | `calculator {expression}` | то же, грамматика только арифметика (`auditgym/calc.py`) | десятичная строка: `0.1+0.2` → `"0.3"` |
 | `submit {findings}` | `submit`, `findings` = объект `{episode_id, findings: [...]}` | `{"accepted": true}`; неверная структура — `error.code = "invalid_findings"`, `result = null`, эпизод завершён, награда −1 только у оценщика |
 
-Имя действия сравнивается точно (регистр и пробелы). Неизвестное имя, не-объект — `unknown_action`; `args` не объект или не JSON (множество, NaN, слишком глубокая вложенность) у известного действия — `bad_arguments` (у `submit` — неверная структура); шаг тратится, ошибка ограничена. Таблицы совпадают с каноническими (`ledger`, `invoices`, `payments`, `fx`), переводить нечего.
+Имя действия сравнивается точно (регистр и пробелы). Неизвестное имя, не-объект — `unknown_action`; `args` не объект или не JSON (множество, NaN, слишком глубокая вложенность) у известного действия — `bad_arguments` (у `submit` — неверная структура); шаг тратится, ошибка ограничена. Таблицы совпадают с каноническими (`ledger`, `invoices`, `payments`, `fx`), переводить нечего; среда дополнительно принимает варианты регистра и расширения (`Ledger`, `ledger.csv`, `INVOICES.JSONL`, ` invoice `) и `cursor=0`, `limit="50"` (нестрогая форма запроса: `docs/CONTRACTS.md`, раздел о форме действия).
 
 Первое наблюдение — ровно `{"task", "manifest", "policy", "remaining_steps": 100}`; `task` — строка: текст задачи плюс схема findings, лимиты и правила ответа по типам (то, что наша среда кладёт в `task`). Следующие — ровно `{"result", "error", "remaining_steps"}`, ошибка `{"code", "message"}` из фиксированного списка, без путей, seed, ID запроса и закрытых данных. Принятие `submit` определяется тем же разбором структуры, что у оценщика; о правильности ответ ничего не говорит (тест `test_a_wrong_but_well_formed_answer_is_accepted_...`).
 

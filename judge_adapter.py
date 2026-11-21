@@ -254,6 +254,9 @@ class AdapterEnv:
         episode_dir = config.get("episode_dir")
         if episode_dir is not None and not isinstance(episode_dir, (str, os.PathLike)):
             raise AdapterError("bad_config")
+        if episode_dir is not None and "mode" not in config:
+            # explicit is safer: a missing mode must not silently pick train (reward visible) for a given episode
+            raise AdapterError("bad_mode")
         team_config = config.get("team_config")
         if team_config is not None and not isinstance(team_config, dict):
             raise AdapterError("bad_config")

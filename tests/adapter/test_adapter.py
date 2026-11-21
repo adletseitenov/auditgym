@@ -88,6 +88,16 @@ class ResetTest(unittest.TestCase):
         self.assertEqual(reward, -1.0)  # one issue missed, empty answer
         self.assertEqual(info["reward"], -1.0)
 
+    def test_an_episode_dir_without_a_mode_is_bad_mode_not_silent_train(self):
+        env, _ = new_env("nomode")
+        self.addCleanup(env.close)
+        fx = helpers.fixture("E")
+        for config in ({"episode_dir": fx["dir"]}, {"episode_dir": fx["dir"], "team_config": {}}):
+            with self.assertRaises(judge_adapter.AdapterError) as caught:
+                env.reset(0, config)
+            self.assertEqual(caught.exception.code, "bad_mode")
+        env.reset(0, {"mode": "train", "episode_dir": fx["dir"]})
+
     def test_closed_mode_does_not_generate_when_the_dir_is_missing(self):
         env, _ = new_env("missing")
         self.addCleanup(env.close)
