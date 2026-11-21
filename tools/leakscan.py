@@ -132,6 +132,8 @@ class RawServer:
         command = [sys.executable, "-m", "auditgym", "serve", "--mode", mode]
         if not allow_load:
             command.append("--no-load")
+        elif mode == "eval":
+            command.append("--allow-load")  # eval refuses load without it (DECISIONS P)
         environment = dict(os.environ, PYTHONPATH=str(ROOT))
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, cwd=str(ROOT), env=environment)

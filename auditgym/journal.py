@@ -141,6 +141,23 @@ def unprotected_eval_rows(lines: list[str]) -> int:
     return count
 
 
+def loaded_eval_rows(lines: list[str]) -> int:
+    """How many lines of mode `eval` record an episode read from a directory (`"source": "load"`).
+    The evaluator hides the truth only if it generated the episode itself; a directory is supplied by
+    whoever started the run, and a policy that could write `load` to the evaluator could have supplied
+    a forged one (empty truth, a hidden episode_id). A line without `source` (a journal written before
+    the field existed) counts as a seed episode: it cannot be told apart, and it is not flagged."""
+    count = 0
+    for text in lines:
+        try:
+            row = json.loads(text)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(row, dict) and row.get("mode") == "eval" and row.get("source") == "load":
+            count += 1
+    return count
+
+
 def episode_rows(lines: list[str]) -> int:
     """How many lines record an episode that ended or was abandoned: `finished` (or a journal row of
     the time before `event` existed) and `abandoned`. Lines that are not JSON objects do not count."""
@@ -157,7 +174,7 @@ def episode_rows(lines: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     """python -m auditgym verify-journal PATH [--secret-file F] [--expect-episodes N]: exit 0 valid,
-    1 failed (a bad line; a line of mode eval written without the evaluator secret or unsigned; with a key, an unsigned or empty journal; fewer than N episode lines),
+    1 failed (a bad line; a line of mode eval written without the evaluator secret or unsigned, or with source "load"; with a key, an unsigned or empty journal; fewer than N episode lines; a line of mode eval with source "load"),
     2 nothing to verify (no key and an unsigned journal, a signed one without a key, unreadable file)."""
     import argparse
     import sys
@@ -198,6 +215,11 @@ def main(argv: list[str]) -> int:
     if unprotected:
         print(f"verify-journal: FAILED: eval rows without evaluator secret: {unprotected}; "
               "the closed run is not protected (see README «Закрытая проверка»)")
+        return 1
+    loaded = loaded_eval_rows(lines)
+    if loaded:
+        print(f"verify-journal: FAILED: eval rows of episodes loaded from a directory (source \"load\"): {loaded}; "
+              "an eval result counts only for an episode the evaluator generated (see docs/CLOSED-RUN.md)")
         return 1
     if arguments.expect_episodes is not None:
         found = episode_rows(lines)
