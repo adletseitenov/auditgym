@@ -164,7 +164,7 @@ class Evaluator:
         """With a seed: generate a new episode. Without: restart the episode from load(), or, when
         none was loaded, generate one from the next default seed with the default configuration:
         DEFAULT_SEED (0) the first time, then the seed of the previous successful reset plus one.
-        A refused reset (bad seed, a seed of more than MAX_SEED_BITS bits, bad config) leaves the
+        A refused reset (bad seed, a negative seed, a seed of more than MAX_SEED_BITS bits, bad config) leaves the
         running episode and the default-seed counter as they are."""
         if seed is None:
             if self._loaded is not None:
@@ -179,7 +179,7 @@ class Evaluator:
             seed = _seed_from_text(seed)
         elif not isinstance(seed, int) or isinstance(seed, bool):
             raise EvaluatorError("bad_config")
-        if seed.bit_length() > MAX_SEED_BITS:
+        if seed < 0 or seed.bit_length() > MAX_SEED_BITS:  # one rule: 0 <= seed < 2**256
             raise EvaluatorError("bad_config")
         observation = self._swap_in(self._generate(seed, config))
         following = seed + 1  # past the largest seed the default sequence starts again at 0

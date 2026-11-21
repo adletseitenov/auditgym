@@ -10,6 +10,7 @@ MAX_FINDINGS = 30                 # findings in one submit
 MAX_ISSUES = 12                   # most issues one episode may hold (errors plus 2 for I1/I2): docs/CASE.md section 03
 MAX_EVIDENCE_IDS = 10             # evidence ids per finding, and ids per truth evidence set
 MAX_EXPLANATION_CHARS = 1000
+MAX_EVIDENCE_EXTRA = 2            # ids a finding may cite beyond one allowed evidence set (never an fx key); bounds hedging
 MAX_MESSAGE_BYTES = 256 * 1024    # docs/AUDIT.md R2: 30 x 10 x 1 000 Cyrillic characters must fit
 MAX_JSON_DEPTH = 64               # nesting of one message; explicit so the result does not depend on
                                   # the Python version's json recursion behaviour

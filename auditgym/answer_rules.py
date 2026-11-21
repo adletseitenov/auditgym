@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import copy
 
-from .limits import MAX_EVIDENCE_IDS, MAX_FINDINGS
+from .limits import MAX_EVIDENCE_EXTRA, MAX_EVIDENCE_IDS, MAX_FINDINGS
 
 GENERAL = [
     "Вывод — TP, только если совпали все пять признаков: type; множество affected_ids (порядок не важен, "
@@ -28,7 +28,9 @@ GENERAL = [
     "повторы внутри evidence_ids схлопываются. Один документ может входить в выводы "
     "разных типов.",
     "Лишние существующие ID в evidence_ids допустимы, пока tolerances.evidence_superset_allowed = true "
-    "(иначе набор должен совпасть точно); несуществующий ID — FP. Всего не более "
+    f"(иначе набор должен совпасть точно), но не больше tolerances.evidence_extra_max ({MAX_EVIDENCE_EXTRA}) сверх одного "
+    "допустимого набора, и среди лишних не может быть ключа курса (ID вида «дата|ИСТ|ЦЕЛЬ»): "
+    "соседние курсы «про запас» делают вывод FP; несуществующий ID — FP. Всего не более "
     f"{MAX_EVIDENCE_IDS} уникальных ID (limits.max_evidence_ids) и не более {MAX_FINDINGS} выводов "
     "(limits.max_findings). Достаточно одного набора из one_of; все четыре набора дубля вместе — шесть ID.",
     "ID: affected_ids — doc_id документов (таблицы invoices, payments); строки — row_id таблицы ledger; "
