@@ -272,7 +272,7 @@ FINDINGS_SCHEMA = {
             "items": {
                 "type": "object",
                 "required": ["type", "affected_ids", "claimed_amount_minor", "currency",
-                             "evidence_ids"],  # explanation is optional (AUDIT R5)
+                             "evidence_ids", "explanation"],  # all six required (CASE 05, CHECKS rule 8)
                 "properties": {
                     "type": {"enum": list(ERROR_TYPES)},
                     "affected_ids": {"type": "array", "items": {"type": "string"},

@@ -7,8 +7,9 @@ huge integers and reference cycles cannot crash it.
 
 Decisions on points the case leaves open (audit R2, R5 relaxed the strictest reading where
 a reasonable oracle built slightly differently would otherwise get -1):
-- Five finding fields are required; `explanation` is optional and defaults to the empty
-  string (when present it must be a string of at most 1 000 code points).
+- All six finding fields are required (CASE section 05 schema, CHECKS rule 8: a missing required
+  field is a structural error of the whole submit); `explanation` must be a string of at most
+  1 000 code points, the empty string is allowed.
 - `evidence_ids` is limited to 10 ELEMENTS of the raw list, checked before repeats collapse
   (official definitions of 20.11, docs/DECISIONS.md R: 11 entries with 10 repeats of D1 is an error).
 - `claimed_amount_minor` is a JSON integer (`int`): `true`, `100.5`, `125000.0`, `"100"`, NaN and
@@ -170,7 +171,7 @@ def _finding(raw: object) -> dict:
     if not isinstance(raw, dict):
         raise StructureError("finding_not_object")
     for field in FIELDS:
-        if field != "explanation" and field not in raw:
+        if field not in raw:
             raise StructureError("missing_field")
     kind = raw["type"]
     if not isinstance(kind, str):  # an unknown string is only unmatchable: an FP, not a structure error
@@ -181,7 +182,7 @@ def _finding(raw: object) -> dict:
     if not isinstance(currency, str):
         raise StructureError("currency_not_string")
     evidence = _id_list(raw["evidence_ids"], MAX_EVIDENCE_IDS)
-    explanation = raw.get("explanation", "")
+    explanation = raw["explanation"]
     if not isinstance(explanation, str):
         raise StructureError("explanation_not_string")
     if len(explanation) > MAX_EXPLANATION_CODE_POINTS:
@@ -191,8 +192,21 @@ def _finding(raw: object) -> dict:
             "explanation": explanation}
 
 
+class _Oversized:
+    """Marker for a request line longer than the serve limit (1 MiB): never parsed, always too large."""
+
+    def __repr__(self) -> str:
+        return "OVERSIZED"
+
+
+OVERSIZED = _Oversized()
+
+
 def parse_findings(payload: object, episode_id: str) -> list[dict]:
-    """Normalized findings in submission order, or StructureError(code)."""
+    """Normalized findings in submission order, or StructureError(code). `OVERSIZED` stands for a
+    submit line the server refused to read (more than 1 MiB): message_too_large."""
+    if payload is OVERSIZED:
+        raise StructureError("message_too_large")
     if message_size(payload) > MAX_MESSAGE_BYTES:
         raise StructureError("message_too_large")
     if not isinstance(payload, dict):

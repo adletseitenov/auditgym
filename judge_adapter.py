@@ -73,7 +73,8 @@ def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None)
     """Write the episode of (seed, config) into `output_dir`: public/{manifest,policy,ledger,invoices,
     payments,fx} and private/{truth,provenance,pre_*}. The same generator and writer as
     `python -m auditgym export`; the same arguments always give the same bytes. `config` is the
-    team config (auditgym/config.py; None or {} is the default). The evaluator secret of the calling
+    team config (auditgym/config.py; None or {} is the default), or the reset-style wrapper with a
+    `team_config` key (its value is the team config; `mode` and `episode_dir` are ignored). The evaluator secret of the calling
     environment ($AUDITGYM_SECRET_FILE / $AUDITGYM_SECRET), or the explicit optional `secret_file`
     (it wins), is mixed in exactly as `export` does it. Without a secret the episode is reproducible
     from seed and config, and so a policy that has this package can recover a hidden episode's seed
@@ -82,6 +83,10 @@ def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None)
     from auditgym.export import build_episode
     from auditgym.storage import write_episode
 
+    if isinstance(config, dict) and "team_config" in config:
+        # the reset-style wrapper {"mode": ..., "episode_dir": ..., "team_config": {...}}: the team
+        # config is the value, mode/episode_dir mean nothing for a generation
+        config = config["team_config"]
     write_episode(build_episode(seed, config, secret_file=secret_file), output_dir)
 
 
@@ -121,6 +126,7 @@ def _log_score_error(path: str, episode_id: str, code: str) -> None:
 
 def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journal_path=None) -> dict:
     """The closed evaluator call. `findings` is the findings.json object {"episode_id", "findings": [...]}
+    or a bare list of findings (the current episode), exactly the shapes a submit step accepts
     (None means an empty answer: a truncated episode). A valid structure gives
     {"tp","fp","fn","precision","recall","f1","return"}; an invalid one gives return -1 and None in the
     other fields, and the error code goes to the evaluator's score log (`journal_path`, else
@@ -133,6 +139,12 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
     episode = load_episode(episode_dir)
     if findings is None:
         findings = {"episode_id": episode["public"]["manifest"]["episode_id"], "findings": []}
+    # the same input shapes as a submit step (bare list, JSON text, findings.json object): one reading
+    episode_id = episode["public"]["manifest"]["episode_id"]
+    try:
+        findings = submit_payload({"findings": findings}, episode_id)
+    except ActionError:
+        pass  # not readable as any accepted shape: the parser names the structure error
     result = judge(episode, _translate_fx_message(findings), inspection_steps)
     if result.get("structure_error"):
         _log_score_error(_score_log_path(journal_path), episode["public"]["manifest"]["episode_id"],

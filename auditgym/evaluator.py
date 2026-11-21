@@ -16,6 +16,7 @@ import sys
 from . import actions, shaped
 from .actions import MAX_STEPS, ActionError, error
 from .calc import CalcError, calculate
+from .findings import OVERSIZED
 from .limits import MAX_SEED_BITS  # a longer seed is refused as bad_config; the running episode is untouched
 
 DEFAULT_TIME_LIMIT = 60
@@ -334,7 +335,7 @@ class Evaluator:
             return self._finish(None, truncated=True)
         return observation, 0.0, False, False, {}
 
-    def reject(self, submit: bool = False):
+    def reject(self, submit: bool = False, oversize: bool = False):
         """A request line the server could not take as an action (too long, audit L4) during an
         episode: a step with an error, or, if it was a submit, an invalid structure. After the end of
         the episode: the same episode_over reply as a step."""
@@ -346,7 +347,7 @@ class Evaluator:
         if self._expired():
             return self._finish(None, truncated=True, by_time=True, spent_step=True)
         if submit:
-            return self._finish({}, truncated=False)
+            return self._finish(OVERSIZED if oversize else {}, truncated=False)
         return self._after_step({"type": "error", "error": error("bad_arguments")})
 
     def _finish(self, payload, truncated: bool, ended_by: str | None = None, by_time: bool = False,
