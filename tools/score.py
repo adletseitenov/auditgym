@@ -192,6 +192,7 @@ CRITERIA: list[tuple[str, float, list[tuple[str, Check]]]] = [
         ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP", todo),
         ("invalid structure ends the episode with reward -1 and a judge log entry", todo),
         ("limits: 30 findings, 10 evidence ids, 1000 characters", todo),
+        ("evidence hedging is bounded (extra ids, no extra rate keys)", todo),
         ("explanation text does not change the reward", todo),
         ("guessed and non-existent ids give no gain", todo),
     ]),
