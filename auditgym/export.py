@@ -43,8 +43,8 @@ def main(argv: list[str]) -> int:
         print(f"export: {message}", file=sys.stderr)
         return 2
 
-    if args.seed.bit_length() > MAX_SEED_BITS:
-        return fail(f"seed must fit into {MAX_SEED_BITS} bits")
+    if args.seed < 0 or args.seed.bit_length() > MAX_SEED_BITS:
+        return fail(f"seed must be from 0 to 2**{MAX_SEED_BITS} - 1")
     config = None
     try:
         if args.config_file is not None:

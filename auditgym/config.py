@@ -168,8 +168,8 @@ def normalize_config(config: object) -> dict:
     surface_seed = given("surface_seed")
     if surface_seed is not None and not _is_int(surface_seed):
         raise ConfigError("bad_surface_seed", "surface_seed must be an integer or null")
-    if surface_seed is not None and surface_seed.bit_length() > MAX_SEED_BITS:
-        raise ConfigError("bad_surface_seed", f"surface_seed must fit into {MAX_SEED_BITS} bits")
+    if surface_seed is not None and (surface_seed < 0 or surface_seed.bit_length() > MAX_SEED_BITS):
+        raise ConfigError("bad_surface_seed", f"surface_seed must fit into {MAX_SEED_BITS} bits and not be negative")
     out["surface_seed"] = surface_seed
 
     foreign_needed = out["errors"]["fx_error"] > 0 or interaction == "I1"

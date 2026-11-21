@@ -74,7 +74,7 @@ class ConfigTest(unittest.TestCase):
 
         self.assertEqual(normalize_config({"surface_seed": (1 << MAX_SEED_BITS) - 1})["surface_seed"],
                          (1 << MAX_SEED_BITS) - 1)
-        for value in (1 << MAX_SEED_BITS, -(1 << MAX_SEED_BITS), 1 << 300):
+        for value in (1 << MAX_SEED_BITS, -(1 << MAX_SEED_BITS), 1 << 300, -1, -(2 ** 256) + 1):
             with self.assertRaises(ConfigError) as caught:
                 normalize_config({"surface_seed": value})
             self.assertEqual(caught.exception.code, "bad_surface_seed")

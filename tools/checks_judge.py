@@ -241,8 +241,15 @@ def limits_30_10_1000() -> Optional[str]:
     if tolerated:
         return tolerated
     return _rows(("30 findings (4 right + 26 junk)", "31 findings",
-                  "10 evidence ids (full set + existing extras)", "11 evidence ids",
+                  "10 evidence ids (full set + 6 extras: over the extra limit)", "11 evidence ids",
                   "explanation 1000 code points, 4-byte chars", "explanation 1001 code points, 2-byte chars"))
+
+
+def evidence_hedging_is_bounded() -> Optional[str]:
+    """DECISIONS Q: a superset is allowed, but at most MAX_EVIDENCE_EXTRA extra ids and no extra rate key."""
+    return _rows(("full set + 2 existing extras (exactly the limit)", "fx right + 2 existing non-rate extras",
+                  "fx right + 3 existing non-rate extras", "hedge: fx right + 1 neighbouring rate key",
+                  "hedge: fx right + 2 neighbouring rate keys + 3 document lines"))
 
 
 def explanation_does_not_matter() -> Optional[str]:
@@ -274,6 +281,7 @@ CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
     ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP", wrong_fields_are_not_tp),
     ("invalid structure ends the episode with reward -1 and a judge log entry", invalid_structure_is_minus_one),
     ("limits: 30 findings, 10 evidence ids, 1000 characters", limits_30_10_1000),
+    ("evidence hedging is bounded (extra ids, no extra rate keys)", evidence_hedging_is_bounded),
     ("explanation text does not change the reward", explanation_does_not_matter),
     ("guessed and non-existent ids give no gain", guessed_ids_give_no_gain),
 ]

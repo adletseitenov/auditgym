@@ -129,6 +129,8 @@ MUTANTS: list[tuple[str, list]] = [
     ("matcher: superset of evidence never allowed", [(matcher, "superset_allowed", lambda policy: False)]),
     ("matcher: superset off when the policy key is missing",
      [(matcher, "superset_allowed", lambda policy: policy.get("evidence_superset_allowed", False) is True)]),
+    ("matcher: no limit on extra evidence ids", [(matcher, "MAX_EVIDENCE_EXTRA", HUGE)]),
+    ("matcher: extra rate keys allowed", [(matcher, "is_rate_key", lambda evidence_id: False)]),
     ("matcher: an empty evidence set accepts any evidence", [(matcher, "evidence_covers", _covers_with_empty)]),
     ("matcher: greedy first-come matching", [(matcher, "match", _greedy_match), (judge, "match", _greedy_match)]),
     ("matcher: rate keys are not citable ids", [(matcher, "known_ids", _known_without_rate_keys)]),

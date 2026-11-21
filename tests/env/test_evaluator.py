@@ -139,6 +139,17 @@ class ResetTest(unittest.TestCase):
             evaluator.reset(None, {"nope": 1})
         self.assertEqual(episode_id(evaluator), episode_id(Evaluator(clock=FakeClock()), 9, None))
 
+    def test_negative_seed_is_bad_config_as_a_string_or_a_number(self):
+        """One rule: an int (not bool) with 0 <= seed < 2**256, else bad_config; same for "-1" and -1."""
+        evaluator = tiny()
+        for seed in (-1, "-1", -(2 ** 256) + 1, -(1 << 255)):
+            with self.subTest(seed=seed):
+                with self.assertRaises(EvaluatorError) as caught:
+                    evaluator.reset(seed, CLEAN)
+                self.assertEqual(caught.exception.code, "bad_config")
+        self.assertEqual(evaluator.steps_remaining(), 100)  # the running episode is untouched
+        Evaluator(clock=FakeClock()).reset(0, CLEAN)
+
     def test_seed_longer_than_256_bits_is_bad_config_and_keeps_the_episode(self):
         from auditgym.limits import MAX_SEED_BITS
 

@@ -73,7 +73,10 @@ def multi_episode() -> dict:
         "payments": [{"doc_id": "p1", "payment_id": "py1", "timestamp": "2026-10-12T11:00:00+05:00",
                       "currency": "KZT", "amount_minor": 150000, "invoice_refs": ["iv3"]}],
         "fx": [{"date": "2026-10-03", "source_currency": "USD", "target_currency": "KZT",
-                "rate": "464.00"}],
+                "rate": "464.00"},
+               # Neighbouring dates: the rate keys a hedging finding cites around the right one.
+               {"date": "2026-10-02", "source_currency": "USD", "target_currency": "KZT", "rate": "463.00"},
+               {"date": "2026-10-04", "source_currency": "USD", "target_currency": "KZT", "rate": "465.00"}],
     }
     issues = [
         {"issue_id": "t1", "type": "duplicate_invoice", "affected_ids": ["d1", "d2"],
@@ -187,6 +190,7 @@ T1 = {"type": "duplicate_invoice", "affected_ids": ["d1", "d2"], "claimed_amount
       "currency": "USD", "evidence_ids": ["d1", "d2", "r9", "r11"], "explanation": "copy"}
 T1_FULL = ["d1", "d2", "r9", "r11"]
 EXISTING_EXTRA = ["r6", "r7", "r8", "d6", "p1", "2026-10-03|USD|KZT"]
+NEIGHBOUR_KEYS = ["2026-10-02|USD|KZT", "2026-10-04|USD|KZT"]
 
 # (name, episode, build, steps, expected): expected is (tp, fp, fn) or a StructureError code.
 ATTACKS: list[tuple] = [
@@ -198,8 +202,18 @@ ATTACKS: list[tuple] = [
     ("one false accusation on clean books", "clean", lambda e: [dict(T1)], STEPS, (0, 1, 0)),
     ("30 findings (4 right + 26 junk)", "multi", lambda e: oracle_findings(e) + _junk(26), STEPS, (4, 26, 0)),
     ("31 findings", "multi", lambda e: oracle_findings(e) + _junk(27), STEPS, "too_many_findings"),
-    ("10 evidence ids (full set + existing extras)", "multi",
-     _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA), STEPS, (4, 0, 0)),
+    ("10 evidence ids (full set + 6 extras: over the extra limit)", "multi",
+     _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA), STEPS, (3, 1, 1)),
+    ("full set + 2 existing extras (exactly the limit)", "multi",
+     _with(0, evidence_ids=T1_FULL + ["r6", "r7"]), STEPS, (4, 0, 0)),
+    ("hedge: fx right + 2 neighbouring rate keys + 3 document lines", "multi",
+     _with(2, evidence_ids=["d4", "r2", FX_KEY] + NEIGHBOUR_KEYS + ["r6", "r7", "r8"]), STEPS, (3, 1, 1)),
+    ("hedge: fx right + 1 neighbouring rate key", "multi",
+     _with(2, evidence_ids=["d4", "r2", FX_KEY, NEIGHBOUR_KEYS[0]]), STEPS, (3, 1, 1)),
+    ("fx right + 3 existing non-rate extras", "multi",
+     _with(2, evidence_ids=["d4", "r2", FX_KEY, "r6", "r7", "r8"]), STEPS, (3, 1, 1)),
+    ("fx right + 2 existing non-rate extras", "multi",
+     _with(2, evidence_ids=["d4", "r2", FX_KEY, "r6", "r7"]), STEPS, (4, 0, 0)),
     ("11 evidence ids", "multi",
      _with(0, evidence_ids=T1_FULL + EXISTING_EXTRA + ["r3"]), STEPS, "too_many_evidence_ids"),
     ("11 evidence entries that collapse to 2 ids count as 2", "multi",

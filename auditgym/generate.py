@@ -164,8 +164,8 @@ def _assemble(seed: int, config: dict, digest: str, attempt: int, retries: list[
 def generate(seed: int, config: dict | None = None, secret: str = "") -> dict:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ConfigError("bad_seed", "seed must be an integer")
-    if seed.bit_length() > MAX_SEED_BITS:  # the evaluator's limit, so a direct call cannot take any length
-        raise ConfigError("bad_seed", f"seed must fit into {MAX_SEED_BITS} bits")
+    if seed < 0 or seed.bit_length() > MAX_SEED_BITS:  # the evaluator's rule: 0 <= seed < 2**256
+        raise ConfigError("bad_seed", f"seed must be an integer from 0 to 2**{MAX_SEED_BITS} - 1")
     if not isinstance(secret, str):
         raise ConfigError("bad_secret", "secret must be a string")
     config = normalize_config(config)

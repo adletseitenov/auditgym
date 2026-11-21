@@ -4,7 +4,9 @@ A finding is a TP for an issue iff every predicate below holds:
   same_type, same_affected_ids (as sets), same_currency, amount_within_tolerance,
   evidence_exists (every evidence id is a ledger row_id, an invoice or payment doc_id, or an
   fx key "date|source|target"), evidence_covers (contains a full allowed evidence set; extra
-  ids only if policy["evidence_superset_allowed"]), and issue_available (not matched yet).
+  ids only if policy["evidence_superset_allowed"], and then at most MAX_EVIDENCE_EXTRA of them
+  and none of them an fx key, so a finding cannot hedge over neighbouring rates or pad with
+  documents), and issue_available (not matched yet).
 
 Choice under ambiguity: the result is a maximum one-to-one matching (augmenting paths,
 Kuhn's algorithm). Findings are tried in submission order and each finding's candidate issues
@@ -20,6 +22,8 @@ mutation tests (tests/judge/test_mutations.py) can switch each one off.
 """
 from __future__ import annotations
 
+from .limits import MAX_EVIDENCE_EXTRA
+
 
 def truth_key(issue: dict) -> tuple:
     return (issue["type"], frozenset(issue["affected_ids"]))
@@ -34,6 +38,11 @@ def known_ids(public: dict) -> frozenset:
     ids.update(f"{r['date']}|{r['source_currency']}|{r['target_currency']}"
                for r in public.get("fx", ()))
     return frozenset(ids)
+
+
+def is_rate_key(evidence_id: str) -> bool:
+    """An fx key is "date|source|target"; no ledger row_id or doc_id contains a bar."""
+    return "|" in evidence_id
 
 
 def tolerance(policy: dict, kind: str) -> int:
@@ -74,8 +83,12 @@ def evidence_covers(finding: dict, issue: dict, superset_allowed: bool) -> bool:
         allowed = set(allowed)
         if not allowed:
             continue  # an empty set would accept any evidence; never valid
-        if allowed == cited or (superset_allowed and allowed <= cited):
+        if allowed == cited:
             return True
+        if superset_allowed and allowed <= cited:
+            extra = cited - allowed
+            if len(extra) <= MAX_EVIDENCE_EXTRA and not any(is_rate_key(i) for i in extra):
+                return True
     return False
 
 

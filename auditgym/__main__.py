@@ -1,6 +1,6 @@
 """Single entry point.
 
-    python -m auditgym check           fast: lint, the score table and the unit tests, under two minutes
+    python -m auditgym check           fast: lint, the score table and the unit tests, about 4-7 minutes
     python -m auditgym check --full    everything: all tests, fuzz, leak scan, metamorphic pairs, attacks
     python -m auditgym serve [--mode train|eval] [--results PATH]    the evaluator process
     python -m auditgym export --seed N [--config JSON | --config-file PATH] --out DIR

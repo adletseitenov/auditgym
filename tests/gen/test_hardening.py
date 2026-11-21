@@ -45,10 +45,10 @@ class ConfigSchemaTest(unittest.TestCase):
     def test_limits_agree_with_normalize_config(self):
         schema = load_schema("config")
         limit = (1 << MAX_SEED_BITS) - 1
-        for value in (limit, -limit, 0, None):
+        for value in (limit, 0, None):
             self.assertEqual(validate({"surface_seed": value}, schema), [])
             normalize_config({"surface_seed": value})
-        for value in (limit + 1, -limit - 1):
+        for value in (limit + 1, -1, -limit, -limit - 1):
             self.assertNotEqual(validate({"surface_seed": value}, schema), [])
             with self.assertRaises(ConfigError):
                 normalize_config({"surface_seed": value})
@@ -63,7 +63,7 @@ class ConfigSchemaTest(unittest.TestCase):
 
 class SeedTest(unittest.TestCase):
     def test_seed_longer_than_the_limit_is_a_config_error(self):
-        for seed in (1 << MAX_SEED_BITS, -(1 << MAX_SEED_BITS), 10 ** 5000):
+        for seed in (1 << MAX_SEED_BITS, -(1 << MAX_SEED_BITS), 10 ** 5000, -1, -(2 ** 256) + 1):
             with self.assertRaises(ConfigError) as caught:
                 generate(seed, {"errors": {}, "size": {"invoices": [10, 12], "background_pairs": [0, 0]}})
             self.assertEqual(caught.exception.code, "bad_seed")
