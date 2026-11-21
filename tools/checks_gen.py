@@ -31,6 +31,8 @@ CONFIGS = [
     {"errors": {"duplicate_invoice": 1, "allocation_gap": 1}, "currencies": ["RUB"], "base_currency": "USD",
      "timezone": "+05:45", "size": SMALL, "distractors": False},
     {"errors": {"allocation_gap": 2, "fx_error": 1}, "currencies": ["USD"], "allocation_gap_mode": "missing", "size": SMALL},
+    {"errors": {"fx_error": 2, "period_cutoff": 1}, "currencies": ["EUR"], "fx_error_mode": "date", "size": SMALL},
+    {"errors": {"fx_error": 2, "duplicate_invoice": 1}, "currencies": ["USD"], "fx_error_mode": "rate", "size": SMALL},
     {"errors": {"allocation_gap": 3, "duplicate_invoice": 1}, "currencies": ["EUR"], "allocation_gap_mode": "mixed",
      "timezone": "+05:45", "size": SMALL},
 ]
@@ -232,6 +234,16 @@ def each_error_type_configurable_alone() -> Optional[str]:
         issues = episode["private"]["truth"]["issues"]
         if len(issues) != 3 or any(issue["type"] != "allocation_gap" for issue in issues) or verify(episode):
             return f"allocation_gap_mode {mode}: not three valid allocation_gap issues"
+    for mode, wanted in (("date", {"wrong_date"}), ("rate", {"wrong_rate"}), ("mixed", {"wrong_date", "wrong_rate"})):
+        seen = set()  # the variants of an fx_error (docs/DECISIONS.md V)
+        for seed in range(12 if mode == "mixed" else 4):
+            episode = generate(seed, {"errors": {"fx_error": 3}, "currencies": ["USD"], "fx_error_mode": mode})
+            issues = episode["private"]["truth"]["issues"]
+            if len(issues) != 3 or any(issue["type"] != "fx_error" for issue in issues) or verify(episode):
+                return f"fx_error_mode {mode}: not three valid fx_error issues"
+            seen |= {step["params"]["mode"] for step in episode["private"]["provenance"]["steps"]}
+        if seen != wanted:
+            return f"fx_error_mode {mode}: variants {sorted(seen)}, wanted {sorted(wanted)}"
     return None
 
 
@@ -249,7 +261,7 @@ def any_seed_and_valid_config_gives_valid_episode() -> Optional[str]:
         return problem
     for bad in ({"seed": 1}, {"errors": {"fx_error": "1"}}, {"timezone": "+05:00\n"}, {"currencies": [["USD"]]},
                 {"period": {"start": "1999-01-01", "months": 1}}, [], {"errors": {"fx_error": 31}},
-                {"allocation_gap_mode": "full"}, {"allocation_gap_mode": None}, {"allocation_gap_mode": ["missing"]}):
+                {"allocation_gap_mode": "full"}, {"fx_error_mode": "wrong_date"}, {"fx_error_mode": None}, {"fx_error_mode": ["date"]}, {"allocation_gap_mode": None}, {"allocation_gap_mode": ["missing"]}):
         try:
             normalize_config(bad)
         except ConfigError:

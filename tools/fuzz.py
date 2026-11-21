@@ -72,6 +72,14 @@ def grid() -> list[tuple[str, dict]]:
         out.append((f"gap_{mode}_x{count}", {"errors": {"allocation_gap": count}, "allocation_gap_mode": mode,
                                               "size": {"invoices": [40, 60], "background_pairs": [0, 40]},
                                               "currencies": currencies, "timezone": "+05:30"}))
+    # The variants of an fx_error (docs/DECISIONS.md V): another date's rate, a perturbed rate, a per-issue mix.
+    for mode, count, currencies in (("date", 2, ["USD"]), ("rate", 2, ["EUR"]), ("mixed", 3, ["USD", "CNY"])):
+        out.append((f"fx_{mode}_x{count}", {"errors": {"fx_error": count}, "fx_error_mode": mode,
+                                             "size": {"invoices": [40, 60], "background_pairs": [0, 40]},
+                                             "currencies": currencies, "timezone": "-03:00"}))
+    out.append(("fx_date_all", {"errors": _errors(*TYPES), "fx_error_mode": "date",
+                                "size": {"invoices": [64, 80], "background_pairs": [50, 100]},
+                                "currencies": ["USD"]}))
     out.append(("gap_missing_I1+all", {"errors": _errors(*TYPES), "allocation_gap_mode": "missing", "interaction": "I1",
                                        "size": {"invoices": [64, 80], "background_pairs": [50, 100]},
                                        "currencies": ["USD"]}))

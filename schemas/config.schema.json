@@ -135,6 +135,15 @@
       ],
       "description": "Variant of an allocation_gap: partial (default), missing (the whole closing moved to unallocated) or mixed (drawn per issue)."
     },
+    "fx_error_mode": {
+      "type": "string",
+      "enum": [
+        "mixed",
+        "date",
+        "rate"
+      ],
+      "description": "Variant of an fx_error: mixed (default, drawn per issue), date (another date's rate) or rate (a perturbed rate of the right date)."
+    },
     "distractors": {
       "description": "Clean patterns that look suspicious but are not errors: true (all), false (none) or an object that switches single patterns on (missing names are false; docs/DECISIONS.md T).",
       "type": ["boolean", "object"],

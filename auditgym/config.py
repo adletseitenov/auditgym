@@ -23,6 +23,11 @@ INTERACTIONS = ("none", "I1", "I2")
 # config, so configs, ids and episodes made before the setting existed stay byte-identical.
 GAP_MODES = ("partial", "missing", "mixed")
 DEFAULT_GAP_MODE = "partial"
+# Variant of an fx_error (docs/DECISIONS.md V): "date" uses another date's rate, "rate" a perturbed
+# rate of the right date, "mixed" draws one of the two per issue. "mixed" is the default and is left
+# out of a normalized config, so older configs, ids and episodes stay byte-identical.
+FX_MODES = ("mixed", "date", "rate")
+DEFAULT_FX_MODE = "mixed"
 # Clean patterns that look suspicious but satisfy no error definition (docs/DECISIONS.md T).
 # `distractors` is true (all on), false (all off) or an object of these names (missing = off).
 DISTRACTOR_KINDS = ("split_payments", "overpayments", "advances", "refunds", "repeated_amounts",
@@ -50,6 +55,7 @@ DEFAULTS = {
     "errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1},
     "interaction": "none",
     "allocation_gap_mode": DEFAULT_GAP_MODE,
+    "fx_error_mode": DEFAULT_FX_MODE,
     "distractors": True,
     "surface_seed": None,
 }
@@ -173,6 +179,12 @@ def normalize_config(config: object) -> dict:
         raise ConfigError("bad_gap_mode", "allocation_gap_mode must be partial, missing or mixed")
     if gap_mode != DEFAULT_GAP_MODE:
         out["allocation_gap_mode"] = gap_mode
+
+    fx_mode = given("fx_error_mode")
+    if not isinstance(fx_mode, str) or fx_mode not in FX_MODES:
+        raise ConfigError("bad_fx_mode", "fx_error_mode must be mixed, date or rate")
+    if fx_mode != DEFAULT_FX_MODE:
+        out["fx_error_mode"] = fx_mode
 
     if "errors" in config:
         errors = config["errors"]
