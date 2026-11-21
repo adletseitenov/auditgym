@@ -130,7 +130,7 @@ def main(argv: list[str]) -> int:
     ok = True
     with tempfile.TemporaryDirectory() as scratch:
         root = pathlib.Path(scratch)
-        print(f"{'episode':<16}{'policy':<17}{'steps':>5} {'saw':>4} {'tp':>3}{'fp':>3}{'fn':>3} {'return':>8} {'journal':>8}")
+        print(f"{'episode':<19}{'policy':<17}{'steps':>5} {'saw':>4} {'tp':>3}{'fp':>3}{'fn':>3} {'return':>8} {'journal':>8}")
         for label, config in DEMO_CONFIGS:
             for seed in range(arguments.seeds):
                 directory = root / f"{label}-{seed}"
@@ -140,7 +140,7 @@ def main(argv: list[str]) -> int:
                 for row in run_baselines(directory, root / "results.jsonl"):
                     same = row["journal_reward"] == row["return"]
                     ok = ok and same and row["policy_saw_reward"] == 0
-                    print(f"{label + '#' + str(seed):<16}{row['policy']:<17}{row['steps']:>5} {row['policy_saw_reward']:>4} "
+                    print(f"{label + '#' + str(seed):<19}{row['policy']:<17}{row['steps']:>5} {row['policy_saw_reward']:>4} "
                           f"{row['tp']!s:>3}{row['fp']!s:>3}{row['fn']!s:>3} {row['return']:>8.3f} "
                           f"{row['journal_reward']:>8.3f}" + ("" if same else "  MISMATCH"))
     print("demo:", "ok (policy saw reward 0; the journal reward equals score_episode)" if ok else "FAILED")

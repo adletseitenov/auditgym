@@ -83,6 +83,8 @@ def render() -> str:
            f"- Ключ курса: `дата:ИСТ:ЦЕЛЬ` (например `{fx_example}`) или `дата|ИСТ|ЦЕЛЬ`; адаптер принимает "
            "обе записи в `evidence_ids`/`affected_ids`. Дата — дата документа в поясе компании, ИСТ — валюта "
            "документа, ЦЕЛЬ — базовая валюта.",
+           "- В `evidence_ids` (только там) адаптер читает `invoice_id`/`payment_id` документа, как его принимает "
+           "`get_record`, как `doc_id` этого документа; в `affected_ids` ID остаются точными (нужен `doc_id`).",
            ""]
     for kind in ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff"):
         finding = dict(found[kind], explanation=NOTES[kind][1])

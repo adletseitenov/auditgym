@@ -17,7 +17,7 @@ Hardening of the process boundary:
 - A policy holding this object can still reach the pipes (Python has no private attributes), so
   the server gives the pipe no more power than reset/step: `load` is accepted only as the first
   request and only by a server started for Env.from_files (in eval mode with `--allow-load`, dev only: the
-  journal marks such rows source=load and verify-journal fails on them); Env() starts it with `--no-load`.
+  journal marks such rows source=load; verify-journal prints them as information and exits 0 when the rows are signed); Env() starts it with `--no-load`.
 - The client never reads the generation secret and never passes it on implicitly:
   $AUDITGYM_SECRET and $AUDITGYM_SECRET_FILE are removed from the server's environment, always
   (otherwise a policy could start its own Env(mode="train") that inherits the secret and rebuild
@@ -118,7 +118,7 @@ class Env:
         if not _files:
             command.append("--no-load")
         elif mode == "eval":
-            command.append("--allow-load")  # dev only: eval rows of loaded episodes are marked and fail verify-journal
+            command.append("--allow-load")  # dev only: eval rows of loaded episodes are marked source=load (informational for verify-journal)
         if shaped_reward and mode == "train":  # never in eval: no hints, no extra journal data
             command.append("--shaped-reward")
         # The secret reaches the server only when it is given explicitly (secret_file): a value or a

@@ -84,7 +84,7 @@ def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None)
     environment ($AUDITGYM_SECRET_FILE / $AUDITGYM_SECRET), or the explicit optional `secret_file`
     (it wins), is mixed in exactly as `export` does it. Without a secret the episode is reproducible
     from seed and config, and so a policy that has this package can recover a hidden episode's seed
-    from its episode_id by trying seeds (measured: seed 7600 in 2.8 s): for hidden episodes the jury
+    from its episode_id by trying seeds (measured: seed 7600 takes 7601 candidates, about 3-5 minutes on one core, 27-43 candidates/s; `python3.11 -m tools.seed_recovery --bits 13 --seed 7600`): for hidden episodes the jury
     should pass a secret (docs/ADAPTER.md, docs/LIMITATIONS.md)."""
     from auditgym.export import build_episode
     from auditgym.secret import read_secret
@@ -121,6 +121,24 @@ def _score_log_path(journal_path) -> str:
     return os.path.join(tempfile.gettempdir(), "auditgym", os.path.basename(primary))
 
 
+def _default_journal_path() -> str:
+    """The evaluator journal of a make_env() without an explicit path: $AUDITGYM_RESULTS or
+    <cwd>/runs/results.jsonl made absolute at call time; when that file cannot be opened for append
+    (non-root user, read-only file system), the same file name under the system temporary directory
+    (auditgym/ there), as for the score log. When neither can be opened the primary path is returned
+    and the reset refuses it with bad_results_path. Always absolute."""
+    primary = os.path.abspath(default_results_path())
+    candidates = [primary, os.path.join(tempfile.gettempdir(), "auditgym", os.path.basename(primary))]
+    for path in candidates:
+        try:
+            pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+            os.close(open_results(path))
+            return path
+        except OSError:
+            continue
+    return primary
+
+
 def _log_score_error(path: str, episode_id: str, code: str) -> None:
     """Append the score_error row. A failure is loud: AdapterError("score_log_unwritable") (the log is
     the only place the structure error code goes; losing it silently would hide it from the jury)."""
@@ -144,7 +162,9 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
     $AUDITGYM_SCORE_LOG, else an absolute runs/score_errors.jsonl, else the same name under the system
     temporary directory); the log holds a fixed code, never agent data. If the log cannot be written,
     AdapterError("score_log_unwritable") is raised. FX keys of the contract `date:src:dst` in
-    evidence_ids/affected_ids are read as our `date|src|dst` (docs/ADAPTER.md)."""
+    evidence_ids/affected_ids are read as our `date|src|dst`; an evidence_ids entry that is an
+    invoice_id/payment_id of a document is read as that document's doc_id (affected_ids stay exact;
+    docs/ADAPTER.md)."""
     from auditgym.storage import load_episode
 
     episode = load_episode(episode_dir)
@@ -156,7 +176,7 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
         findings = submit_payload({"findings": findings}, episode_id)
     except ActionError:
         pass  # not readable as any accepted shape: the parser names the structure error
-    result = judge(episode, _translate_fx_message(findings), inspection_steps)
+    result = judge(episode, _translate_fx_message(findings, _document_aliases(episode["public"])), inspection_steps)
     if result.get("structure_error"):
         _log_score_error(_score_log_path(journal_path), episode["public"]["manifest"]["episode_id"],
                          str(result["structure_error"]))
@@ -206,8 +226,8 @@ class AdapterEnv:
     reward is always 0.0 and `info` is {}; the true reward is in the evaluator's journal."""
 
     def __init__(self, journal_path=None, server_command=None, secret_file=None) -> None:
-        self._journal = os.path.abspath(os.fspath(journal_path) if journal_path is not None
-                                        else default_results_path())
+        self._journal = os.path.abspath(os.fspath(journal_path)) if journal_path is not None \
+            else _default_journal_path()
         self._server_command = list(server_command) if server_command is not None else None
         if secret_file is None and server_command is None:
             secret_file = os.environ.get(ADAPTER_SECRET_FILE_ENV) or None
@@ -219,6 +239,7 @@ class AdapterEnv:
         self._running = False
         self._inspection_steps = 0
         self._remaining = 0
+        self._aliases: dict = {}   # invoice_id / payment_id -> doc_id of documents known to this episode
 
     # --- reset ------------------------------------------------------------------------------
     def reset(self, seed, config=None):
@@ -250,6 +271,7 @@ class AdapterEnv:
             raise AdapterError(error.code) from None
         self._closed_mode = mode == "closed"
         self._episode_id = observation["manifest"]["episode_id"]
+        self._aliases = _directory_aliases(directory)
         self._running = True
         self._inspection_steps = 0
         self._remaining = MAX_STEPS
@@ -307,7 +329,8 @@ class AdapterEnv:
         if not isinstance(args, dict) or not _serialisable(args):
             # not an object, or not JSON (a set, NaN, too deep): bad_arguments (a submit: invalid structure)
             return name, {"action": name, "args": []}
-        return name, {"action": name, "args": _translate_fx_submit(name, _fx_id(name, args), self._episode_id)}
+        return name, {"action": name, "args": _translate_fx_submit(name, _fx_id(name, args), self._episode_id,
+                                                                            self._aliases)}
 
     def step(self, action):
         if self._env is None:
@@ -345,6 +368,8 @@ class AdapterEnv:
             if name == "submit" and self._valid_submit(action):
                 return {"result": {"accepted": True}, "error": None, "remaining_steps": remaining}
             return self._plain(_error("invalid_findings"), remaining)
+        if kind in ("records", "record", "document"):
+            _learn_aliases(self._aliases, internal["records"] if kind == "records" else [internal["record"]])
         if kind == "records":
             result = {"records": internal["records"], "next_cursor": internal["next_cursor"]}
         elif kind in ("record", "document"):
@@ -424,9 +449,54 @@ def _fx_text(value):
     return value
 
 
-def _translate_fx_message(message):
-    """The findings message with colon FX keys in evidence_ids and affected_ids translated; the same
-    object when nothing changes. Shapes the parser would refuse are returned untouched."""
+def _document_aliases(public: dict) -> dict:
+    """invoice_id / payment_id -> doc_id of every document of the open data. get_record accepts these
+    ids for its document (a doc_id is looked up first), so an evidence list that cites one cites that
+    document. An id that is itself a doc_id or a ledger row_id is never an alias."""
+    taken = {doc["doc_id"] for table in ("invoices", "payments") for doc in public.get(table, ())}
+    taken.update(row["row_id"] for row in public.get("ledger", ()))
+    aliases = {}
+    for table, field in (("invoices", "invoice_id"), ("payments", "payment_id")):
+        for doc in public.get(table, ()):
+            alias = doc.get(field)
+            if isinstance(alias, str) and alias not in taken:
+                aliases[alias] = doc["doc_id"]
+    return aliases
+
+
+def _directory_aliases(directory) -> dict:
+    """Aliases of a loaded episode directory (empty for a generated one: they are learnt from the
+    records the policy reads, `_learn_aliases`)."""
+    if directory is None:
+        return {}
+    try:
+        from auditgym.storage import load_episode
+
+        return _document_aliases(load_episode(directory)["public"])
+    except Exception:  # noqa: BLE001 - the evaluator has its own refusal for an unreadable directory
+        return {}
+
+
+def _learn_aliases(aliases: dict, records) -> None:
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("doc_id"), str):
+            continue
+        for field in ("invoice_id", "payment_id"):
+            alias = record.get(field)
+            if isinstance(alias, str) and alias != record["doc_id"]:
+                aliases.setdefault(alias, record["doc_id"])
+
+
+def _evidence_text(value, aliases: dict):
+    value = _fx_text(value)
+    return aliases.get(value, value) if isinstance(value, str) else value
+
+
+def _translate_fx_message(message, aliases=None):
+    """The findings message with colon FX keys in evidence_ids and affected_ids translated, and
+    invoice_id/payment_id entries of evidence_ids (not of affected_ids) replaced by the document's
+    doc_id; the same object when nothing changes. Shapes the parser would refuse are returned untouched."""
+    aliases = aliases or {}
     if not isinstance(message, dict) or not isinstance(message.get("findings"), list):
         return message
     changed, findings = False, []
@@ -436,7 +506,11 @@ def _translate_fx_message(message):
             for field in ("evidence_ids", "affected_ids"):
                 values = finding.get(field)
                 if isinstance(values, list):
-                    translated = [_fx_text(value) for value in values]
+                    translated = [_evidence_text(value, aliases) if field == "evidence_ids" else _fx_text(value)
+                                  for value in values]
+                    if field == "evidence_ids" and translated != values:
+                        translated = [value for index, value in enumerate(translated)
+                                      if not isinstance(value, str) or value not in translated[:index]]
                     if translated != values:
                         update[field] = translated
             if update:
@@ -445,14 +519,14 @@ def _translate_fx_message(message):
     return dict(message, findings=findings) if changed else message
 
 
-def _translate_fx_submit(name: str, args: dict, episode_id: str) -> dict:
+def _translate_fx_submit(name: str, args: dict, episode_id: str, aliases=None) -> dict:
     if name != "submit":
         return args
     try:
         message = submit_payload(args, episode_id)
     except ActionError:
         return args
-    translated = _translate_fx_message(message)
+    translated = _translate_fx_message(message, aliases)
     return args if translated is message else {"findings": translated}
 
 
@@ -468,7 +542,8 @@ def _fx_id(name: str, args: dict) -> dict:
 
 def make_env(journal_path=None, server_command=None, secret_file=None) -> AdapterEnv:
     """The environment object. `journal_path`: the evaluator journal of closed runs (default
-    $AUDITGYM_RESULTS or runs/results.jsonl, as for `python -m auditgym serve --mode eval`);
+    $AUDITGYM_RESULTS or runs/results.jsonl, as for `python -m auditgym serve --mode eval`; when that
+    is not writable, auditgym/results.jsonl under the system temporary directory; see `AdapterEnv._journal`);
     `server_command`: argv of an evaluator started elsewhere (README «Закрытая проверка»), which then
     owns its journal (and its secret). `secret_file` (else $AUDITGYM_ADAPTER_SECRET_FILE; the generic
     $AUDITGYM_SECRET_FILE is still stripped): the evaluator secret file given to the `eval` evaluator
