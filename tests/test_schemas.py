@@ -143,6 +143,10 @@ class SchemaFilesTest(Checker):
         self.bad({"errors": {"duplicate_invoice": -1}}, "config")
         self.bad({"errors": {"made_up": 1}}, "config")
         self.bad({"surface_seed": "1"}, "config")
+        self.bad({"distractors": {"made_up": True}}, "config")
+        self.bad({"distractors": {"refunds": 1}}, "config")
+        self.bad({"distractors": "true"}, "config")
+        self.ok({"distractors": {"refunds": True}}, "config")
         self.bad({"episode_id": "x", "findings": [{"type": "other", "affected_ids": [], "claimed_amount_minor": 1,
                                                    "currency": "USD", "evidence_ids": []}]}, "findings")
         self.bad({"action": "list_records", "table": "ledger", "limit": 51}, "action-list_records")
@@ -175,6 +179,7 @@ class EpisodeFilesTest(Checker):
     def test_generated_episodes(self):
         both = {"errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1}}
         configs = [None, {"errors": {}}, {"errors": {}, "distractors": False},
+                   {"errors": {}, "distractors": {"refunds": True, "weekend_fx": True}},
                    dict(both, currencies=["USD", "EUR"], timezone="-11:00"),
                    {"errors": {"duplicate_invoice": 2}, "interaction": "I2", "base_currency": "USD",
                     "currencies": ["EUR"], "period": {"start": "2027-02-01", "months": 2}},

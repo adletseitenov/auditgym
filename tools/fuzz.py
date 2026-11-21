@@ -14,6 +14,8 @@ import sys
 import time
 from collections import Counter, defaultdict
 
+from auditgym.config import DISTRACTOR_KINDS
+
 TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 BAD_RETRIES = ("internal:", "verify:")  # retry reasons that count as failures
 OFFSETS = ("-11:00", "-09:30", "+00:00", "+05:00", "+05:45", "+14:00", "-03:00", "+05:30", "-12:00", "+12:45")
@@ -32,12 +34,17 @@ def _errors(*names: str, count: int = 1) -> dict:
 
 def grid() -> list[tuple[str, dict]]:
     """(name, config): each type alone, all pairs, both interactions, clean with and without
-    distractors, maximum density; sizes, currencies, offsets and periods cycle over their lists."""
+    distractors (each pattern alone, as objects too), maximum density; sizes, currencies, offsets and periods cycle over their lists."""
     scenarios = [("clean", {}, "none", True), ("clean_plain", {}, "none", False)]
     scenarios += [(name, _errors(name), "none", True) for name in TYPES]
     scenarios += [(f"{a}+{b}", _errors(a, b), "none", True) for i, a in enumerate(TYPES) for b in TYPES[i + 1:]]
     scenarios += [("I1", {}, "I1", True), ("I2", {}, "I2", True), ("I2+cutoff", _errors("period_cutoff"), "I2", True)]
     scenarios += [("all_plain", _errors(*TYPES), "none", False)]
+    # Each clean pattern switched on alone, all of them as an object, none as an object, and one
+    # pattern next to every error type (docs/DECISIONS.md T).
+    scenarios += [(f"toggle_{kind}", {}, "none", {kind: True}) for kind in DISTRACTOR_KINDS]
+    scenarios += [("toggles_all", {}, "none", {kind: True for kind in DISTRACTOR_KINDS}), ("toggles_none", {}, "none", {})]
+    scenarios += [("toggle_refunds+errors", _errors(*TYPES), "none", {"refunds": True, "split_payments": True})]
     out = []
     for index, (name, errors, interaction, distractors) in enumerate(scenarios):
         issues = sum(errors.values()) + (2 if interaction != "none" else 0)
