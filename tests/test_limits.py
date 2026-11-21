@@ -2,7 +2,7 @@
 that runs out of attempts says so with a plain error instead of a quiet result.
 
 Boundaries: config (density, months, issues per answer, sizes), the evidence set size in verify
-(10 pass, 11 fail), the answer size (256 KiB, audit R2; the case's own 68 KB must pass) and the
+(10 pass, 11 fail), the answer size (8 MiB, DECISIONS Y; the case's own 68 KB must pass) and the
 default amount tolerance (a type the policy does not list has 0, tests/judge/test_matcher.py)."""
 from __future__ import annotations
 
@@ -183,7 +183,7 @@ class EvidenceSetBoundaryTest(unittest.TestCase):
 
 
 class AnswerSizeBoundaryTest(unittest.TestCase):
-    """F5: the limit is MAX_MESSAGE_BYTES (256 KiB, audit R2), not 64 KiB: the largest answer the
+    """F5: the limit is MAX_MESSAGE_BYTES (8 MiB, DECISIONS Y), not 64 KiB: the largest answer the
     case itself allows is about 68 KB of Cyrillic and must be accepted."""
 
     @staticmethod

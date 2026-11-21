@@ -60,7 +60,7 @@ CASES = [
     ("amount negative is well-formed (an FP, DECISIONS U)", msg(finding(claimed_amount_minor=-1)), None),
     ("amount zero", msg(finding(claimed_amount_minor=0)), None),
     ("amount 10**30", msg(finding(claimed_amount_minor=10 ** 30)), None),
-    ("amount 10**70000 fits in 256 KiB", msg(finding(claimed_amount_minor=10 ** 70000)), None),
+    ("amount 10**70000 is well-formed", msg(finding(claimed_amount_minor=10 ** 70000)), None),
     ("amount 10**300000 (too large)", msg(finding(claimed_amount_minor=10 ** 300000)), "message_too_large"),
     ("amount NaN", msg(finding(claimed_amount_minor=float("nan"))), "non_finite"),
     ("Infinity in an extra key", msg(GOOD, extra=float("inf")), "non_finite"),
@@ -88,7 +88,7 @@ CASES = [
     ("explanation empty", msg(finding(explanation="")), None),
     ("explanation not a string", msg(finding(explanation=None)), "explanation_not_string"),
     ("extra keys ignored", msg(finding(verdict="tp"), note={"x": [1, None, True]}), None),
-    ("payload over 256 KiB", msg(GOOD, pad="x" * MAX_MESSAGE_BYTES), "message_too_large"),
+    ("payload over the message cap", msg(GOOD, pad="x" * MAX_MESSAGE_BYTES), "message_too_large"),
     ("non-string dict key", msg(GOOD, extra={1: "a"}), "not_json"),
     ("set value", msg(GOOD, extra={"a"}), "not_json"),
     ("bytes value", msg(GOOD, extra=b"a"), "not_json"),
@@ -163,12 +163,12 @@ class MessageSizeTest(unittest.TestCase):
         value = 10 ** 4400  # above the 4300-digit str() limit of Python 3.11
         self.assertEqual(message_size([value]), 2 + 4401)
 
-    def test_limit_is_256_kib(self):
-        self.assertEqual(MAX_MESSAGE_BYTES, 262144)
+    def test_limit_is_8_mib(self):
+        self.assertEqual(MAX_MESSAGE_BYTES, 8 * 1024 * 1024)
         base = message_size(msg(GOOD, pad=""))
-        parse_findings(msg(GOOD, pad="x" * (262144 - base)), EP)
+        parse_findings(msg(GOOD, pad="x" * (MAX_MESSAGE_BYTES - base)), EP)
         with self.assertRaises(StructureError) as caught:
-            parse_findings(msg(GOOD, pad="x" * (262144 - base + 1)), EP)
+            parse_findings(msg(GOOD, pad="x" * (MAX_MESSAGE_BYTES - base + 1)), EP)
         self.assertEqual(caught.exception.code, "message_too_large")
 
     def test_the_case_maximum_fits_in_cyrillic(self):
@@ -201,8 +201,7 @@ class MessageSizeTest(unittest.TestCase):
         deep = []
         for _ in range(150_000):
             deep = [deep]
-        with self.assertRaises(StructureError):  # 300 000 brackets > 256 KiB
-            parse_findings(msg(GOOD, pad=deep), EP)
+        parse_findings(msg(GOOD, pad=deep), EP)  # 300 000 brackets are far below the cap: no crash, no recursion
         shallow = []
         for _ in range(10_000):
             shallow = [shallow]

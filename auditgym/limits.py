@@ -10,7 +10,11 @@ MAX_FINDINGS = 30                 # findings in one submit
 MAX_ISSUES = 12                   # most issues one episode may hold (errors plus 2 for I1/I2): docs/CASE.md section 03
 MAX_EVIDENCE_IDS = 10             # evidence ids per finding, and ids per truth evidence set
 MAX_EXPLANATION_CHARS = 1000
-MAX_MESSAGE_BYTES = 256 * 1024    # docs/AUDIT.md R2: 30 x 10 x 1 000 Cyrillic characters must fit
+MAX_MESSAGE_BYTES = 8 * 1024 * 1024  # a DoS guard only (DECISIONS Y): the case limits 30 / 10 / 1 000 are the structural
+                                     # ones, ids are free-form strings, so an answer inside them with very long ids must
+                                     # be a false positive, not -1. 30 findings x 11 ids x 1 000 Cyrillic characters is ~0.7 MB
+MAX_LINE_BYTES = 32 * 1024 * 1024    # one protocol line (serve, client): above the message cap with room for JSON
+                                     # escapes (up to 6 bytes per character, \uXXXX) and the step envelope
 MAX_JSON_DEPTH = 64               # nesting of one message; explicit so the result does not depend on
                                   # the Python version's json recursion behaviour
 

@@ -15,6 +15,7 @@ import argparse
 import pathlib
 import sys
 import tempfile
+import warnings
 
 BASELINES = ("random_explorer", "reconcile", "flag_all", "oracle")
 DEMO_CONFIGS = (
@@ -133,7 +134,9 @@ def main(argv: list[str]) -> int:
         for label, config in DEMO_CONFIGS:
             for seed in range(arguments.seeds):
                 directory = root / f"{label}-{seed}"
-                judge_adapter.generate_episode(5000 + seed, config, str(directory))
+                with warnings.catch_warnings():  # a train episode of the demo: the no-secret warning is for hidden runs
+                    warnings.filterwarnings("ignore", message="generate_episode: no secret", category=RuntimeWarning)
+                    judge_adapter.generate_episode(5000 + seed, config, str(directory))
                 for row in run_baselines(directory, root / "results.jsonl"):
                     same = row["journal_reward"] == row["return"]
                     ok = ok and same and row["policy_saw_reward"] == 0

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import pathlib
 import tempfile
+import warnings
 
 import judge_adapter
 from auditgym.storage import load_episode
@@ -23,6 +24,14 @@ CONFIG_L = {"size": {"invoices": [60, 80], "background_pairs": [150, 200]}}
 
 _scratch = None
 _cache: dict = {}
+
+
+def generate_quietly(seed, config, directory, **kwargs) -> None:
+    """judge_adapter.generate_episode for fixtures: the no-secret RuntimeWarning is meant for the jury's
+    hidden runs, not for test output (the warning itself is tested in test_jury9)."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="generate_episode: no secret", category=RuntimeWarning)
+        judge_adapter.generate_episode(seed, config, directory, **kwargs)
 
 
 def scratch() -> pathlib.Path:
@@ -46,7 +55,7 @@ def fixture(name: str) -> dict:
         seed, config = {"C": (SEED_C, CONFIG_C), "E": (SEED_E, CONFIG_E), "L": (SEED_L, CONFIG_L),
                         "S": (SEED_VALUE, CONFIG_E)}[name]
         directory = scratch() / name
-        judge_adapter.generate_episode(seed, config, str(directory))
+        generate_quietly(seed, config, str(directory))
         episode = load_episode(directory)
         public = episode["public"]
         text = json.dumps([public[t] for t in ("ledger", "invoices", "payments", "fx")]) + json.dumps(public["manifest"])

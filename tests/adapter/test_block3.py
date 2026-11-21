@@ -32,6 +32,7 @@ import judge_adapter
 from auditgym.matcher import known_ids
 from auditgym.storage import load_episode
 from auditgym.verify import verify
+from tests.adapter import helpers
 from tests.adapter.helpers import oracle_findings
 
 T = "duplicate_invoice"
@@ -63,7 +64,7 @@ def tearDownModule():
 def _generated(name: str, seed: int, config: dict) -> pathlib.Path:
     directory = _scratch() / name
     if not directory.exists():
-        judge_adapter.generate_episode(seed, config, str(directory))
+        helpers.generate_quietly(seed, config, str(directory))
     return directory
 
 

@@ -13,7 +13,7 @@ from .answer_rules import answer_rules
 from .limits import (MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
                      MAX_STEPS, PAGE_SIZE)
 
-MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 256 KiB: one constant for the limit (audit R2)
+MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 8 MiB: one constant for the limit (audit R2)
 MAX_EXPRESSION_CHARS = 200
 # Where the evaluator writes its journal in eval mode when no path is given (audit C5): the path in
 # $AUDITGYM_RESULTS, else DEFAULT_RESULTS_PATH relative to the working directory of whoever starts it.

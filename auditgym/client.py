@@ -41,7 +41,7 @@ import sys
 import threading
 
 from .actions import default_results_path, open_results
-from .limits import json_depth_exceeds
+from .limits import MAX_LINE_BYTES, json_depth_exceeds
 from .secret import SECRET_ENV, SECRET_FILE_ENV
 
 _PACKAGE_PARENT = str(pathlib.Path(__file__).resolve().parent.parent)
@@ -49,7 +49,7 @@ _REFUSALS = ("bad_request", "bad_config", "not_loaded", "bad_episode", "internal
 _NAME_KEYS = ("action", "tool", "name", "type")
 DEFAULT_TIMEOUT = 120.0  # seconds to wait for one reply (generating the largest episode takes a few)
 _UNSERIALISABLE = "<not serialisable>"
-_MAX_LINE_BYTES = 1 << 20  # serve.MAX_LINE_BYTES; not imported, so the client does not load the evaluator
+_MAX_LINE_BYTES = MAX_LINE_BYTES  # one constant in limits (limits imports nothing, the client still does not load the evaluator)
 
 
 class EnvError(RuntimeError):

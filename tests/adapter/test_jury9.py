@@ -1,5 +1,5 @@
 """Ninth blind jury (DECISIONS X): the reset-style wrapper of generate_episode, a required explanation,
-one reading of a findings answer for score_episode and submit, a submit over 1 MiB."""
+one reading of a findings answer for score_episode and submit, a submit line over the line limit."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,8 @@ import unittest
 
 import judge_adapter
 from auditgym import actions
+from auditgym.limits import MAX_LINE_BYTES
+from auditgym.secret import SECRET_ENV, SECRET_FILE_ENV
 from auditgym.findings import StructureError, parse_findings
 from tests.adapter import helpers
 from tests.adapter.helpers import closed, new_env, submit_action
@@ -34,7 +36,7 @@ def episode_with_errors() -> dict:
         from auditgym.storage import load_episode
 
         directory = helpers.scratch() / "with-errors"
-        judge_adapter.generate_episode(SEED, CONFIG, str(directory))
+        helpers.generate_quietly(SEED, CONFIG, str(directory))
         _own.update(dir=str(directory), episode=load_episode(directory))
     return _own
 
@@ -48,28 +50,61 @@ class GenerateWrapperTest(unittest.TestCase):
     def test_reset_style_wrappers_give_the_same_episode_as_the_plain_config(self):
         base = helpers.scratch() / "wrap"
         plain = base / "plain"
-        judge_adapter.generate_episode(SEED, CONFIG, str(plain))
+        helpers.generate_quietly(SEED, CONFIG, str(plain))
         expected = tree(plain)
         self.assertTrue(expected)
         for name, config in (("a", {"team_config": CONFIG}),
                              ("b", {"mode": "closed", "team_config": CONFIG}),
                              ("c", {"mode": "closed", "episode_dir": "/nonexistent/x", "team_config": CONFIG})):
             target = base / name
-            judge_adapter.generate_episode(SEED, config, str(target))
+            helpers.generate_quietly(SEED, config, str(target))
             self.assertEqual(tree(target), expected, name)
 
     def test_wrapper_without_team_config_value_is_the_default_config(self):
         base = helpers.scratch() / "wrap-default"
-        judge_adapter.generate_episode(SEED, None, str(base / "none"))
-        judge_adapter.generate_episode(SEED, {"team_config": None}, str(base / "wrapped"))
+        helpers.generate_quietly(SEED, None, str(base / "none"))
+        helpers.generate_quietly(SEED, {"team_config": None}, str(base / "wrapped"))
         self.assertEqual(tree(base / "wrapped"), tree(base / "none"))
 
     def test_unknown_key_without_the_wrapper_is_still_refused(self):
         from auditgym.config import ConfigError
 
         with self.assertRaises(ConfigError) as caught:
-            judge_adapter.generate_episode(SEED, {"mode": "closed"}, str(helpers.scratch() / "refused"))
+            helpers.generate_quietly(SEED, {"mode": "closed"}, str(helpers.scratch() / "refused"))
         self.assertEqual(caught.exception.code, "unknown_key")
+
+
+class GenerateWithoutSecretWarningTest(unittest.TestCase):
+    def generate(self, name, **kwargs):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            judge_adapter.generate_episode(SEED, CONFIG, str(helpers.scratch() / name), **kwargs)
+        return [w for w in caught if issubclass(w.category, RuntimeWarning)]
+
+    def test_no_secret_warns_and_leaves_the_output_unchanged(self):
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for name in (SECRET_ENV, SECRET_FILE_ENV):
+                os.environ.pop(name, None)
+            seen = self.generate("nosecret-a")
+            self.generate("nosecret-b")
+        self.assertEqual(len(seen), 1)
+        self.assertIn("reproducible from the seed", str(seen[0].message))
+        self.assertIn("secret_file", str(seen[0].message))
+        self.assertEqual(seen[0].filename, __file__)  # points at the caller
+        self.assertEqual(tree(helpers.scratch() / "nosecret-a"), tree(helpers.scratch() / "nosecret-b"))
+
+    def test_secret_file_or_environment_silences_it(self):
+        from unittest import mock
+
+        secret = helpers.scratch() / "secret.txt"
+        secret.write_text("s" * 40)
+        self.assertEqual(self.generate("withsecret", secret_file=str(secret)), [])
+        with mock.patch.dict(os.environ, {SECRET_FILE_ENV: str(secret)}):
+            self.assertEqual(self.generate("envsecret"), [])
 
 
 class ExplanationRequiredTest(unittest.TestCase):
@@ -168,11 +203,68 @@ class ScoreEpisodeShapesTest(unittest.TestCase):
         self.assertEqual(judge_adapter.score_episode(fx["dir"], 7, 0, journal_path=log)["return"], -1)
 
 
+class LongIdsWithinCaseLimitsTest(unittest.TestCase):
+    """DECISIONS Y: 30 findings x 10 evidence ids of 1 000 characters respect the limits 30 / 10 / 1 000 and
+    are false positives, not message_too_large (the cap is 8 MiB, ADAPTER.md item 14)."""
+
+    @staticmethod
+    def message(fx) -> dict:
+        episode_id = fx["episode"]["public"]["manifest"]["episode_id"]
+        findings = [{"type": "duplicate_invoice", "affected_ids": ["no-such-doc-" + "я" * 1000],
+                     "claimed_amount_minor": 1, "currency": "KZT",
+                     "evidence_ids": [f"{n:02d}-{i}-" + "x" * 990 for i in range(10)], "explanation": "я" * 1000}
+                    for n in range(30)]
+        return {"episode_id": episode_id, "findings": findings}
+
+    def test_the_message_is_larger_than_the_old_cap_and_smaller_than_the_new_one(self):
+        from auditgym.findings import message_size
+        from auditgym.limits import MAX_MESSAGE_BYTES
+
+        fx = helpers.fixture("C")
+        self.assertGreater(message_size(self.message(fx)), 256 * 1024)
+        self.assertLess(message_size(self.message(fx)), MAX_MESSAGE_BYTES)
+
+    def test_score_episode_counts_them_as_false_positives(self):
+        fx = episode_with_errors()
+        message = self.message(fx)
+        message["episode_id"] = fx["episode"]["public"]["manifest"]["episode_id"]
+        result = judge_adapter.score_episode(fx["dir"], message, 3, journal_path=str(helpers.scratch() / "long.jsonl"))
+        self.assertEqual((result["tp"], result["fp"]), (0, 30))  # counts, not None: no structure error
+
+    def test_step_submit_agrees_with_score_episode(self):
+        fx = episode_with_errors()
+        message = self.message(fx)
+        message["episode_id"] = fx["episode"]["public"]["manifest"]["episode_id"]
+        env, path = new_env("long-ids")
+        with env:
+            env.reset(0, closed(fx["dir"]))
+            observation, *_ = env.step(submit_action(message))
+        self.assertEqual(observation["result"], {"accepted": True})
+        row = helpers.finished(path)[-1]
+        self.assertEqual((row["tp"], row["fp"], row.get("structure_error")), (0, 30, None))
+
+
+class AdapterTaskTextTest(unittest.TestCase):
+    """DECISIONS Y: the adapter result of list_records is {records, next_cursor}; its task text does not
+    promise limit_clamped."""
+
+    def test_task_does_not_promise_limit_clamped_and_the_result_has_no_such_key(self):
+        fx = helpers.fixture("C")
+        env, _ = new_env("clamp")
+        with env:
+            first, _ = env.reset(0, closed(fx["dir"]))
+            observation, *_ = env.step(helpers.list_action(limit=500))
+        self.assertNotIn("limit_clamped", first["task"])
+        self.assertIn("обрезается до 50", first["task"])
+        self.assertEqual(set(observation["result"]), {"records", "next_cursor"})
+        self.assertEqual(len(observation["result"]["records"]), 50)
+
+
 class OversizedSubmitTest(unittest.TestCase):
-    def test_a_submit_line_over_one_mebibyte_is_message_too_large(self):
+    def test_a_submit_line_over_the_line_limit_is_message_too_large(self):
         fx = helpers.fixture("C")
         journal = pathlib.Path(tempfile.mkdtemp(dir=helpers.scratch())) / "results.jsonl"
-        pad = "x" * ((1 << 20) + 10)
+        pad = "x" * (MAX_LINE_BYTES + 10)
         lines = [json.dumps({"op": "load", "directory": fx["dir"]}),
                  json.dumps({"op": "step", "action": {"action": "submit", "findings": [], "pad": pad}})]
         data = b"".join(line.encode() + b"\n" for line in lines)

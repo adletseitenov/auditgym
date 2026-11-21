@@ -16,6 +16,10 @@ from __future__ import annotations
 
 import sys
 
+if sys.version_info < (3, 11):  # before any other import: older interpreters fail later with obscure errors
+    raise SystemExit("%s needs Python 3.11 or newer; this is Python %d.%d. Run it with python3.11 (docs/USAGE.md)."
+                     % ("python -m auditgym", sys.version_info[0], sys.version_info[1]))
+
 USAGE = "usage: python -m auditgym check [--full] | serve [--mode train|eval] [--results PATH] | export --seed N --out DIR | verify-journal PATH [--expect-episodes N]"
 
 NO_CHECKOUT = ("check runs from the root of a clone of the repository (it needs tools/ and tests/, "

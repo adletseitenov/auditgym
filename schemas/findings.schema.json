@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Findings message",
-  "description": "The agent's answer (docs/CONTRACTS.md 6). Extra keys are ignored by the judge, so they are allowed here; the 256 KiB message size is not expressible and is checked by auditgym.findings.",
+  "description": "The agent's answer (docs/CONTRACTS.md 6). Extra keys are ignored by the judge, so they are allowed here; the 8 MiB message size is not expressible and is checked by auditgym.findings.",
   "type": "object",
   "properties": {
     "episode_id": {
