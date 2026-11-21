@@ -212,7 +212,8 @@ class AdapterBlock(unittest.TestCase):
         self.assertEqual(rows[0], {"event": "score_error", "episode_id": fixture.episode_id, "structure_error": code})
         observation, row = self.play(fixture, payload, steps)
         self.assertEqual((observation["result"], observation["error"]["code"]), (None, "invalid_findings"))
-        self.assertEqual((row["reward"], row["structure_error"], row["tp"], row["fp"]), (-1.0, code, 0, 0))
+        self.assertEqual((row["reward"], row["structure_error"], row["tp"], row["fp"], row["fn"], row["f1"]),
+                         (-1.0, code, None, None, None, None))
 
 
 class Block3Test(AdapterBlock):

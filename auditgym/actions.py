@@ -277,7 +277,7 @@ FINDINGS_SCHEMA = {
                     "type": {"enum": list(ERROR_TYPES)},
                     "affected_ids": {"type": "array", "items": {"type": "string"},
                                      "description": "doc_id of the affected documents"},
-                    "claimed_amount_minor": {"type": "integer", "minimum": 0},
+                    "claimed_amount_minor": {"type": "integer"},
                     "currency": {"type": "string"},
                     "evidence_ids": {"type": "array", "items": {"type": "string"},
                                      "maxItems": MAX_EVIDENCE_IDS},
