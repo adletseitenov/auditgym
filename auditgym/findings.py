@@ -9,11 +9,13 @@ Decisions on points the case leaves open (audit R2, R5 relaxed the strictest rea
 a reasonable oracle built slightly differently would otherwise get -1):
 - Five finding fields are required; `explanation` is optional and defaults to the empty
   string (when present it must be a string of at most 1 000 code points).
-- `evidence_ids` is limited to 10 UNIQUE ids: a list that cites every evidence set in a row
-  with repeats is fine as long as it names at most 10 different ids.
-- `claimed_amount_minor` is an `int`; a float with an integral value (`125000.0`) is accepted
-  and read as that int. `true`, `100.5`, `"100"`, NaN and Infinity stay invalid.
-- `type` and `currency` ignore case and surrounding whitespace (ASCII case only).
+- `evidence_ids` is limited to 10 ELEMENTS of the raw list, checked before repeats collapse
+  (official definitions of 20.11, docs/DECISIONS.md R: 11 entries with 10 repeats of D1 is an error).
+- `claimed_amount_minor` is a JSON integer (`int`): `true`, `100.5`, `125000.0`, `"100"`, NaN and
+  Infinity are structure errors (official definitions of 20.11).
+- `type` and `currency` are compared exactly (case and spaces count). A string `type` outside the four
+  documented values is well-formed and never matches (an FP); a `type` that is not a string is a
+  structure error.
 - Size is the compact UTF-8 JSON serialization (`separators=(",", ":")`, non-ASCII kept
   as UTF-8, lone surrogates counted as 3 bytes) and must be at most 262 144 bytes (256 KiB;
   30 findings x 10 evidence ids x 1 000 Cyrillic characters is 68 KB, so the case's own limits
@@ -23,15 +25,13 @@ a reasonable oracle built slightly differently would otherwise get -1):
 - A value that is not JSON-compatible (a dict key that is not a string, a set, bytes, an
   object) is an error. Tuples are accepted where a JSON array is (they serialize as one) but
   the `findings`, `affected_ids` and `evidence_ids` fields must be real lists.
-- A repeated id inside `affected_ids` is NOT a structure error: the normalized list keeps the repeat
-  (sorted), the matcher never matches such a finding, so it is an FP of that finding alone and the
-  rest of the answer is scored as usual. Repeats in `evidence_ids` collapse.
+- `affected_ids` and `evidence_ids` are SETS of exact ids (official definitions of 20.11): order and
+  repeats do not change them; both normalize to a sorted list of different ids. `evidence_ids` is
+  limited on the raw list first. A repeated finding is a separate FP, never merged.
 - `affected_ids` and `evidence_ids` may be empty: such a finding is well-formed but never
   matches, because every truth issue has at least one affected id and a non-empty evidence set.
 - Absurdly large non-negative integers are well-formed amounts (they simply never match);
   the 256 KiB limit bounds them. Their size is computed without converting them to a string.
-- `currency` is upper-cased and `type` lower-cased in ASCII only (`"usd"` -> `"USD"`), so that
-  Unicode case folding (`"ſ".upper() == "S"`) cannot make a different string equal to a code.
 - Every id must be a string; the empty string is allowed and matches nothing.
 """
 from __future__ import annotations
@@ -41,11 +41,8 @@ import math
 from .limits import MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS as MAX_EXPLANATION_CODE_POINTS  # noqa: F401
 from .limits import MAX_FINDINGS, MAX_MESSAGE_BYTES  # noqa: F401  (one constant per limit)
 
-TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 FIELDS = ("type", "affected_ids", "claimed_amount_minor", "currency", "evidence_ids", "explanation")
 
-_ASCII_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 # Above this many bits an integer has more than 264 000 decimal digits: too large outright.
 _HUGE_INT_BITS = 880_000
 _LOG10_2 = 0.30102999566398120
@@ -149,24 +146,20 @@ def message_size(payload: object) -> int:
     return total
 
 
-def _id_list(value: object, limit: int | None, keep_repeats: bool = False) -> list[str]:
+def _id_list(value: object, limit: int | None) -> list[str]:
+    """Sorted different ids. The limit applies to the raw list, before repeats collapse."""
     if not isinstance(value, list):
         raise StructureError("ids_not_list")
+    if limit is not None and len(value) > limit:
+        raise StructureError("too_many_evidence_ids")
     for item in value:
         if not isinstance(item, str):
             raise StructureError("id_not_string")
-    if keep_repeats:  # affected_ids: a repeat is kept (sorted) so that the matcher can refuse the finding
-        return sorted(value)
-    unique = sorted(set(value))
-    if limit is not None and len(unique) > limit:  # the limit counts different ids (audit R5)
-        raise StructureError("too_many_evidence_ids")
-    return unique
+    return sorted(set(value))
 
 
 def _amount(value: object) -> int:
-    if type(value) is float and value.is_integer():  # 125000.0 is the amount 125000 (audit R5)
-        value = int(value)
-    if type(value) is not int:  # rejects bool, 100.5, str, int subclasses
+    if type(value) is not int:  # rejects bool, float (even 125000.0), str, int subclasses
         raise StructureError("amount_not_int")
     if value < 0:
         raise StructureError("negative_amount")
@@ -180,13 +173,9 @@ def _finding(raw: object) -> dict:
         if field != "explanation" and field not in raw:
             raise StructureError("missing_field")
     kind = raw["type"]
-    if isinstance(kind, str):
-        kind = kind.strip().translate(_ASCII_LOWER)
-    if not isinstance(kind, str) or kind not in TYPES:
-        raise StructureError("unknown_type")
-    # A repeated id stays in the list: the finding is well-formed, but the matcher never matches it
-    # (an FP of this finding alone, docs/DECISIONS.md, O), and it still counts toward the limit.
-    affected = _id_list(raw["affected_ids"], None, keep_repeats=True)
+    if not isinstance(kind, str):  # an unknown string is only unmatchable: an FP, not a structure error
+        raise StructureError("type_not_string")
+    affected = _id_list(raw["affected_ids"], None)
     amount = _amount(raw["claimed_amount_minor"])
     currency = raw["currency"]
     if not isinstance(currency, str):
@@ -198,7 +187,7 @@ def _finding(raw: object) -> dict:
     if len(explanation) > MAX_EXPLANATION_CODE_POINTS:
         raise StructureError("explanation_too_long")
     return {"type": kind, "affected_ids": affected, "claimed_amount_minor": amount,
-            "currency": currency.strip().translate(_ASCII_UPPER), "evidence_ids": evidence,
+            "currency": currency, "evidence_ids": evidence,
             "explanation": explanation}
 
 

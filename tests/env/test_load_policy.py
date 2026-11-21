@@ -1,5 +1,5 @@
 """Eval mode refuses `load` unless `--allow-load`; every journal row says where its episode came from
-(`source`, `source_sha256`); verify-journal fails on eval rows of loaded episodes (DECISIONS P)."""
+(`source`, `source_sha256`); verify-journal reports eval rows of loaded episodes without failing (DECISIONS R)."""
 import contextlib
 import io
 import json
@@ -135,13 +135,26 @@ class LoadPolicyTest(unittest.TestCase):
         self.assertEqual((abandoned["event"], abandoned["source"]), ("abandoned", "load"))
         self.assertEqual((finished["event"], finished["source"]), ("finished", "seed"))
 
-    def test_verify_journal_fails_on_eval_rows_with_source_load(self):
+    def test_verify_journal_reports_eval_rows_with_source_load_and_passes(self):
+        """The official flow loads every closed episode (episode_dir): such rows are normal (DECISIONS R)."""
         evaluator = Evaluator(mode="eval", results_path=self.results, secret=SECRET)
         evaluator.load(str(TINY))
         evaluator.step({"action": "submit", "findings": CORRECT_TINY})
         code, text = verify(self.results, self.secret)
-        self.assertEqual(code, 1, text)
+        self.assertEqual(code, 0, text)
         self.assertIn('source "load"', text)
+        self.assertIn("1 eval rows", text)
+        self.assertEqual(self.rows()[0]["source"], "load")  # the field stays in the signed row
+
+    def test_a_loaded_row_does_not_hide_a_tampered_one(self):
+        evaluator = Evaluator(mode="eval", results_path=self.results, secret=SECRET)
+        evaluator.load(str(TINY))
+        evaluator.step({"action": "submit", "findings": CORRECT_TINY})
+        forged = json.loads(self.results.read_text(encoding="utf-8").splitlines()[0])
+        forged["reward"] = 1.0
+        forged["source"] = "seed"
+        self.results.write_text(json.dumps(forged) + "\n", encoding="utf-8")
+        self.assertEqual(verify(self.results, self.secret)[0], 1)
 
     def test_verify_journal_accepts_seed_rows_and_old_rows_without_source(self):
         evaluator = Evaluator(mode="eval", results_path=self.results, secret=SECRET)
@@ -158,7 +171,8 @@ class LoadPolicyTest(unittest.TestCase):
     def test_forged_directory_does_not_give_an_accepted_eval_row(self):
         """The jury's attack: the first line to the evaluator is a load of a directory with a hidden
         episode_id and no truth, then an empty submit. The default evaluator refuses it; and when load
-        is allowed (--allow-load) the row is marked and verify-journal fails."""
+        is allowed (--allow-load) the row is marked `source: "load"` and verify-journal reports it (exit 0:
+        the official flow loads every closed episode, so the protection is the refusal by default, DECISIONS R)."""
         forged = self.dir / "forged"
         shutil.copytree(TINY, forged)
         truth = json.loads((forged / "private" / "truth.json").read_text(encoding="utf-8"))
@@ -175,7 +189,8 @@ class LoadPolicyTest(unittest.TestCase):
         rows = self.rows()
         self.assertEqual((rows[0]["source"], rows[0]["reward"]), ("load", 1.0))
         code, text = verify(self.results, self.secret)
-        self.assertEqual(code, 1, text)
+        self.assertEqual(code, 0, text)
+        self.assertIn('source "load"', text)
 
 
 if __name__ == "__main__":

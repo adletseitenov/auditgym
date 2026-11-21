@@ -221,35 +221,36 @@ def wrong_fields_are_not_tp() -> Optional[str]:
 
 def invalid_structure_is_minus_one() -> Optional[str]:
     # The judge side: reward -1 and a structure_error code for the evaluator's log.
-    return _rows(("wrong episode_id", "payload is a list", "findings is a dict", "unknown type",
+    return _rows(("wrong episode_id", "payload is a list", "findings is a dict", "type that is not a string",
                   "negative amount", "bool amount", "float amount 125000.5", "string amount",
+                  "float amount 125000.0 is not a JSON integer",
                   "missing currency", "id that is not a string", "huge payload in an ignored key",
                   "NaN in an ignored key"))
 
 
-def tolerated_forms_are_scored() -> Optional[str]:
-    """R5: forms a reasonable oracle may produce are scored, not rejected with -1."""
-    return _rows(("float amount 125000.0 is the amount 125000", "type in capitals with spaces",
-                  "currency with spaces", "missing explanation is the empty string",
-                  "11 evidence entries that collapse to 2 ids count as 2",
-                  "25 evidence entries, 4 different ids: the full set repeated"))
+def official_conventions_are_exact() -> Optional[str]:
+    """DECISIONS R: ids, type and currency compare exactly; affected_ids is a set; a missing explanation is empty."""
+    return _rows(("lower-case currency is not the code (M06)", "currency with spaces is not the code (M06)",
+                  "type in capitals with spaces is an unknown type: an FP",
+                  "unknown type string is unmatchable: an FP, not a structure error",
+                  "affected_ids repeated: still the set (M01)", "affected_ids repeated with a stranger",
+                  "missing explanation is the empty string"))
 
 
 def limits_30_10_1000() -> Optional[str]:
-    """Also R5: the evidence limit counts different ids, and tolerated spellings are still scored."""
-    tolerated = tolerated_forms_are_scored()
-    if tolerated:
-        return tolerated
+    """The three limits count the raw input (30 findings, 10 evidence entries before repeats collapse, 1000 code points)."""
     return _rows(("30 findings (4 right + 26 junk)", "31 findings",
-                  "10 evidence ids (full set + 6 extras: over the extra limit)", "11 evidence ids",
+                  "10 evidence entries, 4 different ids: the full set repeated", "11 evidence ids",
+                  "11 evidence entries that collapse to 2 ids: the limit counts the raw list (M05)",
                   "explanation 1000 code points, 4-byte chars", "explanation 1001 code points, 2-byte chars"))
 
 
-def evidence_hedging_is_bounded() -> Optional[str]:
-    """DECISIONS Q: a superset is allowed, but at most MAX_EVIDENCE_EXTRA extra ids and no extra rate key."""
-    return _rows(("full set + 2 existing extras (exactly the limit)", "fx right + 2 existing non-rate extras",
-                  "fx right + 3 existing non-rate extras", "hedge: fx right + 1 neighbouring rate key",
-                  "hedge: fx right + 2 neighbouring rate keys + 3 document lines"))
+def evidence_superset_of_existing_ids() -> Optional[str]:
+    """Official 20.11 (DECISIONS R): extra EXISTING ids are allowed, one non-existent id is an FP."""
+    return _rows(("full set + 2 existing extras", "fx right + 3 existing non-rate extras",
+                  "hedge: fx right + 1 neighbouring rate key (official: allowed)",
+                  "hedge: fx right + 2 neighbouring rate keys + 3 document lines (official: allowed)",
+                  "full evidence plus a non-existent id", "hedge: neighbouring rate keys and no right one"))
 
 
 def explanation_does_not_matter() -> Optional[str]:
@@ -281,7 +282,8 @@ CHECKS: list[tuple[str, Callable[[], Optional[str]]]] = [
     ("wrong type, ids, amount beyond tolerance, currency or evidence is not a TP", wrong_fields_are_not_tp),
     ("invalid structure ends the episode with reward -1 and a judge log entry", invalid_structure_is_minus_one),
     ("limits: 30 findings, 10 evidence ids, 1000 characters", limits_30_10_1000),
-    ("evidence hedging is bounded (extra ids, no extra rate keys)", evidence_hedging_is_bounded),
+    ("evidence superset of existing ids is allowed, a non-existent id is not", evidence_superset_of_existing_ids),
+    ("ids, type and currency compare exactly; affected_ids is a set", official_conventions_are_exact),
     ("explanation text does not change the reward", explanation_does_not_matter),
     ("guessed and non-existent ids give no gain", guessed_ids_give_no_gain),
 ]

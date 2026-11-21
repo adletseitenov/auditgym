@@ -10,7 +10,7 @@ import re
 import stat
 
 from .answer_rules import answer_rules
-from .limits import (MAX_EVIDENCE_EXTRA, MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
+from .limits import (MAX_EVIDENCE_IDS, MAX_EXPLANATION_CHARS, MAX_FINDINGS, MAX_MESSAGE_BYTES,  # noqa: F401
                      MAX_STEPS, PAGE_SIZE)
 
 MAX_SUBMIT_BYTES = MAX_MESSAGE_BYTES  # 256 KiB: one constant for the limit (audit R2)
@@ -332,8 +332,7 @@ def build_task(policy: dict) -> dict:
             "max_submit_bytes": MAX_SUBMIT_BYTES,
         },
         "tolerances": {"amount_tolerance_minor": dict(tolerances) if isinstance(tolerances, dict) else {},
-                       "evidence_superset_allowed": policy.get("evidence_superset_allowed", True),
-                       "evidence_extra_max": MAX_EVIDENCE_EXTRA},
+                       "evidence_superset_allowed": policy.get("evidence_superset_allowed", True)},
         "accounts": dict(policy.get("accounts") or {}),
         "answer_rules": answer_rules(),
     }

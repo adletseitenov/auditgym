@@ -58,6 +58,12 @@ def _covers_with_empty(finding, issue, superset_allowed):
                for allowed in issue["evidence_sets"])
 
 
+def _covers_with_one_extra(finding, issue, superset_allowed):
+    cited = set(finding["evidence_ids"])
+    return any(set(allowed) and set(allowed) <= cited and len(cited - set(allowed)) <= 1
+               for allowed in issue["evidence_sets"])
+
+
 def _greedy_match(truth, findings_list, public):
     """First come, first served: the slip the maximum matching replaced."""
     policy = public.get("policy", {})
@@ -83,9 +89,23 @@ def _finding_null_explanation(raw):
     return _ORIGINAL_FINDING(raw)
 
 
-def _finding_collapsing_affected(raw):
+def _amount_accepts_floats(value):
+    return int(value) if type(value) is float and value.is_integer() else _ORIGINAL_AMOUNT(value)
+
+
+def _finding_repeat_in_affected_is_an_error(raw):
+    """The pre-20.11 rule: a repeated id in affected_ids is a structure error (DECISIONS N, replaced by R)."""
     if isinstance(raw, dict) and isinstance(raw.get("affected_ids"), list):
-        raw = dict(raw, affected_ids=list(dict.fromkeys(raw["affected_ids"])))
+        ids = raw["affected_ids"]
+        if len(set(map(str, ids))) != len(ids):
+            raise findings.StructureError("duplicate_affected_id")
+    return _ORIGINAL_FINDING(raw)
+
+
+def _finding_unique_evidence_limit(raw):
+    """The limit on different ids instead of the raw list (the pre-20.11 rule)."""
+    if isinstance(raw, dict) and isinstance(raw.get("evidence_ids"), list):
+        raw = dict(raw, evidence_ids=list(dict.fromkeys(raw["evidence_ids"])))
     return _ORIGINAL_FINDING(raw)
 
 
@@ -129,8 +149,10 @@ MUTANTS: list[tuple[str, list]] = [
     ("matcher: superset of evidence never allowed", [(matcher, "superset_allowed", lambda policy: False)]),
     ("matcher: superset off when the policy key is missing",
      [(matcher, "superset_allowed", lambda policy: policy.get("evidence_superset_allowed", False) is True)]),
-    ("matcher: no limit on extra evidence ids", [(matcher, "MAX_EVIDENCE_EXTRA", HUGE)]),
-    ("matcher: extra rate keys allowed", [(matcher, "is_rate_key", lambda evidence_id: False)]),
+    ("matcher: currency compared without case",
+     [(matcher, "same_currency", lambda f, i: f["currency"].upper() == i["currency"].upper())]),
+    ("matcher: only a minimal evidence set or one extra id is accepted",
+     [(matcher, "evidence_covers", _covers_with_one_extra)]),
     ("matcher: an empty evidence set accepts any evidence", [(matcher, "evidence_covers", _covers_with_empty)]),
     ("matcher: greedy first-come matching", [(matcher, "match", _greedy_match), (judge, "match", _greedy_match)]),
     ("matcher: rate keys are not citable ids", [(matcher, "known_ids", _known_without_rate_keys)]),
@@ -156,10 +178,13 @@ MUTANTS: list[tuple[str, list]] = [
     ("structure: no limit of 1000 explanation characters", [(findings, "MAX_EXPLANATION_CODE_POINTS", HUGE)]),
     ("structure: no message size limit", [(findings, "MAX_MESSAGE_BYTES", HUGE)]),
     ("structure: negative amount accepted", [(findings, "_amount", _amount_allows_negative)]),
-    ("structure: unknown type accepted", [(findings, "TYPES", findings.TYPES + ("fraud",))]),
     ("structure: foreign episode_id accepted", [(judge, "parse_findings", _parse_any_episode)]),
     ("structure: explanation null accepted", [(findings, "_finding", _finding_null_explanation)]),
-    ("structure: a repeated affected id collapses", [(findings, "_finding", _finding_collapsing_affected)]),
+    ("structure: a float amount with an integral value accepted", [(findings, "_amount", _amount_accepts_floats)]),
+    ("structure: a repeated affected id is a structure error",
+     [(findings, "_finding", _finding_repeat_in_affected_is_an_error)]),
+    ("structure: the evidence limit counts different ids, not the raw list",
+     [(findings, "_finding", _finding_unique_evidence_limit)]),
     ("structure: a finding that is not an object is skipped", [(judge, "parse_findings", _parse_skipping_non_objects)]),
 ]
 
