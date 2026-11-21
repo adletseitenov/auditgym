@@ -20,6 +20,8 @@ import sys
 from fractions import Fraction
 from typing import Callable
 
+from auditgym.limits import MAX_MESSAGE_BYTES
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STEPS = 10
 EP = "ep_multi0001"
@@ -299,7 +301,7 @@ ATTACKS: list[tuple] = [
     ("payload is a list", "multi", _raw(lambda e: oracle_findings(e)), STEPS, "not_object"),
     ("findings is a dict", "multi", _raw(lambda e: {"episode_id": EP, "findings": {"0": T1}}), STEPS, "findings_not_list"),
     ("huge payload in an ignored key", "multi",
-     _raw(lambda e: dict(payload(e, oracle_findings(e)), pad="x" * 262144)), STEPS, "message_too_large"),
+     _raw(lambda e: dict(payload(e, oracle_findings(e)), pad="x" * MAX_MESSAGE_BYTES)), STEPS, "message_too_large"),
     ("NaN in an ignored key", "multi",
      _raw(lambda e: dict(payload(e, oracle_findings(e)), pad=[float("nan")])), STEPS, "non_finite"),
     ("deep nesting in an ignored key", "multi",

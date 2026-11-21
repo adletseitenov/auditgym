@@ -77,6 +77,7 @@ import tempfile
 import time
 import types
 
+from auditgym.limits import MAX_LINE_BYTES
 from tools.metamorph import (CANDIDATES, TABLES, oracle_answer, page_all, solver_answer, supported_configs)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -357,7 +358,7 @@ def probe(server: RawServer, seed, config, episode: dict, load_dir: str | None, 
     first = start()["observation"]
     episode_id = first["manifest"]["episode_id"]
     server.send(json.dumps({"op": "load", "directory": load_dir or str(ROOT)}).encode(), "probe")
-    server.send(b"x" * ((1 << 20) + 10), "probe")
+    server.send(b"x" * (MAX_LINE_BYTES + 10), "probe")
     page = server.step({"action": "list_records", "table": "ledger", "limit": 3})[0]
     cursor = page.get("next_cursor") or "0" * 20
     other = server.step({"action": "list_records", "table": "fx", "limit": 1})[0].get("next_cursor") or "x"

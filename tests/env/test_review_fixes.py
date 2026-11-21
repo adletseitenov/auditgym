@@ -29,13 +29,14 @@ import unittest
 from auditgym import Env, EnvError
 from auditgym.evaluator import DEFAULT_SEED, MAX_SEED_BITS, Evaluator, EvaluatorError
 from auditgym.generate import generate
+from auditgym.limits import MAX_LINE_BYTES
 from tests.env.helpers import CLEAN, TINY, FakeClock, tiny
 from tests.env.test_evaluator import CORRECT_TINY
 from tools import metamorph
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FX_PAGE = {"action": "list_records", "table": "fx"}
-PAD = "x" * ((1 << 20) + 10)
+PAD = "x" * (MAX_LINE_BYTES + 10)
 
 
 def serve(lines, *args, cwd=None, code=False):
@@ -103,7 +104,7 @@ class UnreadableLineTest(unittest.TestCase):
     def test_a_submit_name_split_between_two_reads_is_found(self):
         head = '{"op": "step", "pad": "'
         cut = '", "action": "sub'
-        pad = "x" * ((1 << 20) + 1 - len(head) - len(cut))
+        pad = "x" * (MAX_LINE_BYTES + 1 - len(head) - len(cut))
         replies = serve([json.dumps({"op": "load", "directory": str(TINY)}),
                          head + pad + '", "action": "submit", "findings": {}}'])
         self.assertEqual((replies[1]["observation"]["type"], replies[1]["reward"]), ("final", -1.0))

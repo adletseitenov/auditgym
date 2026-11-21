@@ -31,6 +31,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import warnings
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -275,7 +276,9 @@ def run_pair(index: int, workdir, verbose: bool = False) -> list[str]:
     work = pathlib.Path(workdir) / f"P{index + 1:02d}"
     seed, config = discover(index)
     original, copy = work / "original", work / "transformed"
-    judge_adapter.generate_episode(seed, config, str(original))
+    with warnings.catch_warnings():  # a train episode of the demo: the no-secret warning is for hidden runs
+        warnings.filterwarnings("ignore", message="generate_episode: no secret", category=RuntimeWarning)
+        judge_adapter.generate_episode(seed, config, str(original))
     before = tree_digest(original)
     document = transform.transform(original, copy, seed=7000 + index, shuffle=kind in ("order", "both"),
                                    rename=kind in ("ids", "both"), id_style=transform.ID_STYLES[index % 4])

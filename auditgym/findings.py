@@ -18,9 +18,9 @@ a reasonable oracle built slightly differently would otherwise get -1):
   documented values is well-formed and never matches (an FP); a `type` that is not a string is a
   structure error.
 - Size is the compact UTF-8 JSON serialization (`separators=(",", ":")`, non-ASCII kept
-  as UTF-8, lone surrogates counted as 3 bytes) and must be at most 262 144 bytes (256 KiB;
-  30 findings x 10 evidence ids x 1 000 Cyrillic characters is 68 KB, so the case's own limits
-  always fit).
+  as UTF-8, lone surrogates counted as 3 bytes) and must be at most 8 MiB (a DoS guard,
+  DECISIONS Y; ids are free-form, so the case's own limits 30 / 10 / 1 000 with ids of any realistic
+  length always fit: 30 x 11 ids x 1 000 Cyrillic characters is ~0.7 MB).
 - A non-finite float anywhere in the payload, even under an ignored extra key, is an
   error: NaN and Infinity are not JSON.
 - A value that is not JSON-compatible (a dict key that is not a string, a set, bytes, an
@@ -34,7 +34,7 @@ a reasonable oracle built slightly differently would otherwise get -1):
 - Any JSON integer is a well-formed amount, a negative one too (official definitions: the amount must be a
   JSON integer, nothing more; the matcher compares |claimed - expected| <= tau, so -5 is an FP, DECISIONS U);
   absurdly large integers are well-formed too (they simply never match);
-  the 256 KiB limit bounds them. Their size is computed without converting them to a string.
+  the 8 MiB limit bounds them. Their size is computed without converting them to a string.
 - Every id must be a string; the empty string is allowed and matches nothing.
 """
 from __future__ import annotations
@@ -193,7 +193,7 @@ def _finding(raw: object) -> dict:
 
 
 class _Oversized:
-    """Marker for a request line longer than the serve limit (1 MiB): never parsed, always too large."""
+    """Marker for a request line longer than the serve line limit (MAX_LINE_BYTES): never parsed, always too large."""
 
     def __repr__(self) -> str:
         return "OVERSIZED"
@@ -204,7 +204,7 @@ OVERSIZED = _Oversized()
 
 def parse_findings(payload: object, episode_id: str) -> list[dict]:
     """Normalized findings in submission order, or StructureError(code). `OVERSIZED` stands for a
-    submit line the server refused to read (more than 1 MiB): message_too_large."""
+    submit line the server refused to read (longer than MAX_LINE_BYTES): message_too_large."""
     if payload is OVERSIZED:
         raise StructureError("message_too_large")
     if message_size(payload) > MAX_MESSAGE_BYTES:

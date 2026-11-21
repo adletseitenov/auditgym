@@ -1,6 +1,8 @@
 """Eighth blind jury (DECISIONS W): a rewritten episode_dir, colon FX keys, non-JSON arguments, the score log."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -34,8 +36,8 @@ class RewrittenEpisodeDirTest(unittest.TestCase):
         base.mkdir()
         target = base / "episode"
         source_a, source_b = base / "a", base / "b"
-        judge_adapter.generate_episode(81001, {"errors": {"duplicate_invoice": 1}}, str(source_a))
-        judge_adapter.generate_episode(81002, {"errors": {"period_cutoff": 1}}, str(source_b))
+        helpers.generate_quietly(81001, {"errors": {"duplicate_invoice": 1}}, str(source_a))
+        helpers.generate_quietly(81002, {"errors": {"period_cutoff": 1}}, str(source_b))
         id_a = load_episode(source_a)["public"]["manifest"]["episode_id"]
         id_b = load_episode(source_b)["public"]["manifest"]["episode_id"]
         self.assertNotEqual(id_a, id_b)
@@ -70,7 +72,7 @@ class ColonFxKeyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.dir = str(helpers.scratch() / "fx")
-        judge_adapter.generate_episode(FX_SEED, FX_CONFIG, cls.dir)
+        helpers.generate_quietly(FX_SEED, FX_CONFIG, cls.dir)
         cls.answer = oracle_of(cls.dir)
         cls.colon = json.loads(json.dumps(cls.answer))
         cls.changed = 0
@@ -179,9 +181,12 @@ class ScoreLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             blocker = pathlib.Path(scratch) / "file"
             blocker.write_text("x")
-            with self.assertRaises(judge_adapter.AdapterError) as caught:
+            noise = io.StringIO()
+            with contextlib.redirect_stderr(noise), self.assertRaises(judge_adapter.AdapterError) as caught:
                 judge_adapter.score_episode(fx["dir"], self.bad_payload(fx), 3, journal_path=str(blocker / "log.jsonl"))
             self.assertEqual(caught.exception.code, "score_log_unwritable")
+            # the diagnostic is expected here; captured so that it does not look like a failure in check output
+            self.assertIn("cannot write the score log", noise.getvalue())
 
     def test_a_valid_answer_needs_no_log(self):
         fx = helpers.fixture("C")

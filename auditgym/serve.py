@@ -62,10 +62,9 @@ import re
 import sys
 
 from .actions import default_results_path
-from .limits import json_depth_exceeds
+from .limits import MAX_LINE_BYTES, json_depth_exceeds
 from .evaluator import Evaluator, EvaluatorError
 
-MAX_LINE_BYTES = 1 << 20
 PROTOCOL_ERRORS = {
     "bad_request": "Bad request.",
     "bad_config": "Bad seed or configuration.",

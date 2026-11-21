@@ -16,6 +16,7 @@ import judge_adapter
 from auditgym.storage import load_episode
 from auditgym.verify import verify
 from policies.oracle import Oracle
+from tests.adapter import helpers
 from tools import adapter_pairs
 from tools.adapter_run import PolicyBridge
 
@@ -169,9 +170,9 @@ def _make(index: int):
     def test(self):
         seed, config = adapter_pairs.discover(index)
         directory = f"{self.scratch.name}/{label}"
-        judge_adapter.generate_episode(seed, config, directory)
+        helpers.generate_quietly(seed, config, directory)
         again = f"{self.scratch.name}/{label}-again"
-        judge_adapter.generate_episode(seed, config, again)
+        helpers.generate_quietly(seed, config, again)
         self.assertEqual(adapter_pairs.tree_digest(directory), adapter_pairs.tree_digest(again))  # deterministic
         episode = load_episode(directory)
         self.assertEqual(verify(episode), [], what)  # books consistent before the injection, the injection is the declared one

@@ -26,7 +26,7 @@ class GenerateTest(unittest.TestCase):
     def test_same_arguments_give_the_same_files_and_other_seed_another_episode(self):
         with tempfile.TemporaryDirectory() as scratch:
             for name, seed in (("a", 5), ("b", 5), ("c", 6)):
-                judge_adapter.generate_episode(seed, {"errors": {"period_cutoff": 1}}, f"{scratch}/{name}")
+                helpers.generate_quietly(seed, {"errors": {"period_cutoff": 1}}, f"{scratch}/{name}")
             digest = adapter_pairs.tree_digest
             self.assertEqual(digest(f"{scratch}/a"), digest(f"{scratch}/b"))
             self.assertNotEqual(digest(f"{scratch}/a"), digest(f"{scratch}/c"))
@@ -42,7 +42,7 @@ class GenerateTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as scratch:
             with self.assertRaises(ConfigError):
-                judge_adapter.generate_episode(1, {"errors": {"no_such_type": 1}}, scratch + "/x")
+                helpers.generate_quietly(1, {"errors": {"no_such_type": 1}}, scratch + "/x")
 
 
 class ResetTest(unittest.TestCase):
@@ -73,7 +73,7 @@ class ResetTest(unittest.TestCase):
         self.assertEqual(a, b)
         self.assertNotEqual(a["manifest"]["episode_id"], c["manifest"]["episode_id"])
         with tempfile.TemporaryDirectory() as scratch:
-            judge_adapter.generate_episode(11, config, scratch + "/e")
+            helpers.generate_quietly(11, config, scratch + "/e")
             self.assertEqual(json.loads((pathlib.Path(scratch) / "e/public/manifest.json").read_text())["episode_id"],
                              a["manifest"]["episode_id"])  # the same generator as generate_episode
 
@@ -283,7 +283,7 @@ class SecretTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             secret = pathlib.Path(scratch, "secret")
             secret.write_text(self.SECRET + "\n", encoding="utf-8")
-            judge_adapter.generate_episode(5, {}, f"{scratch}/open")
+            helpers.generate_quietly(5, {}, f"{scratch}/open")
             judge_adapter.generate_episode(5, {}, f"{scratch}/closed", secret_file=secret)
             judge_adapter.generate_episode(5, {}, f"{scratch}/closed2", secret_file=secret)
             digest = adapter_pairs.tree_digest

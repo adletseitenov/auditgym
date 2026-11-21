@@ -20,12 +20,17 @@ randomness, no clock).
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 11):  # before any other import: older interpreters fail later with obscure errors
+    raise SystemExit("%s needs Python 3.11 or newer; this is Python %d.%d. Run it with python3.11 (docs/USAGE.md)."
+                     % ("judge_adapter", sys.version_info[0], sys.version_info[1]))
+
 import contextlib
 import json
 import os
 import pathlib
 import re
-import sys
 import tempfile
 import warnings
 
@@ -41,6 +46,7 @@ __all__ = ["generate_episode", "make_env", "score_episode", "AdapterEnv", "Adapt
 
 TABLES = ("ledger", "invoices", "payments", "fx")  # canonical table names of the contract = ours
 MAX_STEPS = 100
+_CLAMP_PROMISE = " (ответ тогда содержит limit_clamped: true)"
 ADAPTER_SECRET_FILE_ENV = "AUDITGYM_ADAPTER_SECRET_FILE"  # signing secret for the eval evaluator (make_env)
 SCORE_LOG_ENV = "AUDITGYM_SCORE_LOG"
 DEFAULT_SCORE_LOG = "runs/score_errors.jsonl"
@@ -81,8 +87,13 @@ def generate_episode(seed: int, config: dict, output_dir: str, secret_file=None)
     from its episode_id by trying seeds (measured: seed 7600 in 2.8 s): for hidden episodes the jury
     should pass a secret (docs/ADAPTER.md, docs/LIMITATIONS.md)."""
     from auditgym.export import build_episode
+    from auditgym.secret import read_secret
     from auditgym.storage import write_episode
 
+    if secret_file is None and not read_secret():
+        warnings.warn("generate_episode: no secret (no secret_file, no $AUDITGYM_SECRET_FILE / $AUDITGYM_SECRET): "
+                      "the episode is reproducible from the seed; for hidden runs pass secret_file",
+                      RuntimeWarning, stacklevel=2)
     if isinstance(config, dict) and "team_config" in config:
         # the reset-style wrapper {"mode": ..., "episode_dir": ..., "team_config": {...}}: the team
         # config is the value, mode/episode_dir mean nothing for a generation
@@ -271,7 +282,10 @@ class AdapterEnv:
     @staticmethod
     def _first_observation(internal: dict) -> dict:
         task = internal["task"]
-        text = (task["text"] + "\n\nerror_types: " + json.dumps(task["error_types"])
+        # The adapter's list_records result is the official {records, next_cursor}: it has no limit_clamped,
+        # so the internal task text must not promise it (DECISIONS Y).
+        base_text = task["text"].replace(_CLAMP_PROMISE, "")
+        text = (base_text + "\n\nerror_types: " + json.dumps(task["error_types"])
                 + "\nlimits: " + json.dumps(task["limits"], sort_keys=True)
                 + "\nfindings_schema: " + json.dumps(task["findings_schema"], ensure_ascii=False, sort_keys=True)
                 + "\nanswer_rules: " + json.dumps(task["answer_rules"], ensure_ascii=False, sort_keys=True))
