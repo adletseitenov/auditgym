@@ -94,6 +94,16 @@ def _fx_mode(mode):
     return check
 
 
+def _gap_variant(variant):
+    """An allocation_gap whose payment allocation is entirely missing ("missing") or only partly moved to
+    unallocated ("partial"); the generator records the variant of a missing one in the provenance params."""
+    def check(episode) -> bool:
+        steps = episode["private"]["provenance"]["steps"]
+        return sorted(i["type"] for i in episode["private"]["truth"]["issues"]) == ["allocation_gap"] and \
+            steps[0]["params"].get("variant", "partial") == variant
+    return check
+
+
 def _both(*checks):
     return lambda episode: all(check(episode) for check in checks)
 
@@ -112,24 +122,30 @@ MATRIX = (
     ("D08", "duplicate invoice, two currencies, another offset",
      {"errors": {"duplicate_invoice": 1}, "currencies": ["USD", "RUB"], "timezone": "+03:00"},
      _issue_types("duplicate_invoice")),
-    ("D09", "payment allocation gap", {"errors": {"allocation_gap": 1}}, _issue_types("allocation_gap")),
-    ("D10", "payment allocation gap, EUR", {"errors": {"allocation_gap": 1}, "currencies": ["EUR"]},
-     _issue_types("allocation_gap")),
-    ("D11", "payment allocation gap, CNY, another offset",
-     {"errors": {"allocation_gap": 1}, "currencies": ["CNY"], "timezone": "+09:00"}, _issue_types("allocation_gap")),
+    ("D09", "allocation gap, payment allocation entirely missing",
+     {"errors": {"allocation_gap": 1}, "allocation_gap_mode": "missing"}, _gap_variant("missing")),
+    ("D10", "allocation gap, partial allocation, EUR",
+     {"errors": {"allocation_gap": 1}, "allocation_gap_mode": "partial", "currencies": ["EUR"]},
+     _gap_variant("partial")),
+    ("D11", "allocation gap, entirely missing, CNY, another offset",
+     {"errors": {"allocation_gap": 1}, "allocation_gap_mode": "missing", "currencies": ["CNY"],
+      "timezone": "+09:00"}, _gap_variant("missing")),
     ("D12", "fx error, wrong rate date", {"errors": {"fx_error": 1}, "currencies": ["USD"]}, _fx_mode("wrong_date")),
     ("D13", "fx error, wrong rate value", {"errors": {"fx_error": 1}, "currencies": ["EUR"]}, _fx_mode("wrong_rate")),
     ("D14", "period cutoff", {"errors": {"period_cutoff": 1}}, _issue_types("period_cutoff")),
     ("D15", "period cutoff, far-west offset", {"errors": {"period_cutoff": 1}, "timezone": "-11:00"},
      _issue_types("period_cutoff")),
     ("D16", "interaction I1", {"errors": {}, "interaction": "I1"}, _issue_types("allocation_gap", "fx_error")),
-    ("D17", "interaction I1, EUR", {"errors": {}, "interaction": "I1", "currencies": ["EUR"]},
+    ("D17", "interaction I1, CNY, another offset",
+     {"errors": {}, "interaction": "I1", "currencies": ["CNY"], "timezone": "+09:00"},
      _issue_types("allocation_gap", "fx_error")),
-    ("D18", "interaction I1 with other errors",
+    ("D18", "interaction I1 with other errors, two currencies",
      {"errors": {"duplicate_invoice": 1, "period_cutoff": 1}, "interaction": "I1", "currencies": ["USD", "EUR"]},
      _issue_types("allocation_gap", "fx_error", "duplicate_invoice", "period_cutoff")),
-    ("D19", "interaction I2", {"errors": {}, "interaction": "I2"}, _issue_types("duplicate_invoice", "period_cutoff")),
-    ("D20", "interaction I2, another offset", {"errors": {}, "interaction": "I2", "timezone": "+14:00"},
+    ("D19", "interaction I2, EUR", {"errors": {}, "interaction": "I2", "currencies": ["EUR"]},
+     _issue_types("duplicate_invoice", "period_cutoff")),
+    ("D20", "interaction I2, USD and RUB, another offset",
+     {"errors": {}, "interaction": "I2", "timezone": "+14:00", "currencies": ["USD", "RUB"]},
      _issue_types("duplicate_invoice", "period_cutoff")),
 )
 # P01-P05 reorder, P06-P10 rename, P11-P20 both (docs/ADAPTER.md)

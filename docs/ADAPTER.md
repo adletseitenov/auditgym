@@ -48,38 +48,111 @@
 - 100 действий без `submit`: `truncated = true`, пустой ответ (`fn` = число ошибок эталона), `inspection_steps = 100` (C17). После конца любое действие даёт `episode_over`, журнал не меняется (C15, C17).
 - 60 с на эпизод: часы оценщика идут от `reset`/`load` и проверяются на каждом шаге, `reset` и закрытии; шаг после 60 с даёт `truncated = true` и пустой ответ, учитываются только реально сделанные действия (C18). Медленная политика не обходит лимит: время считается по стенным часам процесса-оценщика.
 
-## Проверки жюри → наши тесты
+## Проверки жюри → наши тесты (92 из 92 через адаптер)
 
-Блок 1 (`tests/adapter/test_contract.py`, фикстуры C, E, L, U — `tests/adapter/helpers.py`; все создаются `generate_episode` и грузятся через `episode_dir`):
+Каждая строка — тест, который идёт через `generate_episode`, `make_env` и `score_episode` (фикстуры и каталоги эпизодов на диске, `reset` с `episode_dir`). Таблица сверяется с кодом тестом `tests/adapter/test_table.py`: ровно эти 92 ID, каждое имя теста существует. B3-NN — тесты 1–20 Блока 3.
 
-| Проверка | Тест | Статус |
-|---|---|---|
-| C01 пара observation, info, JSON | `C01to04.test_C01_*` | pass |
-| C02 первое наблюдение, нет seed и эталона | `C01to04.test_C02_*` | pass |
-| C03 manifest, числа сверены с данными | `C01to04.test_C03_*` | pass |
-| C04 пятёрка step, булевы флаги | `C01to04.test_C04_*` | pass |
-| C05 три страницы L по 50, без пропусков и повторов | `C05to08.test_C05_*` | pass |
-| C06 один курсор дважды | `C05to08.test_C06_*` | pass |
-| C07 get_record R1 | `C05to08.test_C07_*` | pass |
-| C08 get_document D1 | `C05to08.test_C08_*` | pass |
-| C09 `0.1+0.2` = `"0.3"` | `C09to14.test_C09_*` | pass |
-| C10 калькулятор вне грамматики (файл, import, lambda) | `C09to14.test_C10_*` | pass |
-| C11 get_record U | `C09to14.test_C11_*` | pass |
-| C12 get_document U | `C09to14.test_C12_*` | pass |
-| C13 неизвестное имя действия | `C09to14.test_C13_*` | pass |
-| C14 ошибка не даёт бесплатного шага | `C09to14.test_C14_*` | pass |
-| C15 submit завершает, дальше ничего не меняется | `C15to19.test_C15_*` | pass |
-| C16 submit на 100-м действии | `C15to19.test_C16_*` | pass |
-| C17 100 действий без submit | `C15to19.test_C17_*` | pass |
-| C18 лимит времени | `C15to19.test_C18_*` (лимит 1 с через `tests/adapter/timed_server.py`), `RealTimeLimitTest` (настоящие 60 с, только `--full`) | pass; расхождение ниже |
-| C19 закрытый режим: награда 0, истина у оценщика | `C15to19.test_C19_*` | pass |
-| C20 нет утечек, нет shell/SQL/FS/сети | `C20.test_C20_*` (полный проход по записям и документам C и E-фикстуры, ядовитые ID и выражения) | pass; код и изоляцию жюри смотрит отдельно |
+| ID | что проверяется | тест (`tests/adapter/`) | статус |
+|---|---|---|---|
+| C01 | reset на C: пара observation, info, JSON | `test_contract.C01to04.test_C01_reset_returns_observation_and_info_json` | pass |
+| C02 | первое observation: task, manifest, policy, бюджет, без seed/эталона | `test_contract.C01to04.test_C02_first_observation_has_task_manifest_policy_budget_and_no_secret` | pass |
+| C03 | manifest, числа сверены с данными | `test_contract.C01to04.test_C03_manifest_matches_the_data` | pass |
+| C04 | list_records: пятёрка step, булевы флаги | `test_contract.C01to04.test_C04_list_records_returns_the_five_tuple` | pass |
+| C05 | L: страницы по 50, без пропусков и повторов | `test_contract.C05to08.test_C05_pagination_of_L_has_no_gaps_and_no_repeats` | pass |
+| C06 | один курсор дважды | `test_contract.C05to08.test_C06_same_cursor_twice_gives_the_same_page` | pass |
+| C07 | get_record R1 | `test_contract.C05to08.test_C07_get_record_returns_the_right_record_only` | pass |
+| C08 | get_document D1 | `test_contract.C05to08.test_C08_get_document_returns_the_right_document` | pass |
+| C09 | calculator `0.1+0.2` = `"0.3"` | `test_contract.C09to14.test_C09_calculator_is_decimal_arithmetic` | pass |
+| C10 | calculator вне арифметики | `test_contract.C09to14.test_C10_calculator_refuses_anything_but_arithmetic` | pass |
+| C11 | get_record U | `test_contract.C09to14.test_C11_get_record_of_U_is_a_bounded_error` | pass |
+| C12 | get_document U | `test_contract.C09to14.test_C12_get_document_of_U_is_a_bounded_error` | pass |
+| C13 | неизвестное имя действия | `test_contract.C09to14.test_C13_unknown_action_name_is_a_bounded_error_and_a_step` | pass |
+| C14 | ошибка не даёт бесплатного шага | `test_contract.C09to14.test_C14_errors_do_not_give_free_actions_and_do_not_spoil_access` | pass |
+| C15 | submit завершает, дальше ничего не меняется | `test_contract.C15to19.test_C15_submit_ends_the_episode_and_later_actions_change_nothing` | pass |
+| C16 | submit как действие 100 | `test_contract.C15to19.test_C16_submit_as_action_100_is_accepted` | pass |
+| C17 | 100 действий без submit: truncated | `test_contract.C15to19.test_C17_one_hundred_inspections_truncate_with_empty_findings` | pass |
+| C18 | лимит времени 60 с | `test_contract.C15to19.test_C18_time_limit_truncates_with_empty_findings` | pass (лимит 1 с; настоящие 60 с: `test_contract.RealTimeLimitTest`, `--full`) |
+| C19 | закрытый режим: награда 0, истина у оценщика | `test_contract.C15to19.test_C19_closed_mode_gives_the_policy_nothing_of_the_reward` | pass |
+| C20 | нет утечек, нет shell/SQL/FS/сети | `test_contract.C20.test_C20_nothing_leaks_and_the_tools_open_no_door` | pass (код и изоляцию жюри смотрит отдельно) |
+| D01 | clean, plain reconciliation (no distractors) | `test_scenarios.ScenarioTest.test_D01` | pass |
+| D02 | clean, a correctly split payment | `test_scenarios.ScenarioTest.test_D02` | pass |
+| D03 | clean, a correct refund | `test_scenarios.ScenarioTest.test_D03` | pass |
+| D04 | clean, legitimately repeated amounts | `test_scenarios.ScenarioTest.test_D04` | pass |
+| D05 | clean, a period/offset boundary by policy | `test_scenarios.ScenarioTest.test_D05` | pass |
+| D06 | duplicate invoice | `test_scenarios.ScenarioTest.test_D06` | pass |
+| D07 | duplicate invoice, EUR | `test_scenarios.ScenarioTest.test_D07` | pass |
+| D08 | duplicate invoice, two currencies, another offset | `test_scenarios.ScenarioTest.test_D08` | pass |
+| D09 | allocation gap, payment allocation entirely missing | `test_scenarios.ScenarioTest.test_D09` | pass |
+| D10 | allocation gap, partial allocation, EUR | `test_scenarios.ScenarioTest.test_D10` | pass |
+| D11 | allocation gap, entirely missing, CNY, another offset | `test_scenarios.ScenarioTest.test_D11` | pass |
+| D12 | fx error, wrong rate date | `test_scenarios.ScenarioTest.test_D12` | pass |
+| D13 | fx error, wrong rate value | `test_scenarios.ScenarioTest.test_D13` | pass |
+| D14 | period cutoff | `test_scenarios.ScenarioTest.test_D14` | pass |
+| D15 | period cutoff, far-west offset | `test_scenarios.ScenarioTest.test_D15` | pass |
+| D16 | interaction I1 | `test_scenarios.ScenarioTest.test_D16` | pass |
+| D17 | interaction I1, CNY, another offset | `test_scenarios.ScenarioTest.test_D17` | pass |
+| D18 | interaction I1 with other errors, two currencies | `test_scenarios.ScenarioTest.test_D18` | pass |
+| D19 | interaction I2, EUR | `test_scenarios.ScenarioTest.test_D19` | pass |
+| D20 | interaction I2, USD and RUB, another offset | `test_scenarios.ScenarioTest.test_D20` | pass |
+| B3-01 | один правильный F: награда 0.98 | `test_block3.Block3Test.test_01_one_correct_finding` | pass |
+| B3-02 | пустые findings: -1 | `test_block3.Block3Test.test_02_empty_findings` | pass |
+| B3-03 | пустой эталон, пустые findings: F1=1, 0.98 | `test_block3.Block3Test.test_03_empty_truth_empty_findings` | pass |
+| B3-04 | пустой эталон, ложный вывод: -1 | `test_block3.Block3Test.test_04_empty_truth_one_false_finding` | pass |
+| B3-05 | два одинаковых F: 47/150 | `test_block3.Block3Test.test_05_two_identical_findings` | pass |
+| B3-06 | неправильный тип | `test_block3.Block3Test.test_06_wrong_type` | pass |
+| B3-07 | другая существующая запись | `test_block3.Block3Test.test_07_other_existing_record` | pass |
+| B3-08 | сумма 10001 при τ=0 | `test_block3.Block3Test.test_08_amount_off_by_one_at_tolerance_zero` | pass |
+| B3-09 | другая валюта | `test_block3.Block3Test.test_09_other_currency` | pass |
+| B3-10 | только D1 вместо {D1, D2} | `test_block3.Block3Test.test_10_only_d1` | pass |
+| B3-11 | несуществующий evidence_id вместо D2 | `test_block3.Block3Test.test_11_missing_evidence_id_instead_of_d2` | pass |
+| B3-12 | массовая пометка 20 выводов: -871/1050 | `test_block3.Block3Test.test_12_mass_flagging_five_records_four_types` | pass |
+| B3-13 | две ошибки, найдена одна: 47/150 | `test_block3.Block3Test.test_13_two_errors_one_found` | pass |
+| B3-14 | две ошибки, один верный и один ложный: -0.02 | `test_block3.Block3Test.test_14_two_errors_one_found_one_false` | pass |
+| B3-15 | inspection_steps=0: награда 1 | `test_block3.Block3Test.test_15_zero_inspection_steps` | pass |
+| B3-16 | inspection_steps=50: 0.90 | `test_block3.Block3Test.test_16_fifty_inspection_steps` | pass |
+| B3-17 | inspection_steps=100: 0.80 | `test_block3.Block3Test.test_17_hundred_inspection_steps` | pass (формула; эпизод без submit на 100-м шаге не получить) |
+| B3-18 | 31 вывод: структура, -1 | `test_block3.Block3Test.test_18_thirty_one_findings` | pass |
+| B3-19 | 11 различных evidence_ids: структура, -1 | `test_block3.Block3Test.test_19_eleven_different_evidence_ids` | pass |
+| B3-20 | explanation 1001 символ: структура, -1 | `test_block3.Block3Test.test_20_explanation_of_1001_ascii_characters` | pass |
+| M01 | affected_ids=[R2, R1, R1] — то же множество | `test_block3.OpenExamplesTest.test_M01_affected_ids_repeat_is_the_same_set` | pass |
+| M02 | лишняя существующая запись: FP=1, FN=1 | `test_block3.OpenExamplesTest.test_M02_extra_existing_unaffected_record` | pass |
+| M03 | evidence [D2, D1, D3]: TP | `test_block3.OpenExamplesTest.test_M03_superset_with_existing_available_evidence` | pass |
+| M04 | evidence [D1, D2, U]: FP=1, FN=1 | `test_block3.OpenExamplesTest.test_M04_unavailable_id_beside_the_minimal_set` | pass |
+| M05 | 11 элементов (10 повторов D1): структура, -1 | `test_block3.OpenExamplesTest.test_M05_raw_limit_before_repeats_collapse` | pass |
+| M06 | валюта другим регистром или с пробелом | `test_block3.OpenExamplesTest.test_M06_currency_is_exact` | pass |
+| M07 | сумма 10001 при τ=0 | `test_block3.OpenExamplesTest.test_M07_amount_one_off_with_tau_zero` | pass |
+| M08 | τ=1: 10001 проходит, 10002 нет | `test_block3.OpenExamplesTest.test_M08_tolerance_one_is_inclusive` | pass |
+| M09 | сумма строкой или true: структура, -1 | `test_block3.OpenExamplesTest.test_M09_amount_string_or_bool` | pass |
+| M10 | максимальное паросочетание: TP=2 | `test_block3.OpenExamplesTest.test_M10_maximum_matching_beats_greedy` | pass (какой вывод взял какую ошибку: `tests/judge`, `matcher.match`; здесь TP/FP/FN и награда в обоих порядках) |
+| M11 | оба вывода подходят обеим: TP=2, порядок не важен | `test_block3.OpenExamplesTest.test_M11_both_fit_both_and_order_does_not_matter` | pass (какой вывод взял какую ошибку: `tests/judge`, `matcher.match`; здесь TP/FP/FN и награда в обоих порядках) |
+| M12 | два одинаковых правильных вывода: TP=1, FP=1 | `test_block3.OpenExamplesTest.test_M12_two_identical_correct_findings` | pass |
+| P01 | D01: перестановка | `test_pairs.PairsTest.test_P01_D01` | pass |
+| P02 | D02: перестановка | `test_pairs.PairsTest.test_P02_D02` | pass |
+| P03 | D03: перестановка | `test_pairs.PairsTest.test_P03_D03` | pass |
+| P04 | D04: перестановка | `test_pairs.PairsTest.test_P04_D04` | pass |
+| P05 | D05: перестановка | `test_pairs.PairsTest.test_P05_D05` | pass |
+| P06 | D06: замена ID | `test_pairs.PairsTest.test_P06_D06` | pass |
+| P07 | D07: замена ID | `test_pairs.PairsTest.test_P07_D07` | pass |
+| P08 | D08: замена ID | `test_pairs.PairsTest.test_P08_D08` | pass |
+| P09 | D09: замена ID | `test_pairs.PairsTest.test_P09_D09` | pass |
+| P10 | D10: замена ID | `test_pairs.PairsTest.test_P10_D10` | pass |
+| P11 | D11: перестановка и замена ID | `test_pairs.PairsTest.test_P11_D11` | pass |
+| P12 | D12: перестановка и замена ID | `test_pairs.PairsTest.test_P12_D12` | pass |
+| P13 | D13: перестановка и замена ID | `test_pairs.PairsTest.test_P13_D13` | pass |
+| P14 | D14: перестановка и замена ID | `test_pairs.PairsTest.test_P14_D14` | pass |
+| P15 | D15: перестановка и замена ID | `test_pairs.PairsTest.test_P15_D15` | pass |
+| P16 | D16: перестановка и замена ID | `test_pairs.PairsTest.test_P16_D16` | pass |
+| P17 | D17: перестановка и замена ID | `test_pairs.PairsTest.test_P17_D17` | pass |
+| P18 | D18: перестановка и замена ID | `test_pairs.PairsTest.test_P18_D18` | pass |
+| P19 | D19: перестановка и замена ID | `test_pairs.PairsTest.test_P19_D19` | pass |
+| P20 | D20: перестановка и замена ID | `test_pairs.PairsTest.test_P20_D20` | pass |
 
-Блок 2 (`tests/adapter/test_scenarios.py`, матрица в `tools/adapter_pairs.MATRIX`): для каждого D01–D20 эпизод ищется перебором seed по предикату над данными (расщеплённый платёж, возврат, повторяющиеся суммы, граница пояса, `wrong_date`/`wrong_rate`, состав сценариев взаимодействия), создаётся `generate_episode` дважды (побайтно одно и то же), проверяется `auditgym.verify` (книги согласованы до внесения ошибки, инъекция — заявленная), `truth` пуст у D01–D05 и непуст у D06–D20, oracle через `score_episode` и через `make_env` получает return 1.0. Это дым-проверка: независимой сверки жюри она не заменяет (`verify` наш).
+Как устроены группы.
 
-Блок 3 — тесты matcher и награды ведёт другой участник (`tests/judge/`); через адаптер проверены публичные примеры награды (`test_published_reward_examples_through_score_episode`: 0.98, −1, 47/150, 1.0/0.90/0.80) и структурные лимиты 31/11/1001 (`test_block3_18_to_20_*`).
-
-Блок 4 (`tests/adapter/test_pairs.py`, `python -m tools.adapter_pairs`, все 20 пар, около 8 с): P01–P05 перестановка (D01–D05), P06–P10 замена ID (D06–D10), P11–P20 обе (D11–D20). Копию делает `tools/transform.py` (фиксированные параметры, исходный каталог не меняется, проверяется хэшем). Для каждой пары: повтор на исходном эпизоде (тот же env дважды и свежий env) совпадает по JSON-значениям в записях, переходах и наградах; oracle с переназначенными ID при том же `inspection_steps` (5) даёт те же TP/FP/FN/P/R/F1/return по `score_episode` и по журналу; выводы после обратного отображения равны исходным; все таблицы, считанные через `list_records` и отображённые назад, равны исходным; контроль: исходные ID на переименованной копии не засчитываются (tp = 0).
+- **Блок 1** (C01–C20): фикстуры C, E, L, U — `tests/adapter/helpers.py`, все делает `generate_episode`.
+- **Блок 2** (D01–D20, матрица `tools/adapter_pairs.MATRIX`): эпизод ищется перебором seed по предикату над данными (расщеплённый платёж, возврат, повторяющиеся суммы, граница пояса, `wrong_date`/`wrong_rate`, вариант `missing`/`partial` пропуска распределения, состав сценариев взаимодействия). D09 и D11 — `allocation_gap_mode: missing`, D10 — `partial`; D12 — неверная дата курса, D13 — неверный курс; D16–D18 — взаимодействие I1, D19–D20 — I2, у каждого свои валюты, пояс и набор ошибок. Для каждого D: `generate_episode` дважды даёт одни и те же байты; `auditgym.verify` пуст (книги согласованы до внесения ошибки, инъекция заявленная); суммы дебета и кредита равны до и после; truth непуст кроме D01–D05; независимый пересчёт по открытым строкам и снимку `pre_*` (дубль: два проведённых счёта с одной сигнатурой; разрыв: непривязанный кредит равен сумме truth, при `missing` закрытия дебиторки нет совсем, при `partial` закрытие плюс разрыв равны прежнему закрытию); все `affected_ids` и все ID всех наборов доказательств достаются через `make_env` в режиме `train` (`get_record`/`get_document`) и равны записям в файлах; форматы §03 (время со смещением, деньги целыми, FX строкой-десятичной, явные `null`) проверены на том, что отдаёт `list_records`; oracle получает return 1.0 через `score_episode` и через `step`. Это проверка нашими средствами: независимой сверки жюри она не заменяет (`verify` наш).
+- **Блок 3 и M01–M12** (`tests/adapter/test_block3.py`, юнит-слой — `tests/judge/test_official_block3.py`): открытые данные — настоящий сгенерированный эпизод; truth страницы (A, R1/R2, D1/D2/D3, 10000 KZT, τ=0, для M08 τ=1 в policy копии) записан в КОПИИ каталога из реальных ID записей, U выбран среди отсутствующих. Каждый случай идёт через `score_episode(episode_dir, findings, inspection_steps)` и, кроме формульных тестов с 100 шагами, ещё и в закрытом режиме `make_env` (`reset`, `inspection_steps` шагов, `submit`): строка журнала оценщика равна по TP/FP/FN, награде и числу шагов, политика видит награду 0. Тесты 3, 4 и `RealEpisodeTest` работают на нетронутых эпизодах, где truth — настоящая инъекция (`verify` пуст). Допуск 1e-9 абсолютный. Тесты 15–17 передают `inspection_steps` напрямую (15 и 16 ещё и в эпизодном прогоне). Для M10/M11 граф рёбер задан наборами доказательств; кто какую ошибку взял, видит только юнит-слой.
+- **Блок 4** (P01–P20, `python -m tools.adapter_pairs`, все 20 пар, около 8 с): P01–P05 перестановка (D01–D05), P06–P10 замена ID (D06–D10), P11–P20 обе (D11–D20). Копию делает `tools/transform.py` (фиксированные параметры, исходный каталог не меняется, проверяется хэшем). Для каждой пары: повтор на исходном эпизоде (тот же env дважды и свежий env) совпадает по JSON-значениям в записях, переходах и наградах; oracle с переназначенными ID при том же `inspection_steps` (5) даёт те же TP/FP/FN/P/R/F1/return по `score_episode` и по журналу; выводы после обратного отображения равны исходным; все таблицы через `list_records`, отображённые назад, равны исходным; контроль: исходные ID на переименованной копии не засчитываются (tp = 0).
 
 ## Известные расхождения и допущения
 
@@ -87,7 +160,7 @@
 2. **Результат 100-го действия без submit.** Сервер при усечении отвечает финальным наблюдением без результата последнего действия (`error.code = "truncated"`). Политика, дошедшая до 100 действий без submit, всё равно получает `truncated = true`.
 3. **Время.** Усечение по времени выполняется при следующем запросе (шаг, `reset`, закрытие), а не асинхронно; при нём оценщик считает `inspection_steps` по реально выполненным действиям, при усечении по 100 шагам — 100. Счётчик `env.inspection_steps` адаптера при усечении по времени может быть на 1 больше; авторитетна строка журнала. Лимит в тесте C18 ускорен (1 с); настоящие 60 с проверены в `--full`.
 4. **Независимая настраиваемость чистых вариантов (D02–D05).** Расщеплённый платёж, возврат, повторяющиеся суммы и граничные даты не имеют отдельных переключателей: все они включаются одним `distractors` (по умолчанию `true`), а конкретный вариант находится перебором seed по предикату над данными. D01 — `distractors: false`.
-5. **`allocation_gap` только частичный.** Генератор уводит на `unallocated` часть платежа (меньше закрытия дебиторки); полностью нераспределённого платежа по ссылке на счёт как ошибки нет (аванс без ссылки — законный случай, не ошибка). Требование D09–D11 «хотя бы один пропуск и один частичный» выполняется только в части «частичный».
+5. **`allocation_gap`: пропуск и частичный случай.** `allocation_gap_mode` = `partial` (по умолчанию: на `unallocated` уходит часть платежа), `missing` (весь платёж остаётся нераспределённым, закрытия дебиторки нет) или `mixed` (DECISIONS S). D09–D11 содержат оба случая (D09, D11 — `missing`, D10 — `partial`). Платёж без ссылки на счёт (аванс) — по-прежнему законный случай, не ошибка. I1 остаётся частичным.
 6. **Ключи FX.** Наш ключ `date|src|dst`; `get_record` для `fx` принимает и `date:src:dst`. В `affected_ids` и `evidence_ids` ключ FX остаётся нашим (oracle берёт их из `truth`). При замене ID ключи FX не меняются.
 7. **Преобразование пар** делает `tools/transform.py`; кроме порядка строк он перемешивает `line_items` и `invoice_refs` внутри документа (строже правил жюри; среда этого различия не замечает, это проверено парами).
 8. **Закрытый режим без `episode_dir`** генерирует эпизод без секрета (воспроизводим по seed); для скрытых эпизодов жюри использует `generate_episode` и `episode_dir`.
