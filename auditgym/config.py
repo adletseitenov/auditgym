@@ -17,6 +17,12 @@ from .limits import (INVOICES_PER_ERROR, MAX_BACKGROUND_PAIRS, MAX_FOREIGN_CURRE
 CONFIG_VERSION = "1"
 ERROR_TYPES = ("duplicate_invoice", "allocation_gap", "fx_error", "period_cutoff")
 INTERACTIONS = ("none", "I1", "I2")
+# Variant of an allocation_gap (docs/DECISIONS.md S): "partial" moves a share of the payment's
+# receivable credit to unallocated, "missing" moves all of it (the payment is not applied at all),
+# "mixed" draws one of the two per issue. "partial" is the default and is left out of a normalized
+# config, so configs, ids and episodes made before the setting existed stay byte-identical.
+GAP_MODES = ("partial", "missing", "mixed")
+DEFAULT_GAP_MODE = "partial"
 # New currencies are appended: the first non-base currency is the default, so order must not change.
 CURRENCIES = ("KZT", "USD", "EUR", "RUB", "CNY", "JPY", "KWD")
 # ISO 4217 minor-unit exponents: JPY has none, KWD has three (docs/DECISIONS.md M).
@@ -39,6 +45,7 @@ DEFAULTS = {
     "period": {"start": "2026-10-01", "months": 1},
     "errors": {"duplicate_invoice": 1, "allocation_gap": 1, "fx_error": 1, "period_cutoff": 1},
     "interaction": "none",
+    "allocation_gap_mode": DEFAULT_GAP_MODE,
     "distractors": True,
     "surface_seed": None,
 }
@@ -148,6 +155,12 @@ def normalize_config(config: object) -> dict:
     if not isinstance(interaction, str) or interaction not in INTERACTIONS:
         raise ConfigError("bad_interaction", "interaction must be none, I1 or I2")
     out["interaction"] = interaction
+
+    gap_mode = given("allocation_gap_mode")
+    if not isinstance(gap_mode, str) or gap_mode not in GAP_MODES:
+        raise ConfigError("bad_gap_mode", "allocation_gap_mode must be partial, missing or mixed")
+    if gap_mode != DEFAULT_GAP_MODE:
+        out["allocation_gap_mode"] = gap_mode
 
     if "errors" in config:
         errors = config["errors"]
