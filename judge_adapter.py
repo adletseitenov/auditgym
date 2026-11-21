@@ -161,10 +161,10 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
     other fields, and the error code goes to the evaluator's score log (`journal_path`, else
     $AUDITGYM_SCORE_LOG, else an absolute runs/score_errors.jsonl, else the same name under the system
     temporary directory); the log holds a fixed code, never agent data. If the log cannot be written,
-    AdapterError("score_log_unwritable") is raised. FX keys of the contract `date:src:dst` in
-    evidence_ids/affected_ids are read as our `date|src|dst`; an evidence_ids entry that is an
-    invoice_id/payment_id of a document is read as that document's doc_id (affected_ids stay exact;
-    docs/ADAPTER.md)."""
+    AdapterError("score_log_unwritable") is raised. The structure (30 findings, 10 evidence ids per
+    finding, 1 000 code points of explanation, types) is checked on the raw answer first; only then
+    FX keys of the contract `date:src:dst` in evidence_ids/affected_ids are read as our `date|src|dst`
+    (a renaming: no id is dropped or merged; every other id is compared exactly; docs/ADAPTER.md)."""
     from auditgym.storage import load_episode
 
     episode = load_episode(episode_dir)
@@ -176,7 +176,7 @@ def score_episode(episode_dir: str, findings: dict, inspection_steps: int, journ
         findings = submit_payload({"findings": findings}, episode_id)
     except ActionError:
         pass  # not readable as any accepted shape: the parser names the structure error
-    result = judge(episode, _translate_fx_message(findings, _document_aliases(episode["public"])), inspection_steps)
+    result = judge(episode, _checked_message(findings, episode_id), inspection_steps)
     if result.get("structure_error"):
         _log_score_error(_score_log_path(journal_path), episode["public"]["manifest"]["episode_id"],
                          str(result["structure_error"]))
@@ -222,7 +222,9 @@ class AdapterEnv:
     Modes (config["mode"]): "closed" with config["episode_dir"] loads exactly that episode in the eval
     evaluator (no regeneration, ids untouched; every reset restarts it); "train" with an episode_dir
     loads it in the train evaluator; "train" without one generates with `seed` and config["team_config"];
-    "closed" without an episode_dir generates in the eval evaluator the same way. In closed mode the
+    "closed" without an episode_dir generates in the eval evaluator under the signing secret and is
+    refused with AdapterError("secret_required") when none is available (no `secret_file`, no
+    `server_command`): an episode reproducible from the seed is not closed. In closed mode the
     reward is always 0.0 and `info` is {}; the true reward is in the evaluator's journal."""
 
     def __init__(self, journal_path=None, server_command=None, secret_file=None) -> None:
@@ -239,7 +241,7 @@ class AdapterEnv:
         self._running = False
         self._inspection_steps = 0
         self._remaining = 0
-        self._aliases: dict = {}   # invoice_id / payment_id -> doc_id of documents known to this episode
+        self._submit_valid = False  # the structure verdict of the last submit sent (same pipeline as the evaluator)
 
     # --- reset ------------------------------------------------------------------------------
     def reset(self, seed, config=None):
@@ -255,6 +257,9 @@ class AdapterEnv:
         team_config = config.get("team_config")
         if team_config is not None and not isinstance(team_config, dict):
             raise AdapterError("bad_config")
+        if mode == "closed" and episode_dir is None and self._secret_file is None and self._server_command is None:
+            # a closed episode generated without a secret is reproducible from the seed: not closed
+            raise AdapterError("secret_required")
         directory = os.path.abspath(os.fspath(episode_dir)) if episode_dir is not None else None
         # The content of the directory is part of the key: the jury may write another episode into the
         # same path between two resets, and a reset must serve what is on disk now.
@@ -271,7 +276,6 @@ class AdapterEnv:
             raise AdapterError(error.code) from None
         self._closed_mode = mode == "closed"
         self._episode_id = observation["manifest"]["episode_id"]
-        self._aliases = _directory_aliases(directory)
         self._running = True
         self._inspection_steps = 0
         self._remaining = MAX_STEPS
@@ -318,6 +322,7 @@ class AdapterEnv:
     def _internal_action(self, action) -> tuple[str | None, object]:
         """(name, internal action). An unknown or malformed envelope becomes an action the evaluator
         answers with a bounded error and a spent step (None is read as an unknown action)."""
+        self._submit_valid = False
         if not isinstance(action, dict):
             return None, None
         name = action.get("name")
@@ -328,9 +333,12 @@ class AdapterEnv:
             args = {}
         if not isinstance(args, dict) or not _serialisable(args):
             # not an object, or not JSON (a set, NaN, too deep): bad_arguments (a submit: invalid structure)
+            self._submit_valid = False
             return name, {"action": name, "args": []}
-        return name, {"action": name, "args": _translate_fx_submit(name, _fx_id(name, args), self._episode_id,
-                                                                            self._aliases)}
+        args = _fx_id(name, args)
+        if name == "submit":
+            args, self._submit_valid = _prepare_submit(args, self._episode_id)
+        return name, {"action": name, "args": args}
 
     def step(self, action):
         if self._env is None:
@@ -365,11 +373,9 @@ class AdapterEnv:
         if kind == "final":
             if truncated:
                 return self._plain(_error("truncated"), 0)
-            if name == "submit" and self._valid_submit(action):
+            if name == "submit" and self._submit_valid:
                 return {"result": {"accepted": True}, "error": None, "remaining_steps": remaining}
             return self._plain(_error("invalid_findings"), remaining)
-        if kind in ("records", "record", "document"):
-            _learn_aliases(self._aliases, internal["records"] if kind == "records" else [internal["record"]])
         if kind == "records":
             result = {"records": internal["records"], "next_cursor": internal["next_cursor"]}
         elif kind in ("record", "document"):
@@ -379,16 +385,6 @@ class AdapterEnv:
         else:
             return self._plain(_error("internal_error"), remaining)
         return {"result": result, "error": None, "remaining_steps": remaining}
-
-    def _valid_submit(self, action: dict) -> bool:
-        """Whether the findings of this submit have a valid structure (the same parser the evaluator
-        uses); nothing about their correctness is known here."""
-        args = action.get("args")
-        try:
-            parse_findings(submit_payload(args if isinstance(args, dict) else {}, self._episode_id), self._episode_id)
-        except (ActionError, StructureError):
-            return False
-        return True
 
     # --- jury side ----------------------------------------------------------------------------
     @property
@@ -449,54 +445,10 @@ def _fx_text(value):
     return value
 
 
-def _document_aliases(public: dict) -> dict:
-    """invoice_id / payment_id -> doc_id of every document of the open data. get_record accepts these
-    ids for its document (a doc_id is looked up first), so an evidence list that cites one cites that
-    document. An id that is itself a doc_id or a ledger row_id is never an alias."""
-    taken = {doc["doc_id"] for table in ("invoices", "payments") for doc in public.get(table, ())}
-    taken.update(row["row_id"] for row in public.get("ledger", ()))
-    aliases = {}
-    for table, field in (("invoices", "invoice_id"), ("payments", "payment_id")):
-        for doc in public.get(table, ()):
-            alias = doc.get(field)
-            if isinstance(alias, str) and alias not in taken:
-                aliases[alias] = doc["doc_id"]
-    return aliases
-
-
-def _directory_aliases(directory) -> dict:
-    """Aliases of a loaded episode directory (empty for a generated one: they are learnt from the
-    records the policy reads, `_learn_aliases`)."""
-    if directory is None:
-        return {}
-    try:
-        from auditgym.storage import load_episode
-
-        return _document_aliases(load_episode(directory)["public"])
-    except Exception:  # noqa: BLE001 - the evaluator has its own refusal for an unreadable directory
-        return {}
-
-
-def _learn_aliases(aliases: dict, records) -> None:
-    for record in records:
-        if not isinstance(record, dict) or not isinstance(record.get("doc_id"), str):
-            continue
-        for field in ("invoice_id", "payment_id"):
-            alias = record.get(field)
-            if isinstance(alias, str) and alias != record["doc_id"]:
-                aliases.setdefault(alias, record["doc_id"])
-
-
-def _evidence_text(value, aliases: dict):
-    value = _fx_text(value)
-    return aliases.get(value, value) if isinstance(value, str) else value
-
-
-def _translate_fx_message(message, aliases=None):
-    """The findings message with colon FX keys in evidence_ids and affected_ids translated, and
-    invoice_id/payment_id entries of evidence_ids (not of affected_ids) replaced by the document's
-    doc_id; the same object when nothing changes. Shapes the parser would refuse are returned untouched."""
-    aliases = aliases or {}
+def _translate_fx_message(message):
+    """The findings message with colon FX keys in evidence_ids and affected_ids renamed; the same object
+    when nothing changes. Only a renaming: lists keep their length and order (no id is dropped or
+    merged). Shapes the parser would refuse are returned untouched."""
     if not isinstance(message, dict) or not isinstance(message.get("findings"), list):
         return message
     changed, findings = False, []
@@ -506,11 +458,7 @@ def _translate_fx_message(message, aliases=None):
             for field in ("evidence_ids", "affected_ids"):
                 values = finding.get(field)
                 if isinstance(values, list):
-                    translated = [_evidence_text(value, aliases) if field == "evidence_ids" else _fx_text(value)
-                                  for value in values]
-                    if field == "evidence_ids" and translated != values:
-                        translated = [value for index, value in enumerate(translated)
-                                      if not isinstance(value, str) or value not in translated[:index]]
+                    translated = [_fx_text(value) for value in values]
                     if translated != values:
                         update[field] = translated
             if update:
@@ -519,15 +467,42 @@ def _translate_fx_message(message, aliases=None):
     return dict(message, findings=findings) if changed else message
 
 
-def _translate_fx_submit(name: str, args: dict, episode_id: str, aliases=None) -> dict:
-    if name != "submit":
-        return args
+def _checked_message(message, episode_id: str):
+    """The message to judge. The structure is validated on the RAW message (the limits of CHECKS count
+    the submitted lists); a refused structure is returned as it came, so the judge names the same error.
+    A valid one is returned with the FX keys renamed (the structure cannot change by a renaming)."""
+    try:
+        parse_findings(message, episode_id)
+    except StructureError:
+        return message
+    translated = _translate_fx_message(message)
+    try:
+        parse_findings(translated, episode_id)
+    except StructureError:
+        return message
+    return translated
+
+
+def _prepare_submit(args: dict, episode_id: str) -> tuple[dict, bool]:
+    """(arguments for the evaluator, structure valid). The raw submitted answer is validated first by the
+    evaluator's own parser; the same verdict is what the policy is told. An invalid one is passed on
+    untouched (the evaluator refuses it with its own code); a valid one with its FX keys renamed."""
     try:
         message = submit_payload(args, episode_id)
     except ActionError:
-        return args
-    translated = _translate_fx_message(message, aliases)
-    return args if translated is message else {"findings": translated}
+        return args, False
+    try:
+        parse_findings(message, episode_id)
+    except StructureError:
+        return args, False
+    translated = _checked_message(message, episode_id)
+    if translated is message:
+        return args, True
+    try:
+        parse_findings(translated, episode_id)
+    except StructureError:
+        return args, False
+    return {"findings": translated}, True
 
 
 def _fx_id(name: str, args: dict) -> dict:
